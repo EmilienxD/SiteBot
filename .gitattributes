@@ -1,0 +1,6 @@
+# LF everywhere. This template gets cloned onto Windows, macOS and Linux, and
+# CRLF creeping into a shipped bundle or a shebang breaks things quietly.
+* text=auto eol=lf
+
+*.png binary
+pnpm-lock.yaml -diff linguist-generated

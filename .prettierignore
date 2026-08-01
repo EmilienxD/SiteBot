@@ -1,0 +1,13 @@
+dist
+coverage
+node_modules
+.turbo
+pnpm-lock.yaml
+*.png
+
+# The spec set is normative and is cited by section from code comments and
+# tests. Prettier must not churn it.
+docs/
+
+# Generated from Zod at build time.
+schema/*.json

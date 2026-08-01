@@ -1,0 +1,44 @@
+{
+  "name": "website-chatbot-template",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Drop-in AI assistant for websites. Configure one file, mount one route, add one script tag.",
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run --project=!live",
+    "test:watch": "vitest --project=!live",
+    "test:live": "vitest run --project=live",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "size": "turbo run size",
+    "clean": "turbo run clean",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "turbo run build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.11",
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^9.39.5",
+    "globals": "^16.0.0",
+    "jsdom": "^27.0.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.5.1",
+    "turbo": "^2.10.8",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10"
+  },
+  "prettier": "./.prettierrc.json"
+}

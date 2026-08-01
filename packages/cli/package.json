@@ -1,0 +1,40 @@
+{
+  "name": "@sitebot/cli",
+  "version": "0.0.0",
+  "description": "The sitebot CLI: init, validate, ingest, dev, serve, doctor. Layer 4.",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "sitebot": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@sitebot/config": "workspace:*",
+    "@sitebot/core": "workspace:*",
+    "@sitebot/ingest": "workspace:*",
+    "@sitebot/server": "workspace:*"
+  },
+  "devDependencies": {
+    "rimraf": "^6.1.3",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
