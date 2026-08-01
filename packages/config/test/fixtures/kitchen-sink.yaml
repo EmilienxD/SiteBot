@@ -1,0 +1,345 @@
+# yaml-language-server: $schema=../../schema/chatbot.schema.json
+#
+# Every section of docs/02-configuration.md, exercised at once. This file is the
+# Phase 1 acceptance criterion: it must validate and resolve.
+
+version: 1
+name: Acme Assistant
+mode: agent
+
+backend:
+  provider: anthropic
+  model: claude-opus-5
+  apiKey: ${env.ANTHROPIC_API_KEY}
+  temperature: 0.4
+  maxOutputTokens: 2048
+  topP: 0.95
+  headers:
+    anthropic-beta: some-beta-flag
+  timeoutMs: 45000
+  maxRetries: 2
+  fallback:
+    - { provider: anthropic, model: claude-sonnet-5 }
+    - provider: openai
+      model: gpt-5
+      apiKey: ${env.OPENAI_API_KEY}
+    - provider: openai-compatible
+      model: mixtral-8x7b
+      baseUrl: https://gateway.acme.com/v1
+
+prompt:
+  system: |
+    You are Acme's website assistant. You help visitors understand our
+    logistics platform, find documentation, and check order status.
+    Be concise. Prefer three sentences over ten.
+    Support is reachable at {{supportEmail}}.
+  includePageContext: true
+  includeSiteContext: true
+  variables:
+    supportEmail: support@acme.com
+    tier: ${env.DEPLOY_TIER:-standard}
+  guardrails:
+    refuseOffTopic: true
+    offTopicMessage: I can only help with questions about Acme.
+    maxUserMessageChars: 4000
+
+siteContext:
+  company: Acme Inc
+  description: B2B logistics SaaS for mid-market freight forwarders
+  primaryUrl: https://acme.com
+  supportUrl: https://acme.com/support
+  tone: friendly, direct, no marketing fluff
+  facts:
+    - Support hours are 9-18 CET, Monday to Friday
+    - Free trial is 14 days, no credit card
+    - We do not currently operate in South America
+  routes:
+    # Quoted: an unquoted comma inside a YAML flow mapping starts a new key.
+    - {
+        path: /pricing,
+        summary: 'Plans, pricing tiers, and the ROI calculator',
+      }
+    - { path: /docs/api, summary: REST API reference and authentication guide }
+    - { path: /changelog, summary: Product release notes }
+  glossary:
+    - { term: FCL, definition: Full Container Load }
+    - { term: BOL, definition: Bill of Lading }
+
+agent:
+  maxSteps: 8
+  approvalRequired: [create_ticket]
+  approvalPolicy: always
+  stopWhen:
+    tokens: 20000
+    seconds: 60
+  onMaxSteps: summarize
+  parallelToolCalls: true
+  toolChoice: auto
+
+tools:
+  - name: check_order_status
+    description: |
+      Look up the current status, carrier, and estimated delivery date of an
+      order. Use when the user asks about a specific order and provides an ID.
+    readOnly: true
+    scope: authenticated
+    enabled: ${env.FEATURE_ORDERS:-true}
+    parameters:
+      type: object
+      properties:
+        orderId:
+          type: string
+          pattern: '^ORD-[0-9]{4}$'
+          description: The order ID, e.g. ORD-4821
+      required: [orderId]
+    executor:
+      type: http
+      method: GET
+      url: https://api.acme.com/v1/orders/{orderId}
+      headers:
+        Authorization: Bearer ${env.ACME_API_KEY}
+        X-Acting-User: '{{identity.sub}}'
+      query:
+        include: shipment
+      timeoutMs: 8000
+      responsePath: $.data
+      maxResponseBytes: 32768
+      allowHosts: [api.acme.com]
+      errorMap:
+        '404': No order with that ID exists.
+        '403': That order belongs to a different account.
+
+  - name: create_ticket
+    description: File a support ticket on the user's behalf. Use when the user asks for human help with a concrete problem.
+    requiresApproval: true
+    approvalRisk: high
+    approvalSummary: 'Create a ticket titled {subject}'
+    parameters:
+      type: object
+      properties:
+        subject: { type: string, description: One-line summary }
+        priority: { type: string, description: low, normal or high }
+      required: [subject]
+    executor:
+      type: http
+      method: POST
+      url: https://api.acme.com/v1/tickets
+      body:
+        subject: '{subject}'
+        requester: '{{identity.email}}'
+        source: website_assistant
+      maxRedirects: 0
+
+  - from: mcp
+    id: acme_docs
+    server:
+      transport: http
+      url: https://acme.com/mcp
+      # Quoted because a bare ${env.X} ends in `}`, which would close a YAML
+      # flow mapping. Worth knowing before writing it the short way.
+      headers:
+        Authorization: Bearer ${env.MCP_TOKEN}
+    allow: [search_docs, list_plans]
+    prefix: docs_
+    readOnly: true
+    timeoutMs: 15000
+
+  - name: calculate_quote
+    description: Compute a shipping quote for a route and weight. Use for pricing questions with concrete inputs.
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        origin: { type: string }
+        destination: { type: string }
+        weightKg: { type: number }
+      required: [origin, destination, weightKg]
+    executor:
+      type: module
+      path: ./tools/quote.ts
+      export: calculateQuote
+
+  - name: handoff_to_human
+    description: Connect the user to a human from the sales or support team.
+    executor:
+      type: builtin
+      id: handoff
+      target:
+        kind: webhook
+        url: ${env.SLACK_WEBHOOK}
+        includeTranscript: true
+      message: A human will reply here shortly.
+
+  - name: highlight_section
+    description: Scroll to and highlight a section of the current page. Use when pointing the user at something on screen.
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        selector: { type: string, description: CSS selector }
+      required: [selector]
+    executor: { type: client, id: highlight }
+
+knowledge:
+  sources:
+    - type: sitemap
+      url: https://acme.com/sitemap.xml
+      include: ['/docs/**', '/blog/**']
+      exclude: ['/docs/internal/**']
+      maxPages: 500
+    - type: crawl
+      url: https://acme.com
+      maxDepth: 3
+      respectRobots: true
+    - type: files
+      glob: ./content/**/*.{md,mdx}
+      baseUrl: https://acme.com/guides
+    - type: openapi
+      path: ./openapi.yaml
+    - type: text
+      id: policies
+      content: |
+        Returns accepted within 30 days of delivery, in original packaging.
+    - type: json
+      path: ./data/products.json
+      jsonPath: $.products[*]
+      template: '{name} — {description}'
+  extract:
+    selector: main, article
+    strip: [nav, footer, aside, .cookie-banner]
+    format: markdown
+    minChars: 200
+  chunk:
+    strategy: semantic
+    maxTokens: 512
+    overlapTokens: 64
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+    apiKey: ${env.OPENAI_API_KEY}
+    batchSize: 96
+  store:
+    type: sqlite
+    path: ./.sitebot/index.db
+  retrieval:
+    mode: tool
+    topK: 6
+    minScore: 0.35
+    maxContextTokens: 3000
+    includeCitations: true
+    rerank: false
+    dedupeByUrl: true
+    expandNeighbours: 1
+
+storage:
+  type: sqlite
+  path: ./.sitebot/sessions.db
+  ttlSeconds: 2592000
+  maxMessagesPerSession: 100
+  persistTranscripts: true
+
+ui:
+  position: bottom-right
+  offset: { x: 24, y: 24 }
+  zIndex: 2147483000
+  isolation: shadow
+  launcher:
+    label: Ask Acme
+    icon: sparkle
+    showAfterMs: 1200
+    hideOnPaths: ['/checkout/**']
+    badge: { enabled: true, text: New }
+  panel:
+    width: 400
+    height: 640
+    avatarUrl: /logo-mark.svg
+    showAvatar: true
+    showClose: true
+    rememberOpenState: true
+  theme:
+    mode: auto
+    primary: '#4f46e5'
+    onPrimary: '#ffffff'
+    surface: '#ffffff'
+    text: '#18181b'
+    muted: '#71717a'
+    bubbleAssistant: '#f1f1f1'
+    bubbleUser: '#4f46e5'
+    radius: 16
+    font: inherit
+    shadow: '0 12px 48px rgba(0,0,0,0.16)'
+  messages:
+    greeting: Hi there! Looking to book a meeting or learn more about Acme?
+    placeholder: 'Enter...'
+    suggestions:
+      - label: 'Schedule a Meeting with Sales 📅'
+        action: { type: send, text: I'd like to book a demo }
+      - label: 'Start the Application 🚀'
+        action: { type: navigate, path: /apply }
+      - label: 'Chat with Sales now 💬'
+        action: { type: tool, tool: handoff_to_human }
+      - label: Read the docs
+        action: { type: link, url: https://acme.com/docs }
+    suggestionsPersist: false
+    errorMessage: Something went wrong. Please try again.
+  footer:
+    text: Acme provides this chat. You agree this chat may be recorded.
+    linkText: Privacy Statement
+    linkUrl: https://acme.com/privacy
+  behaviour:
+    streaming: true
+    showTypingIndicator: true
+    markdown: true
+    allowFileUpload: false
+    persistHistory: true
+    resetOnNavigate: false
+    sound: false
+  pageContext:
+    excludePaths: ['/checkout/**', '/account/**']
+  a11y:
+    launcherAriaLabel: Open chat assistant
+    panelAriaLabel: Chat with Acme assistant
+  locale: auto
+  strings:
+    fr:
+      greeting: Bonjour ! Comment puis-je vous aider ?
+      placeholder: 'Écrivez...'
+
+security:
+  publicKey: pk_live_a1b2c3
+  allowedOrigins:
+    - https://acme.com
+    - https://*.acme.com
+  rateLimit:
+    perSession: 30/5m
+    perIp: 100/1h
+    store: redis
+  budget:
+    maxTokensPerSession: 50000
+    maxTokensPerDay: 5000000
+    maxUsdPerDay: 25
+    onExceeded: degrade
+    degradeTo: { provider: anthropic, model: claude-haiku-4-5-20251001 }
+  auth:
+    mode: optional
+    jwt:
+      secret: ${env.SITEBOT_JWT_SECRET}
+      algorithm: HS256
+      issuer: acme.com
+      audience: sitebot
+      claimsMap: { userId: sub, email: email, tier: 'custom.tier' }
+  redactPii: true
+  piiPatterns: [email, phone, creditcard, iban]
+  blockedPatterns:
+    - '(?i)ignore (all )?previous instructions'
+  maxRequestBytes: 262144
+  trustProxy: 1
+
+telemetry:
+  enabled: true
+  otel: { enabled: true, serviceName: sitebot }
+  events:
+    webhook: ${env.EVENTS_WEBHOOK}
+    include: [message, tool_call, error, finish]
+  logLevel: info
+  redactPromptsInLogs: true

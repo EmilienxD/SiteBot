@@ -109,6 +109,22 @@ describe('dependency boundaries (docs/01 §3)', () => {
     expect(restricted(messages)).toHaveLength(0)
   })
 
+  it("rule 6: config's root entry may not import node:* either", async () => {
+    const messages = await lint(
+      'packages/config/src/loader.ts',
+      `import { readFile } from 'node:fs/promises'\nexport const x = readFile\n`,
+    )
+    expect(restricted(messages)).toHaveLength(1)
+  })
+
+  it('rule 6: config/node may import node:*', async () => {
+    const messages = await lint(
+      'packages/config/src/node/loader.ts',
+      `import { readFile } from 'node:fs/promises'\nexport const x = readFile\n`,
+    )
+    expect(restricted(messages)).toHaveLength(0)
+  })
+
   it('rule 7: no package reaches into another package internals', async () => {
     const messages = await lint(
       'packages/server/src/leak2.ts',

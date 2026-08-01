@@ -2,8 +2,9 @@
 
 A drop-in, fully configurable AI assistant for any website. One config file, one route handler, one script tag.
 
-> **Status: Phase 0 — Foundations complete.**
-> The monorepo builds, tests and lints, and the seven packages exist as typed skeletons. No engine yet.
+> **Status: Phase 1 — `@sitebot/config` complete.**
+> The config file is real: schema, loader, `${env.*}` interpolation, `extends` merging, cross-field
+> validation and a published JSON Schema. No engine yet.
 > The full specification lives in [`docs/`](./docs) and is the implementation blueprint.
 
 ---
@@ -138,6 +139,27 @@ pnpm size         # widget bundle budgets: 12 KB launcher, 25 KB total
 
 ---
 
+## Configuration
+
+`@sitebot/config` splits along the same line as `@sitebot/core`: the schema, validators and
+`toPublicConfig` are browser-safe, and the filesystem loader lives behind a Node-only subpath.
+
+```ts
+import { validateConfig, toPublicConfig } from '@sitebot/config'
+import { loadConfig } from '@sitebot/config/node' // reads files, needs node:fs
+```
+
+Point your editor at the generated schema for autocomplete and inline validation:
+
+```yaml
+# yaml-language-server: $schema=./node_modules/@sitebot/config/schema/chatbot.schema.json
+```
+
+`sitebot init` writes that line for you. The file is generated from the Zod source at build time,
+so it cannot drift from what the loader actually accepts.
+
+---
+
 ## Next step
 
-[Phase 1 — `@sitebot/config`](./docs/09-implementation-plan.md#phase-1--sitebotconfig): the Zod schema, the loader, `${env.*}` interpolation, `extends` merging, and the ten cross-field validation rules.
+[Phase 2 — `@sitebot/core`, chat mode only](./docs/09-implementation-plan.md#phase-2--sitebotcore-chat-mode-only): the provider registry with lazy imports and install hints, the fallback chain, prompt composition, session storage, guards, and `handleChat` streaming against `MockLanguageModelV2`.

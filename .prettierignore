@@ -9,5 +9,6 @@ pnpm-lock.yaml
 # tests. Prettier must not churn it.
 docs/
 
-# Generated from Zod at build time.
-schema/*.json
+# Generated from Zod at build time. Leading **/ so the pattern reaches inside
+# packages — a bare `schema/` anchors to this file's directory.
+**/schema/*.json

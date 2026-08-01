@@ -6,8 +6,15 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "package.json", "tsup.config.ts", "vite.config.ts", "tsconfig.json"],
-      "outputs": ["dist/**"]
+      "inputs": [
+        "src/**",
+        "scripts/**",
+        "package.json",
+        "tsup.config.ts",
+        "vite.config.ts",
+        "tsconfig.json"
+      ],
+      "outputs": ["dist/**", "schema/**"]
     },
     "typecheck": {
       "dependsOn": ["^build"],

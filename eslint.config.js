@@ -106,6 +106,27 @@ export default tseslint.config(
     ),
   },
 
+  // Rule 6, applied to config as well: the root entry has to survive being
+  // pulled into a browser bundle, so the loader lives under src/node/.
+  {
+    files: ['packages/config/src/**/*.ts'],
+    ignores: ['packages/config/src/node/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['node:*', 'fs', 'path', 'crypto', 'child_process', 'worker_threads'],
+              message:
+                "@sitebot/config's main entry must stay browser-safe. Put Node-only code under src/node/ (docs/01-architecture.md §2)",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // ── layer 2 ───────────────────────────────────────────────────────────────
   // Rule 2: core imports only config.
   {
@@ -185,17 +206,28 @@ export default tseslint.config(
 
   // ── tests and tooling ─────────────────────────────────────────────────────
   {
-    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts'],
+    // Tests are never published, so the boundary rules that keep a bundle small
+    // and edge-safe do not apply to them. A test that needs node:fs to build a
+    // fixture project is doing exactly what it should.
+    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/test/**/*.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': 'off',
+      'no-restricted-imports': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   {
-    files: ['**/*.config.ts', '**/*.config.js', 'eslint.config.js', 'vitest.config.ts'],
+    files: [
+      '**/*.config.ts',
+      '**/*.config.js',
+      '**/scripts/**',
+      'eslint.config.js',
+      'vitest.config.ts',
+    ],
     rules: {
       'no-console': 'off',
       '@typescript-eslint/no-restricted-imports': 'off',
+      'no-restricted-imports': 'off',
     },
   },
 )

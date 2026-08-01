@@ -1,0 +1,2618 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`emitJsonSchema > matches the committed snapshot 1`] = `
+{
+  "$id": "https://unpkg.com/@sitebot/config/schema/chatbot.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "description": "SiteBot configuration — see docs/02-configuration.md.",
+  "properties": {
+    "agent": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "docs/02-configuration.md §7.",
+      "properties": {
+        "approvalPolicy": {
+          "default": "always",
+          "enum": [
+            "always",
+            "once-per-session",
+            "never",
+          ],
+          "type": "string",
+        },
+        "approvalRequired": {
+          "default": [],
+          "description": "Tool names that need explicit user approval. Unioned with per-tool requiresApproval.",
+          "items": {
+            "description": "Unique tool name the model will call.",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "maxSteps": {
+          "default": 8,
+          "description": "Hard ceiling on loop iterations.",
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "onMaxSteps": {
+          "default": "summarize",
+          "description": "summarize asks the model for a final answer with tools disabled — one extra call, always a usable reply.",
+          "enum": [
+            "summarize",
+            "error",
+            "silent",
+          ],
+          "type": "string",
+        },
+        "parallelToolCalls": {
+          "default": true,
+          "type": "boolean",
+        },
+        "stopWhen": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "seconds": {
+              "default": 120,
+              "description": "Wall clock.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "steps": {
+              "description": "Defaults to agent.maxSteps.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "tokens": {
+              "default": 20000,
+              "description": "Cumulative across the loop.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "toolChoice": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "required",
+            "none",
+          ],
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "backend": {
+      "additionalProperties": false,
+      "description": "The model. docs/02-configuration.md §4.",
+      "properties": {
+        "apiKey": {
+          "description": "API key. Use \${env.VAR}; defaults to the provider's conventional environment variable.",
+          "type": "string",
+        },
+        "baseUrl": {
+          "description": "Override the provider endpoint — gateways, proxies, self-hosted.",
+          "type": "string",
+        },
+        "fallback": {
+          "default": [],
+          "description": "Ordered fallback chain, tried only before the first token is emitted (docs/04 §3).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "apiKey": {
+                "description": "API key. Use \${env.VAR}; defaults to the provider's conventional environment variable.",
+                "type": "string",
+              },
+              "baseUrl": {
+                "description": "Override the provider endpoint — gateways, proxies, self-hosted.",
+                "type": "string",
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string",
+                },
+                "default": {},
+                "propertyNames": {
+                  "type": "string",
+                },
+                "type": "object",
+              },
+              "maxOutputTokens": {
+                "default": 2048,
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+              "maxRetries": {
+                "default": 2,
+                "description": "Retries within this provider before moving to the next fallback.",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer",
+              },
+              "model": {
+                "description": "Model ID, passed to the provider verbatim. Never validated against a list, so new models work without upgrading this package.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "module": {
+                "description": "For provider: custom — path to a module exporting a LanguageModel factory, e.g. ./providers/x.ts#factory",
+                "type": "string",
+              },
+              "provider": {
+                "description": "Model provider.",
+                "enum": [
+                  "anthropic",
+                  "openai",
+                  "google",
+                  "azure",
+                  "bedrock",
+                  "vertex",
+                  "mistral",
+                  "groq",
+                  "openai-compatible",
+                  "ollama",
+                  "custom",
+                ],
+                "type": "string",
+              },
+              "temperature": {
+                "maximum": 2,
+                "minimum": 0,
+                "type": "number",
+              },
+              "timeoutMs": {
+                "default": 60000,
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+              "topK": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+              "topP": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number",
+              },
+            },
+            "required": [
+              "provider",
+              "model",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string",
+          },
+          "default": {},
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "maxOutputTokens": {
+          "default": 2048,
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "maxRetries": {
+          "default": 2,
+          "description": "Retries within this provider before moving to the next fallback.",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "model": {
+          "description": "Model ID, passed to the provider verbatim. Never validated against a list, so new models work without upgrading this package.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "module": {
+          "description": "For provider: custom — path to a module exporting a LanguageModel factory, e.g. ./providers/x.ts#factory",
+          "type": "string",
+        },
+        "provider": {
+          "description": "Model provider.",
+          "enum": [
+            "anthropic",
+            "openai",
+            "google",
+            "azure",
+            "bedrock",
+            "vertex",
+            "mistral",
+            "groq",
+            "openai-compatible",
+            "ollama",
+            "custom",
+          ],
+          "type": "string",
+        },
+        "temperature": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number",
+        },
+        "timeoutMs": {
+          "default": 60000,
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "topK": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "topP": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number",
+        },
+      },
+      "required": [
+        "provider",
+        "model",
+      ],
+      "type": "object",
+    },
+    "extends": {
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      ],
+      "description": "chatbot.config.ts only — declarative files to merge under this one, applied left to right.",
+    },
+    "knowledge": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "docs/02-configuration.md §9, docs/06-knowledge.md.",
+      "properties": {
+        "chunk": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "maxTokens": {
+              "default": 512,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "minTokens": {
+              "default": 64,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "overlapTokens": {
+              "default": 64,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "strategy": {
+              "default": "semantic",
+              "enum": [
+                "semantic",
+                "heading",
+                "fixed",
+              ],
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "embedding": {
+          "additionalProperties": false,
+          "properties": {
+            "apiKey": {
+              "type": "string",
+            },
+            "baseUrl": {
+              "type": "string",
+            },
+            "batchSize": {
+              "default": 96,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "dimensions": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "model": {
+              "minLength": 1,
+              "type": "string",
+            },
+            "provider": {
+              "enum": [
+                "openai",
+                "google",
+                "mistral",
+                "cohere",
+                "voyage",
+                "ollama",
+                "openai-compatible",
+              ],
+              "type": "string",
+            },
+          },
+          "required": [
+            "provider",
+            "model",
+          ],
+          "type": "object",
+        },
+        "extract": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "format": {
+              "default": "markdown",
+              "enum": [
+                "markdown",
+                "text",
+              ],
+              "type": "string",
+            },
+            "minChars": {
+              "default": 200,
+              "description": "Pages shorter than this after extraction are skipped.",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "renderJs": {
+              "default": false,
+              "description": "Fetch through a headless browser. Slow; for SPA-rendered sites.",
+              "type": "boolean",
+            },
+            "selector": {
+              "default": "main, article, [role="main"]",
+              "minLength": 1,
+              "type": "string",
+            },
+            "strip": {
+              "default": [
+                "nav",
+                "footer",
+                "aside",
+                ".cookie-banner",
+              ],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "retrieval": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "dedupeByUrl": {
+              "default": true,
+              "description": "At most one chunk per URL, so one long page cannot dominate.",
+              "type": "boolean",
+            },
+            "expandNeighbours": {
+              "default": 0,
+              "description": "Pull N adjacent chunks around each hit from the same document.",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "filter": {
+              "additionalProperties": {},
+              "propertyNames": {
+                "type": "string",
+              },
+              "type": "object",
+            },
+            "includeCitations": {
+              "default": true,
+              "type": "boolean",
+            },
+            "maxContextTokens": {
+              "default": 3000,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "minScore": {
+              "default": 0.3,
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number",
+            },
+            "mode": {
+              "description": "Defaults to \`always\` in chat mode and \`tool\` in agent mode.",
+              "enum": [
+                "tool",
+                "always",
+                "hybrid",
+              ],
+              "type": "string",
+            },
+            "rerank": {
+              "default": false,
+              "type": "boolean",
+            },
+            "topK": {
+              "default": 6,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "sources": {
+          "default": [],
+          "description": "Empty means the whole knowledge subsystem stays inert.",
+          "items": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "exclude": {
+                    "default": [],
+                    "items": {
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "include": {
+                    "default": [],
+                    "items": {
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "maxPages": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer",
+                  },
+                  "type": {
+                    "const": "sitemap",
+                    "type": "string",
+                  },
+                  "url": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                  "url",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "exclude": {
+                    "default": [],
+                    "items": {
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "include": {
+                    "default": [],
+                    "items": {
+                      "minLength": 1,
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "maxDepth": {
+                    "default": 3,
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer",
+                  },
+                  "maxPages": {
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991,
+                    "type": "integer",
+                  },
+                  "respectRobots": {
+                    "default": true,
+                    "type": "boolean",
+                  },
+                  "type": {
+                    "const": "crawl",
+                    "type": "string",
+                  },
+                  "url": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                  "url",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "baseUrl": {
+                    "description": "Maps file paths to public URLs so citations link somewhere.",
+                    "type": "string",
+                  },
+                  "glob": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": {
+                    "const": "files",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                  "glob",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "path": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": {
+                    "const": "openapi",
+                    "type": "string",
+                  },
+                  "url": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": {
+                    "const": "text",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                  "id",
+                  "content",
+                ],
+                "type": "object",
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "jsonPath": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "path": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "template": {
+                    "description": "Renders each record into text, e.g. "{name} — {description}".",
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                  "type": {
+                    "const": "json",
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                  "path",
+                  "template",
+                ],
+                "type": "object",
+              },
+            ],
+          },
+          "type": "array",
+        },
+        "store": {
+          "default": {
+            "type": "memory",
+          },
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "description": "Optional JSON file to persist the in-memory index between runs.",
+                  "type": "string",
+                },
+                "type": {
+                  "const": "memory",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "default": "./.sitebot/index.db",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": {
+                  "const": "sqlite",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "table": {
+                  "default": "sitebot_chunks",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": {
+                  "const": "pgvector",
+                  "type": "string",
+                },
+                "url": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "url",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "token": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": {
+                  "const": "upstash",
+                  "type": "string",
+                },
+                "url": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "url",
+                "token",
+              ],
+              "type": "object",
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "module": {
+                  "description": "Path to a module implementing the VectorStore interface.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": {
+                  "const": "custom",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "module",
+              ],
+              "type": "object",
+            },
+          ],
+        },
+      },
+      "type": "object",
+    },
+    "mode": {
+      "default": "chat",
+      "description": "The policy switch. chat: one step, readOnly tools only. agent: multi-step with approval gates.",
+      "enum": [
+        "chat",
+        "agent",
+      ],
+      "type": "string",
+    },
+    "name": {
+      "description": "Displayed as the panel title. Public.",
+      "minLength": 1,
+      "type": "string",
+    },
+    "prompt": {
+      "additionalProperties": false,
+      "description": "docs/02-configuration.md §5.",
+      "properties": {
+        "guardrails": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "maxUserMessageChars": {
+              "default": 8000,
+              "description": "Messages longer than this are rejected before the model call.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "offTopicMessage": {
+              "default": "I can only help with questions about this site.",
+              "type": "string",
+            },
+            "refuseOffTopic": {
+              "default": false,
+              "description": "Appends a scoping instruction to the prompt. A soft guard, not a security control.",
+              "type": "boolean",
+            },
+          },
+          "type": "object",
+        },
+        "includePageContext": {
+          "default": true,
+          "type": "boolean",
+        },
+        "includeSiteContext": {
+          "default": true,
+          "type": "boolean",
+        },
+        "system": {
+          "description": "The system prompt. {{variables}} are substituted; \${env.*} is deliberately NOT (docs/02 §2).",
+          "minLength": 1,
+          "type": "string",
+        },
+        "systemFile": {
+          "description": "Path to a file holding the system prompt, relative to the config file. Read at load time.",
+          "minLength": 1,
+          "type": "string",
+        },
+        "variables": {
+          "additionalProperties": {
+            "type": "string",
+          },
+          "default": {},
+          "description": "Values for {{name}} placeholders in \`system\`.",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "security": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "docs/02-configuration.md §12, docs/08-security.md.",
+      "properties": {
+        "allowedOrigins": {
+          "default": [],
+          "description": "Empty means same-origin only. A cross-origin sidecar must opt in explicitly.",
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "auth": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "jwt": {
+              "additionalProperties": false,
+              "properties": {
+                "algorithm": {
+                  "default": "HS256",
+                  "enum": [
+                    "HS256",
+                    "HS384",
+                    "HS512",
+                    "RS256",
+                    "RS384",
+                    "RS512",
+                    "ES256",
+                    "ES384",
+                  ],
+                  "type": "string",
+                },
+                "audience": {
+                  "type": "string",
+                },
+                "claimsMap": {
+                  "additionalProperties": {
+                    "type": "string",
+                  },
+                  "default": {},
+                  "description": "Maps JWT claims into ctx.identity. Unmapped claims are discarded.",
+                  "propertyNames": {
+                    "type": "string",
+                  },
+                  "type": "object",
+                },
+                "clockToleranceSeconds": {
+                  "default": 60,
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer",
+                },
+                "issuer": {
+                  "type": "string",
+                },
+                "jwksUrl": {
+                  "description": "For RS*/ES* verification.",
+                  "type": "string",
+                },
+                "maxTokenAgeSeconds": {
+                  "default": 900,
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer",
+                },
+                "secret": {
+                  "description": "HS* shared secret. Use \${env.*}.",
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+            "mode": {
+              "default": "optional",
+              "enum": [
+                "none",
+                "optional",
+                "required",
+              ],
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "blockedPatterns": {
+          "default": [],
+          "description": "Regexes rejected in user messages. Defence in depth against the lazy attempt, not a real filter.",
+          "items": {
+            "minLength": 1,
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "budget": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "degradeTo": {
+              "additionalProperties": false,
+              "description": "Cheaper model to switch to when onExceeded is \`degrade\`.",
+              "properties": {
+                "apiKey": {
+                  "description": "API key. Use \${env.VAR}; defaults to the provider's conventional environment variable.",
+                  "type": "string",
+                },
+                "baseUrl": {
+                  "description": "Override the provider endpoint — gateways, proxies, self-hosted.",
+                  "type": "string",
+                },
+                "headers": {
+                  "additionalProperties": {
+                    "type": "string",
+                  },
+                  "default": {},
+                  "propertyNames": {
+                    "type": "string",
+                  },
+                  "type": "object",
+                },
+                "maxOutputTokens": {
+                  "default": 2048,
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer",
+                },
+                "maxRetries": {
+                  "default": 2,
+                  "description": "Retries within this provider before moving to the next fallback.",
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer",
+                },
+                "model": {
+                  "description": "Model ID, passed to the provider verbatim. Never validated against a list, so new models work without upgrading this package.",
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "module": {
+                  "description": "For provider: custom — path to a module exporting a LanguageModel factory, e.g. ./providers/x.ts#factory",
+                  "type": "string",
+                },
+                "provider": {
+                  "description": "Model provider.",
+                  "enum": [
+                    "anthropic",
+                    "openai",
+                    "google",
+                    "azure",
+                    "bedrock",
+                    "vertex",
+                    "mistral",
+                    "groq",
+                    "openai-compatible",
+                    "ollama",
+                    "custom",
+                  ],
+                  "type": "string",
+                },
+                "temperature": {
+                  "maximum": 2,
+                  "minimum": 0,
+                  "type": "number",
+                },
+                "timeoutMs": {
+                  "default": 60000,
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer",
+                },
+                "topK": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer",
+                },
+                "topP": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number",
+                },
+              },
+              "required": [
+                "provider",
+                "model",
+              ],
+              "type": "object",
+            },
+            "maxTokensPerDay": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "maxTokensPerSession": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "maxUsdPerDay": {
+              "exclusiveMinimum": 0,
+              "type": "number",
+            },
+            "onExceeded": {
+              "default": "message",
+              "enum": [
+                "message",
+                "error",
+                "degrade",
+              ],
+              "type": "string",
+            },
+            "resetHourUtc": {
+              "default": 0,
+              "maximum": 23,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "maxRequestBytes": {
+          "default": 262144,
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer",
+        },
+        "piiPatterns": {
+          "default": [],
+          "items": {
+            "enum": [
+              "email",
+              "phone",
+              "creditcard",
+              "iban",
+              "ssn",
+            ],
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "publicKey": {
+          "description": "Identifies this deployment to the widget. Not a secret — it grants nothing on its own.",
+          "type": "string",
+        },
+        "rateLimit": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "perIp": {
+              "default": "100/1h",
+              "pattern": "^[1-9][0-9]*\\/[1-9][0-9]*[smhd]$",
+              "type": "string",
+            },
+            "perSession": {
+              "default": "30/5m",
+              "pattern": "^[1-9][0-9]*\\/[1-9][0-9]*[smhd]$",
+              "type": "string",
+            },
+            "store": {
+              "default": "memory",
+              "description": "memory is single-process only — use redis for multi-replica.",
+              "enum": [
+                "memory",
+                "redis",
+              ],
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "redactPii": {
+          "default": false,
+          "type": "boolean",
+        },
+        "strictTools": {
+          "default": false,
+          "description": "Turns the "MCP import without \`allow\`" warning into an error.",
+          "type": "boolean",
+        },
+        "trustProxy": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean",
+            },
+            {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer",
+            },
+          ],
+          "default": false,
+          "description": "Hop count for X-Forwarded-For. false ignores the header entirely.",
+        },
+      },
+      "type": "object",
+    },
+    "siteContext": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "docs/02-configuration.md §6.",
+      "properties": {
+        "company": {
+          "type": "string",
+        },
+        "description": {
+          "type": "string",
+        },
+        "facts": {
+          "default": [],
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "glossary": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "definition": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "term": {
+                "minLength": 1,
+                "type": "string",
+              },
+            },
+            "required": [
+              "term",
+              "definition",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "primaryUrl": {
+          "type": "string",
+        },
+        "routes": {
+          "default": [],
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "description": "Path on the site, e.g. /pricing.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "summary": {
+                "description": "What a visitor finds there.",
+                "type": "string",
+              },
+            },
+            "required": [
+              "path",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "supportUrl": {
+          "type": "string",
+        },
+        "tone": {
+          "type": "string",
+        },
+      },
+      "type": "object",
+    },
+    "storage": {
+      "default": {
+        "type": "memory",
+      },
+      "description": "docs/02-configuration.md §10.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "none",
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+          ],
+          "type": "object",
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "memory",
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+          ],
+          "type": "object",
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "path": {
+              "default": "./.sitebot/sessions.db",
+              "minLength": 1,
+              "type": "string",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "sqlite",
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+          ],
+          "type": "object",
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "redis",
+              "type": "string",
+            },
+            "url": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+            "url",
+          ],
+          "type": "object",
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "postgres",
+              "type": "string",
+            },
+            "url": {
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+            "url",
+          ],
+          "type": "object",
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "maxMessagesPerSession": {
+              "default": 100,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "module": {
+              "description": "Path to a module implementing the SessionStore interface.",
+              "minLength": 1,
+              "type": "string",
+            },
+            "persistTranscripts": {
+              "default": true,
+              "description": "false keeps only the loop state needed for resume and drops message bodies at session end.",
+              "type": "boolean",
+            },
+            "ttlSeconds": {
+              "default": 2592000,
+              "description": "Session retention. Default 30 days.",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "type": {
+              "const": "custom",
+              "type": "string",
+            },
+          },
+          "required": [
+            "type",
+            "module",
+          ],
+          "type": "object",
+        },
+      ],
+    },
+    "telemetry": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "docs/02-configuration.md §13.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean",
+        },
+        "events": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "include": {
+              "default": [
+                "message",
+                "tool_call",
+                "error",
+                "finish",
+              ],
+              "items": {
+                "enum": [
+                  "message",
+                  "tool_call",
+                  "error",
+                  "finish",
+                  "approval",
+                  "feedback",
+                  "provider_fallback",
+                  "budget_exceeded",
+                ],
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "webhook": {
+              "description": "The developer's own endpoint. No webhook, no events.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "logLevel": {
+          "default": "info",
+          "enum": [
+            "silent",
+            "error",
+            "warn",
+            "info",
+            "debug",
+          ],
+          "type": "string",
+        },
+        "otel": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean",
+            },
+            "serviceName": {
+              "default": "sitebot",
+              "minLength": 1,
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "redactPromptsInLogs": {
+          "default": true,
+          "type": "boolean",
+        },
+      },
+      "type": "object",
+    },
+    "tools": {
+      "default": [],
+      "items": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "allow": {
+                "description": "Tool names to import. Strongly recommended in production.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "deny": {
+                "default": [],
+                "items": {
+                  "minLength": 1,
+                  "type": "string",
+                },
+                "type": "array",
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean",
+                  },
+                  {
+                    "type": "string",
+                  },
+                ],
+                "default": true,
+              },
+              "from": {
+                "const": "mcp",
+                "type": "string",
+              },
+              "id": {
+                "description": "Identifies this server in health checks and telemetry.",
+                "minLength": 1,
+                "type": "string",
+              },
+              "prefix": {
+                "default": "",
+                "description": "Prepended to imported tool names to avoid collisions.",
+                "type": "string",
+              },
+              "readOnly": {
+                "default": false,
+                "type": "boolean",
+              },
+              "requiresApproval": {
+                "default": false,
+                "type": "boolean",
+              },
+              "scope": {
+                "default": "public",
+                "enum": [
+                  "public",
+                  "authenticated",
+                ],
+                "type": "string",
+              },
+              "server": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "headers": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "default": {},
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "transport": {
+                        "enum": [
+                          "http",
+                          "sse",
+                        ],
+                        "type": "string",
+                      },
+                      "url": {
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "transport",
+                      "url",
+                    ],
+                    "type": "object",
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "args": {
+                        "default": [],
+                        "items": {
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                      "command": {
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "env": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "default": {},
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "transport": {
+                        "const": "stdio",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "transport",
+                      "command",
+                    ],
+                    "type": "object",
+                  },
+                ],
+              },
+              "timeoutMs": {
+                "default": 15000,
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+            },
+            "required": [
+              "from",
+              "id",
+              "server",
+            ],
+            "type": "object",
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "approvalRisk": {
+                "default": "medium",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                ],
+                "type": "string",
+              },
+              "approvalSummary": {
+                "description": "Human-readable summary shown on the approval card.",
+                "type": "string",
+              },
+              "description": {
+                "description": "What the model reads to decide whether to call this. Required except for builtin executors.",
+                "type": "string",
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean",
+                  },
+                  {
+                    "type": "string",
+                  },
+                ],
+                "default": true,
+                "description": "A string is treated as a condition, e.g. "\${env.FEATURE_ORDERS}".",
+              },
+              "errorMessage": {
+                "description": "Shown to the model when the executor fails.",
+                "type": "string",
+              },
+              "executor": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "allowHosts": {
+                        "description": "SSRF allowlist. Defaults to the host literally written in \`url\` (docs/08 §5).",
+                        "items": {
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
+                      "allowPrivateNetwork": {
+                        "default": false,
+                        "type": "boolean",
+                      },
+                      "body": {
+                        "description": "Request body template. Defaults to the validated argument object on POST/PUT/PATCH.",
+                      },
+                      "errorMap": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "default": {},
+                        "description": "HTTP status code to a model-readable message.",
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "headers": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "default": {},
+                        "description": "Static headers plus {{identity.*}} / {{session.*}} context. Model-controlled {param} is forbidden here.",
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "maxRedirects": {
+                        "default": 0,
+                        "maximum": 9007199254740991,
+                        "minimum": 0,
+                        "type": "integer",
+                      },
+                      "maxResponseBytes": {
+                        "default": 65536,
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "type": "integer",
+                      },
+                      "method": {
+                        "default": "GET",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE",
+                          "HEAD",
+                        ],
+                        "type": "string",
+                      },
+                      "query": {
+                        "additionalProperties": {
+                          "type": "string",
+                        },
+                        "default": {},
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "responsePath": {
+                        "description": "JSONPath applied to the response before the model sees it.",
+                        "type": "string",
+                      },
+                      "timeoutMs": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "type": "integer",
+                      },
+                      "type": {
+                        "const": "http",
+                        "type": "string",
+                      },
+                      "url": {
+                        "description": "Target URL. {param} placeholders are percent-encoded and may not appear in the scheme or host.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "url",
+                    ],
+                    "type": "object",
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "server": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "headers": {
+                                "additionalProperties": {
+                                  "type": "string",
+                                },
+                                "default": {},
+                                "propertyNames": {
+                                  "type": "string",
+                                },
+                                "type": "object",
+                              },
+                              "transport": {
+                                "enum": [
+                                  "http",
+                                  "sse",
+                                ],
+                                "type": "string",
+                              },
+                              "url": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "transport",
+                              "url",
+                            ],
+                            "type": "object",
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "args": {
+                                "default": [],
+                                "items": {
+                                  "type": "string",
+                                },
+                                "type": "array",
+                              },
+                              "command": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
+                              "env": {
+                                "additionalProperties": {
+                                  "type": "string",
+                                },
+                                "default": {},
+                                "propertyNames": {
+                                  "type": "string",
+                                },
+                                "type": "object",
+                              },
+                              "transport": {
+                                "const": "stdio",
+                                "type": "string",
+                              },
+                            },
+                            "required": [
+                              "transport",
+                              "command",
+                            ],
+                            "type": "object",
+                          },
+                        ],
+                      },
+                      "tool": {
+                        "description": "Tool name as the server exposes it.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": {
+                        "const": "mcp",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "server",
+                      "tool",
+                    ],
+                    "type": "object",
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "export": {
+                        "default": "default",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "path": {
+                        "description": "Module path, resolved relative to the config file.",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": {
+                        "const": "module",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "path",
+                    ],
+                    "type": "object",
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "filter": {
+                        "additionalProperties": {},
+                        "propertyNames": {
+                          "type": "string",
+                        },
+                        "type": "object",
+                      },
+                      "id": {
+                        "enum": [
+                          "search_knowledge_base",
+                          "list_site_sections",
+                          "get_page_context",
+                          "handoff",
+                          "navigate",
+                          "collect_lead",
+                          "submit_feedback",
+                          "get_time",
+                        ],
+                        "type": "string",
+                      },
+                      "message": {
+                        "type": "string",
+                      },
+                      "minScore": {
+                        "maximum": 1,
+                        "minimum": 0,
+                        "type": "number",
+                      },
+                      "target": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "email": {
+                            "type": "string",
+                          },
+                          "includeTranscript": {
+                            "default": false,
+                            "type": "boolean",
+                          },
+                          "kind": {
+                            "enum": [
+                              "webhook",
+                              "intercom",
+                              "crisp",
+                              "zendesk",
+                              "email",
+                              "url",
+                            ],
+                            "type": "string",
+                          },
+                          "url": {
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "kind",
+                        ],
+                        "type": "object",
+                      },
+                      "topK": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "type": "integer",
+                      },
+                      "type": {
+                        "const": "builtin",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                    ],
+                    "type": "object",
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "A builtin client tool id, or a name registered via SiteBot.registerTool().",
+                        "minLength": 1,
+                        "type": "string",
+                      },
+                      "type": {
+                        "const": "client",
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "type",
+                      "id",
+                    ],
+                    "type": "object",
+                  },
+                ],
+              },
+              "maxCallsPerSession": {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+              "name": {
+                "description": "Unique tool name the model will call.",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                "type": "string",
+              },
+              "parameters": {
+                "additionalProperties": {},
+                "default": {},
+                "description": "JSON Schema (draft-07 subset) for the tool arguments.",
+                "properties": {
+                  "properties": {
+                    "additionalProperties": {
+                      "additionalProperties": {},
+                      "properties": {},
+                      "type": "object",
+                    },
+                    "default": {},
+                    "propertyNames": {
+                      "type": "string",
+                    },
+                    "type": "object",
+                  },
+                  "required": {
+                    "default": [],
+                    "items": {
+                      "type": "string",
+                    },
+                    "type": "array",
+                  },
+                  "type": {
+                    "const": "object",
+                    "default": "object",
+                    "type": "string",
+                  },
+                },
+                "type": "object",
+              },
+              "readOnly": {
+                "default": false,
+                "description": "Declares no side effects. Must be true in chat mode.",
+                "type": "boolean",
+              },
+              "requiresApproval": {
+                "default": false,
+                "type": "boolean",
+              },
+              "scope": {
+                "default": "public",
+                "enum": [
+                  "public",
+                  "authenticated",
+                ],
+                "type": "string",
+              },
+              "timeoutMs": {
+                "default": 10000,
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer",
+              },
+            },
+            "required": [
+              "name",
+              "executor",
+            ],
+            "type": "object",
+          },
+        ],
+      },
+      "type": "array",
+    },
+    "ui": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "Fully public — everything here is served by GET /api/chat/config. Never put a secret in this block.",
+      "properties": {
+        "a11y": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "launcherAriaLabel": {
+              "default": "Open chat assistant",
+              "type": "string",
+            },
+            "panelAriaLabel": {
+              "default": "Chat assistant",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "behaviour": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "allowFileUpload": {
+              "default": false,
+              "type": "boolean",
+            },
+            "markdown": {
+              "default": true,
+              "type": "boolean",
+            },
+            "navigateAllowlist": {
+              "default": [],
+              "description": "Extra paths the navigate client tool may target, beyond siteContext.routes.",
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "persistHistory": {
+              "default": true,
+              "description": "Cache the last 50 messages in localStorage for instant restore.",
+              "type": "boolean",
+            },
+            "resetOnNavigate": {
+              "default": false,
+              "type": "boolean",
+            },
+            "sessionScope": {
+              "default": "tab",
+              "description": "tab uses sessionStorage; browser uses localStorage.",
+              "enum": [
+                "tab",
+                "browser",
+              ],
+              "type": "string",
+            },
+            "showReasoning": {
+              "default": false,
+              "description": "Reveal the model's reasoning parts in a disclosure.",
+              "type": "boolean",
+            },
+            "showTypingIndicator": {
+              "default": true,
+              "type": "boolean",
+            },
+            "sound": {
+              "default": false,
+              "type": "boolean",
+            },
+            "streaming": {
+              "default": true,
+              "type": "boolean",
+            },
+          },
+          "type": "object",
+        },
+        "extract": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "selector": {
+              "default": "main, article, [role="main"]",
+              "minLength": 1,
+              "type": "string",
+            },
+            "strip": {
+              "default": [],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "footer": {
+          "additionalProperties": false,
+          "properties": {
+            "linkText": {
+              "type": "string",
+            },
+            "linkUrl": {
+              "type": "string",
+            },
+            "text": {
+              "default": "",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "isolation": {
+          "default": "shadow",
+          "enum": [
+            "shadow",
+            "iframe",
+          ],
+          "type": "string",
+        },
+        "launcher": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "badge": {
+              "additionalProperties": false,
+              "default": {},
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "type": "boolean",
+                },
+                "text": {
+                  "default": "",
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+            "hideOnPaths": {
+              "default": [],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "icon": {
+              "default": "sparkle",
+              "enum": [
+                "sparkle",
+                "chat",
+                "question",
+                "custom",
+              ],
+              "type": "string",
+            },
+            "iconUrl": {
+              "type": "string",
+            },
+            "label": {
+              "description": "Turns the circular launcher into a pill. Omit for icon-only.",
+              "type": "string",
+            },
+            "showAfterMs": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "locale": {
+          "default": "auto",
+          "type": "string",
+        },
+        "messages": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "emptyStateAfterMs": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "errorMessage": {
+              "default": "Something went wrong. Please try again.",
+              "type": "string",
+            },
+            "greeting": {
+              "type": "string",
+            },
+            "placeholder": {
+              "default": "Ask a question…",
+              "type": "string",
+            },
+            "suggestions": {
+              "default": [],
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "text": {
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                          "type": {
+                            "const": "send",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "type",
+                          "text",
+                        ],
+                        "type": "object",
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "path": {
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                          "type": {
+                            "const": "navigate",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "type",
+                          "path",
+                        ],
+                        "type": "object",
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "input": {
+                            "additionalProperties": {},
+                            "propertyNames": {
+                              "type": "string",
+                            },
+                            "type": "object",
+                          },
+                          "tool": {
+                            "description": "Unique tool name the model will call.",
+                            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                            "type": "string",
+                          },
+                          "type": {
+                            "const": "tool",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "type",
+                          "tool",
+                        ],
+                        "type": "object",
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": {
+                            "const": "link",
+                            "type": "string",
+                          },
+                          "url": {
+                            "minLength": 1,
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "type",
+                          "url",
+                        ],
+                        "type": "object",
+                      },
+                    ],
+                  },
+                  "label": {
+                    "minLength": 1,
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "label",
+                  "action",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "suggestionsPersist": {
+              "default": false,
+              "description": "Keep the pills visible after the first user message.",
+              "type": "boolean",
+            },
+          },
+          "type": "object",
+        },
+        "offset": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "x": {
+              "default": 24,
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer",
+            },
+            "y": {
+              "default": 24,
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "pageContext": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "excludePaths": {
+              "default": [],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "readSelectorDenylist": {
+              "default": [
+                "input[type=password]",
+                "[data-sensitive]",
+                "iframe",
+              ],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "redactSelectors": {
+              "default": [
+                "input",
+                "[data-private]",
+                ".pii",
+              ],
+              "items": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "type": "array",
+            },
+          },
+          "type": "object",
+        },
+        "panel": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "avatarUrl": {
+              "type": "string",
+            },
+            "height": {
+              "default": 640,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+            "openOnFirstVisit": {
+              "default": false,
+              "type": "boolean",
+            },
+            "rememberOpenState": {
+              "default": true,
+              "type": "boolean",
+            },
+            "showAvatar": {
+              "default": true,
+              "type": "boolean",
+            },
+            "showClose": {
+              "default": true,
+              "type": "boolean",
+            },
+            "title": {
+              "description": "Defaults to the top-level \`name\`.",
+              "type": "string",
+            },
+            "width": {
+              "default": 400,
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer",
+            },
+          },
+          "type": "object",
+        },
+        "position": {
+          "default": "bottom-right",
+          "enum": [
+            "bottom-right",
+            "bottom-left",
+          ],
+          "type": "string",
+        },
+        "strings": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string",
+            },
+            "propertyNames": {
+              "type": "string",
+            },
+            "type": "object",
+          },
+          "default": {},
+          "description": "Per-locale overrides, keyed by BCP-47 tag.",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
+        "theme": {
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "bubbleAssistant": {
+              "type": "string",
+            },
+            "bubbleUser": {
+              "type": "string",
+            },
+            "font": {
+              "description": "inherit | system | a CSS font-family.",
+              "type": "string",
+            },
+            "mode": {
+              "default": "auto",
+              "enum": [
+                "auto",
+                "light",
+                "dark",
+              ],
+              "type": "string",
+            },
+            "muted": {
+              "type": "string",
+            },
+            "onPrimary": {
+              "description": "Computed from \`primary\` by luminance when omitted, so contrast holds.",
+              "type": "string",
+            },
+            "primary": {
+              "type": "string",
+            },
+            "radius": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            },
+            "shadow": {
+              "type": "string",
+            },
+            "surface": {
+              "type": "string",
+            },
+            "text": {
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "zIndex": {
+          "default": 2147483000,
+          "maximum": 9007199254740991,
+          "minimum": -9007199254740991,
+          "type": "integer",
+        },
+      },
+      "type": "object",
+    },
+    "version": {
+      "const": 1,
+      "description": "Schema version. Currently must be 1.",
+      "type": "number",
+    },
+  },
+  "required": [
+    "version",
+    "name",
+    "backend",
+    "prompt",
+  ],
+  "title": "SiteBot configuration",
+  "type": "object",
+}
+`;

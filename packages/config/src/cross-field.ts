@@ -1,0 +1,378 @@
+import { containsEnvPlaceholder } from './env.js'
+import { childPath, didYouMean } from './errors.js'
+import { isMcpImport } from './schema/tools.js'
+import type { SiteBotConfig } from './schema/config.js'
+import type { BackendEntry } from './schema/backend.js'
+import type { BuildTarget, ConfigError, ConfigWarning } from './types.js'
+
+/**
+ * The cross-field rules from docs/02-configuration.md §14, plus the three rules
+ * stated elsewhere in the spec that are also validation-time
+ * ("validation rejects" / "a fatal config error"):
+ *
+ *   duplicate tool names          docs/05-tools.md §1
+ *   mcp stdio on edge             docs/05-tools.md §3 rule 4
+ *   `*` as an allowed origin      docs/08-security.md §7
+ *
+ * Every message here is asserted verbatim by a test. Treat them as API: a
+ * developer greps for the sentence they saw in their terminal.
+ */
+
+export interface CrossFieldContext {
+  target: BuildTarget
+  /** Config paths whose value came from `${env.*}`. */
+  envPaths: readonly string[]
+}
+
+export interface CrossFieldResult {
+  errors: ConfigError[]
+  warnings: ConfigWarning[]
+}
+
+export function checkCrossFields(
+  config: SiteBotConfig,
+  context: CrossFieldContext,
+): CrossFieldResult {
+  const errors: ConfigError[] = []
+  const warnings: ConfigWarning[] = []
+
+  ruleChatForbidsWritableTools(config, errors)
+  ruleAgentForbidsStatelessStorage(config, errors)
+  ruleProviderRequirements(config, errors)
+  ruleKnowledgeNeedsEmbedding(config, errors)
+  ruleStoreNotAvailableOnEdge(config, context, errors)
+  ruleAuthRequiredNeedsJwt(config, errors)
+  ruleAuthenticatedToolsNeedAuth(config, errors)
+  ruleSuggestionToolsExist(config, errors)
+  ruleUiHasNoSecrets(config, errors)
+
+  ruleToolNamesAreUnique(config, errors)
+  ruleStdioNotAvailableOnEdge(config, context, errors)
+  ruleNoWildcardOrigin(config, errors)
+
+  warnMcpImportWithoutAllow(config, errors, warnings)
+  warnPublicFieldFromEnv(config, context, warnings)
+
+  return { errors, warnings }
+}
+
+// ── 1 ───────────────────────────────────────────────────────────────────────
+
+/**
+ * The rule that stops an "it's only a simple chatbot" config from quietly
+ * having the power to place orders.
+ */
+function ruleChatForbiddenNames(config: SiteBotConfig): string[] {
+  const offenders: string[] = []
+  for (const entry of config.tools) {
+    if (entry.readOnly === true) continue
+    offenders.push(isMcpImport(entry) ? `mcp:${entry.id}` : entry.name)
+  }
+  return offenders
+}
+
+function ruleChatForbidsWritableTools(config: SiteBotConfig, errors: ConfigError[]): void {
+  if (config.mode !== 'chat') return
+  const offenders = ruleChatForbiddenNames(config)
+  if (offenders.length === 0) return
+
+  errors.push({
+    path: 'tools',
+    message: `mode: chat allows only tools marked readOnly: true. These are not: ${offenders.join(', ')}.`,
+    value: offenders,
+    expected: 'every tool to declare readOnly: true',
+    fix: 'Add `readOnly: true` to each tool that has no side effects, or switch to `mode: agent` and gate the rest with `agent.approvalRequired`.',
+    rule: 'cross-field/1',
+  })
+}
+
+// ── 2 ───────────────────────────────────────────────────────────────────────
+
+function ruleAgentForbidsStatelessStorage(config: SiteBotConfig, errors: ConfigError[]): void {
+  if (config.mode !== 'agent' || config.storage.type !== 'none') return
+
+  errors.push({
+    path: 'storage.type',
+    message: 'mode: agent requires server-side session storage, but storage.type is "none".',
+    value: 'none',
+    expected: 'memory | sqlite | redis | postgres | custom',
+    fix: 'Approval gates and client-tool resume checkpoint the loop into the session store, so agent mode cannot be stateless. Use `sqlite` for a single node or `redis` for multiple replicas.',
+    rule: 'cross-field/2',
+  })
+}
+
+// ── 3 and 4 ─────────────────────────────────────────────────────────────────
+
+function ruleProviderRequirements(config: SiteBotConfig, errors: ConfigError[]): void {
+  checkBackendEntry(config.backend, 'backend', errors)
+  config.backend.fallback.forEach((entry, index) => {
+    checkBackendEntry(entry, `backend.fallback[${index}]`, errors)
+  })
+}
+
+function checkBackendEntry(entry: BackendEntry, path: string, errors: ConfigError[]): void {
+  if (entry.provider === 'openai-compatible' && entry.baseUrl === undefined) {
+    errors.push({
+      path: `${path}.baseUrl`,
+      message: 'provider "openai-compatible" requires a baseUrl.',
+      expected: 'the base URL of an OpenAI-compatible endpoint',
+      fix: `Set ${path}.baseUrl, for example https://my-gateway.example.com/v1`,
+      rule: 'cross-field/3',
+    })
+  }
+  if (entry.provider === 'custom' && entry.module === undefined) {
+    errors.push({
+      path: `${path}.module`,
+      message: 'provider "custom" requires a module path to a LanguageModel factory.',
+      expected: 'a module path, optionally with a named export',
+      fix: `Set ${path}.module, for example ./providers/my-gateway.ts#factory`,
+      rule: 'cross-field/4',
+    })
+  }
+}
+
+// ── 5 ───────────────────────────────────────────────────────────────────────
+
+function ruleKnowledgeNeedsEmbedding(config: SiteBotConfig, errors: ConfigError[]): void {
+  if (config.knowledge.sources.length === 0) return
+  if (config.knowledge.embedding !== undefined) return
+
+  errors.push({
+    path: 'knowledge.embedding',
+    message: 'knowledge.sources is not empty, so knowledge.embedding is required.',
+    expected: 'an embedding provider and model',
+    fix: 'Add `knowledge.embedding: { provider: openai, model: text-embedding-3-small }`, or remove the sources to turn the knowledge base off.',
+    rule: 'cross-field/5',
+  })
+}
+
+// ── 6 ───────────────────────────────────────────────────────────────────────
+
+function ruleStoreNotAvailableOnEdge(
+  config: SiteBotConfig,
+  context: CrossFieldContext,
+  errors: ConfigError[],
+): void {
+  if (context.target !== 'edge' || config.knowledge.store.type !== 'sqlite') {
+    return
+  }
+
+  errors.push({
+    path: 'knowledge.store.type',
+    message: 'knowledge.store.type "sqlite" is not available on the edge runtime.',
+    value: 'sqlite',
+    expected: 'memory | pgvector | upstash | custom',
+    fix: 'Edge runtimes have no filesystem and cannot load the sqlite-vec native extension. Use `upstash` for a zero-ops edge store, or `pgvector` if you already run Postgres.',
+    rule: 'cross-field/6',
+  })
+}
+
+// ── 7 ───────────────────────────────────────────────────────────────────────
+
+function ruleAuthRequiredNeedsJwt(config: SiteBotConfig, errors: ConfigError[]): void {
+  if (config.security.auth.mode !== 'required') return
+  if (config.security.auth.jwt !== undefined) return
+
+  errors.push({
+    path: 'security.auth.jwt',
+    message: 'security.auth.mode "required" needs security.auth.jwt to verify tokens with.',
+    expected: 'a jwt block with either `secret` or `jwksUrl`',
+    fix: 'Add `security.auth.jwt: { secret: ${env.SITEBOT_JWT_SECRET}, issuer: …, audience: … }`, or relax the mode to `optional`.',
+    rule: 'cross-field/7',
+  })
+}
+
+// ── 8 ───────────────────────────────────────────────────────────────────────
+
+function ruleAuthenticatedToolsNeedAuth(config: SiteBotConfig, errors: ConfigError[]): void {
+  if (config.security.auth.mode !== 'none') return
+
+  config.tools.forEach((entry, index) => {
+    if (entry.scope !== 'authenticated') return
+    const label = isMcpImport(entry) ? `mcp:${entry.id}` : entry.name
+    errors.push({
+      path: `tools[${index}].scope`,
+      message: `Tool "${label}" has scope: authenticated, but security.auth.mode is "none" — there is no verified identity to check against.`,
+      value: 'authenticated',
+      expected: 'security.auth.mode to be "optional" or "required"',
+      fix: 'Set `security.auth.mode: optional` so a signed-in visitor gets the tool and an anonymous one does not, or drop the scope.',
+      rule: 'cross-field/8',
+    })
+  })
+}
+
+// ── 9 ───────────────────────────────────────────────────────────────────────
+
+function ruleSuggestionToolsExist(config: SiteBotConfig, errors: ConfigError[]): void {
+  const configured = new Set<string>()
+  for (const entry of config.tools) {
+    if (!isMcpImport(entry)) configured.add(entry.name)
+  }
+
+  config.ui.messages.suggestions.forEach((suggestion, index) => {
+    if (suggestion.action.type !== 'tool') return
+    const { tool } = suggestion.action
+    if (configured.has(tool)) return
+
+    errors.push({
+      path: `ui.messages.suggestions[${index}].action.tool`,
+      message: `Suggestion action refers to tool "${tool}", which is not configured.`,
+      value: tool,
+      expected:
+        configured.size > 0
+          ? `one of: ${[...configured].join(', ')}`
+          : 'the name of a tool declared in `tools`',
+      fix: `Add a tool named "${tool}" to \`tools\`, or point the suggestion at an existing one.`,
+      // Names imported in bulk from an MCP server are not known until the
+      // server is reached, so a pill pointing at one still fails here. That is
+      // the intended trade — a dead quick-reply pill is a visible bug.
+      suggestion: didYouMean(tool, [...configured]),
+      rule: 'cross-field/9',
+    })
+  })
+}
+
+// ── 10 ──────────────────────────────────────────────────────────────────────
+
+function ruleUiHasNoSecrets(config: SiteBotConfig, errors: ConfigError[]): void {
+  for (const path of findEnvPlaceholders(config.ui, 'ui')) {
+    errors.push({
+      path,
+      message: 'ui must not contain ${env.*} — the whole block is served to the browser.',
+      expected: 'a literal value',
+      fix: 'Move the value out of `ui`. If it is genuinely public, inline it; if it is a secret, it does not belong anywhere the widget can read.',
+      rule: 'cross-field/10',
+    })
+  }
+}
+
+/** Paths under `node` whose string value still holds a `${env.…}` placeholder. */
+function findEnvPlaceholders(node: unknown, path: string): string[] {
+  if (typeof node === 'string') {
+    return containsEnvPlaceholder(node) ? [path] : []
+  }
+  if (Array.isArray(node)) {
+    return node.flatMap((item, index) => findEnvPlaceholders(item, childPath(path, index)))
+  }
+  if (typeof node === 'object' && node !== null) {
+    return Object.entries(node).flatMap(([key, value]) =>
+      findEnvPlaceholders(value, childPath(path, key)),
+    )
+  }
+  return []
+}
+
+// ── additional normative rules ──────────────────────────────────────────────
+
+/** docs/05-tools.md §1: duplicate names are a fatal config error. */
+function ruleToolNamesAreUnique(config: SiteBotConfig, errors: ConfigError[]): void {
+  const seen = new Map<string, number>()
+  config.tools.forEach((entry, index) => {
+    if (isMcpImport(entry)) return
+    const first = seen.get(entry.name)
+    if (first === undefined) {
+      seen.set(entry.name, index)
+      return
+    }
+    errors.push({
+      path: `tools[${index}].name`,
+      message: `Duplicate tool name "${entry.name}" — already defined at tools[${first}].`,
+      value: entry.name,
+      expected: 'a unique tool name',
+      fix: 'Rename one of them. (Redefining a tool by name is only meaningful across an `extends` boundary, where the TS config intentionally overrides the declarative one.)',
+      rule: 'tools/duplicate-name',
+    })
+  })
+}
+
+/** docs/05-tools.md §3 rule 4. */
+function ruleStdioNotAvailableOnEdge(
+  config: SiteBotConfig,
+  context: CrossFieldContext,
+  errors: ConfigError[],
+): void {
+  if (context.target !== 'edge') return
+
+  config.tools.forEach((entry, index) => {
+    const server = isMcpImport(entry)
+      ? entry.server
+      : entry.executor?.type === 'mcp'
+        ? entry.executor.server
+        : undefined
+    if (server?.transport !== 'stdio') return
+
+    errors.push({
+      path: `tools[${index}].server.transport`,
+      message: 'MCP transport "stdio" is not available on the edge runtime.',
+      value: 'stdio',
+      expected: 'http | sse',
+      fix: 'Edge runtimes cannot spawn a child process. Host the MCP server separately and connect over `http`.',
+      rule: 'tools/stdio-on-edge',
+    })
+  })
+}
+
+/** docs/08-security.md §7: `*` alone is rejected. */
+function ruleNoWildcardOrigin(config: SiteBotConfig, errors: ConfigError[]): void {
+  config.security.allowedOrigins.forEach((origin, index) => {
+    if (origin.trim() !== '*') return
+    errors.push({
+      path: `security.allowedOrigins[${index}]`,
+      message: '"*" is not an allowed origin — list the origins that may embed the widget.',
+      value: origin,
+      expected: 'an exact origin, or a single-level wildcard like https://*.acme.com',
+      fix: 'Replace it with the origins you actually serve. An empty list already means same-origin only, which is the safe default.',
+      rule: 'security/wildcard-origin',
+    })
+  })
+}
+
+// ── warnings ────────────────────────────────────────────────────────────────
+
+function warnMcpImportWithoutAllow(
+  config: SiteBotConfig,
+  errors: ConfigError[],
+  warnings: ConfigWarning[],
+): void {
+  config.tools.forEach((entry, index) => {
+    if (!isMcpImport(entry) || entry.allow !== undefined) return
+
+    const path = `tools[${index}].allow`
+    const message = `MCP import "${entry.id}" has no \`allow\` list, so every tool the server exposes is imported.`
+    const fix =
+      'List the tool names you actually want. Without it, a server-side update silently grants the assistant new capabilities.'
+
+    if (config.security.strictTools) {
+      errors.push({
+        path,
+        message,
+        expected: 'an explicit allow list',
+        fix,
+        rule: 'tools/mcp-allow-required',
+      })
+    } else {
+      warnings.push({ path, message, fix, rule: 'tools/mcp-allow-missing' })
+    }
+  })
+}
+
+/**
+ * `name` is the one public field that can legitimately come from the
+ * environment — and env-sourced values are stripped from `PublicConfig`
+ * mechanically (docs/08-security.md §2), so it would silently vanish from the
+ * panel header. Better to say so at load time.
+ */
+function warnPublicFieldFromEnv(
+  _config: SiteBotConfig,
+  context: CrossFieldContext,
+  warnings: ConfigWarning[],
+): void {
+  if (!context.envPaths.includes('name')) return
+  warnings.push({
+    path: 'name',
+    message:
+      '`name` comes from the environment, so it is excluded from the public config and will not reach the widget.',
+    fix: 'Inline the name if it is not a secret; the widget falls back to its built-in title otherwise.',
+    rule: 'public/env-sourced-field',
+  })
+}

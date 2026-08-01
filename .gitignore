@@ -4,6 +4,10 @@ coverage/
 .turbo/
 *.tsbuildinfo
 
+# Generated from the Zod schema during `pnpm build` and published from `files`.
+# Committing it would mean reviewing a 2,600-line diff every time a field moves.
+packages/*/schema/
+
 # local runtime state (sqlite index, sessions)
 .sitebot/
 
