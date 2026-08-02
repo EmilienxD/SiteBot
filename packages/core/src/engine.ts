@@ -36,7 +36,7 @@ import { createLogger } from './telemetry/logger.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
 import { createToolRegistry } from './tools/registry.js'
 import type { HostResolver } from './tools/http.js'
-import type { StdioMcpConnector } from './tools/mcp.js'
+import { McpClientPool, type StdioMcpConnector } from './tools/mcp.js'
 import type {
   ChatRequest,
   Engine,
@@ -73,6 +73,7 @@ export interface EngineDeps {
   now?: () => number
   resolveHost?: HostResolver
   connectStdioMcp?: StdioMcpConnector
+  mcpPool?: McpClientPool
 }
 
 /** How long a `/health` provider check is reused — docs/03-protocol.md §8. */
@@ -111,6 +112,13 @@ export function createEngine(
           now,
         })
       : noopDispatcher)
+  const mcpPool =
+    deps.mcpPool ??
+    new McpClientPool({
+      ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
+      ...(deps.connectStdioMcp === undefined ? {} : { connectStdio: deps.connectStdioMcp }),
+      now,
+    })
 
   const chain = resolveChain(config.backend)
   const debug = config.telemetry.logLevel === 'debug'
@@ -163,7 +171,7 @@ export function createEngine(
       ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
       baseDir: config.$meta.baseDir,
       ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
-      ...(deps.connectStdioMcp === undefined ? {} : { connectStdioMcp: deps.connectStdioMcp }),
+      mcpPool,
     }).build()
 
     const result = await runChain({
@@ -440,6 +448,20 @@ export function createEngine(
         }
       }
 
+      const mcpEntries = config.tools.flatMap((entry) => {
+        if (entry.enabled === false) return []
+        if ('from' in entry) return [{ id: entry.id, server: entry.server }]
+        return entry.executor?.type === 'mcp'
+          ? [{ id: `tool:${entry.name}`, server: entry.executor.server }]
+          : []
+      })
+      await Promise.all(
+        mcpEntries.map(async ({ id, server }) => {
+          const check = await mcpPool.health(id, server)
+          checks[`mcp:${id}`] = { ...check }
+        }),
+      )
+
       // `error` when the provider or storage is unusable, `degraded` when
       // something non-essential is (knowledge and MCP, from Phases 6 and 7).
       const statuses = Object.values(checks).map((check) => check.status)
@@ -461,6 +483,7 @@ export function createEngine(
       await dispatcher.drain()
       await sessionStore.dispose?.()
       await rateLimitStore.dispose?.()
+      await mcpPool.dispose()
     },
   }
 

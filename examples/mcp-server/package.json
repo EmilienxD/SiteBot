@@ -1,0 +1,14 @@
+{
+  "name": "@sitebot/example-mcp-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "start:http": "node server.mjs --http"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.1.8"
+  }
+}

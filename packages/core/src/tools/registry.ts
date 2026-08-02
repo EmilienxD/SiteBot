@@ -5,8 +5,12 @@ import type { RequestContext } from '../types.js'
 import { EngineError } from '../stream/errors.js'
 import { createHttpExecutor } from './http.js'
 import type { HostResolver } from './http.js'
-import { createMcpExecutor, expandMcpImport } from './mcp.js'
-import type { StdioMcpConnector } from './mcp.js'
+import {
+  createMcpExecutor,
+  expandMcpImport,
+  McpClientPool,
+  type StdioMcpConnector,
+} from './mcp.js'
 import { validateJsonSchema, type JsonSchemaObject } from './schema.js'
 
 export interface ToolRegistryOptions {
@@ -16,6 +20,7 @@ export interface ToolRegistryOptions {
   fetchImpl?: typeof fetch
   baseDir?: string | null
   resolveHost?: HostResolver
+  mcpPool?: McpClientPool
   connectStdioMcp?: StdioMcpConnector
   approvals: boolean
   isApprovalGranted?: (toolName: string, input: unknown) => Promise<boolean>
@@ -26,17 +31,27 @@ export interface ToolRegistry {
 }
 
 export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
-  return { build: async () => buildTools(options) }
+  const mcpPool =
+    options.mcpPool ??
+    new McpClientPool({
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      ...(options.connectStdioMcp === undefined
+        ? {}
+        : { connectStdio: options.connectStdioMcp }),
+    })
+  return { build: async () => buildTools({ ...options, mcpPool }) }
 }
 
-async function buildTools(options: ToolRegistryOptions): Promise<ToolSet> {
+type ResolvedToolRegistryOptions = ToolRegistryOptions & { mcpPool: McpClientPool }
+
+async function buildTools(options: ResolvedToolRegistryOptions): Promise<ToolSet> {
   const tools: ToolSet = {}
   for (const entry of options.config.tools) {
     if (isMcpImport(entry)) {
       if (entry.enabled === false || !options.filter(entry)) continue
       if (entry.scope === 'authenticated' && options.ctx.identity === null) continue
       try {
-        for (const definition of await expandMcpImport(entry, options.fetchImpl, options.connectStdioMcp)) {
+        for (const definition of await expandMcpImport(entry, options.mcpPool)) {
           tools[definition.name] = buildMcpTool(definition, entry, options)
         }
       } catch (error) {
@@ -51,7 +66,7 @@ async function buildTools(options: ToolRegistryOptions): Promise<ToolSet> {
   return tools
 }
 
-async function buildTool(entry: Exclude<ToolEntry, { from: 'mcp' }>, options: ToolRegistryOptions): Promise<ToolSet[string]> {
+async function buildTool(entry: Exclude<ToolEntry, { from: 'mcp' }>, options: ResolvedToolRegistryOptions): Promise<ToolSet[string]> {
   const schema = entry.parameters as JsonSchemaObject
   const execute = await resolveExecutor(entry, options)
   const requiresApproval =
@@ -79,7 +94,7 @@ async function buildTool(entry: Exclude<ToolEntry, { from: 'mcp' }>, options: To
   } as unknown as Parameters<typeof tool>[0]) as unknown as ToolSet[string]
 }
 
-async function resolveExecutor(entry: Exclude<ToolEntry, { from: 'mcp' }>, options: ToolRegistryOptions): Promise<((input: unknown, ctx: RequestContext) => Promise<unknown>) | undefined> {
+async function resolveExecutor(entry: Exclude<ToolEntry, { from: 'mcp' }>, options: ResolvedToolRegistryOptions): Promise<((input: unknown, ctx: RequestContext) => Promise<unknown>) | undefined> {
   const executor = entry.executor
   const raw = entry.execute !== undefined
     ? async (input: unknown, ctx: RequestContext) => (entry.execute as (value: unknown, context: RequestContext) => unknown | Promise<unknown>)(input, ctx)
@@ -90,7 +105,7 @@ async function resolveExecutor(entry: Exclude<ToolEntry, { from: 'mcp' }>, optio
       : executor?.type === 'module'
           ? await moduleExecutor(executor.path, executor.export, options.baseDir)
           : executor?.type === 'mcp'
-            ? await createMcpExecutor(entry, options.fetchImpl, options.connectStdioMcp)
+            ? await createMcpExecutor(entry, options.mcpPool)
           : executor?.type === 'client'
             ? undefined
             : undefined
@@ -113,7 +128,7 @@ async function resolveExecutor(entry: Exclude<ToolEntry, { from: 'mcp' }>, optio
 function buildMcpTool(
   definition: Awaited<ReturnType<typeof expandMcpImport>>[number],
   entry: Extract<ToolEntry, { from: 'mcp' }>,
-  options: ToolRegistryOptions,
+  options: ResolvedToolRegistryOptions,
 ): ToolSet[string] {
   const requiresApproval =
     options.approvals &&

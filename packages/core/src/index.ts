@@ -108,6 +108,16 @@ export { ApprovalError, MemoryApprovalStore, argumentHash } from './tools/approv
 export type { ApprovalCheckpoint, ApprovalDecision, ApprovalResolution } from './tools/approvals.js'
 export { lintTools } from './tools/lint.js'
 export type { ToolLintFinding, ToolLintSeverity } from './tools/lint.js'
+export { McpClientPool } from './tools/mcp.js'
+export type {
+  McpClientPoolOptions,
+  McpConnection,
+  McpConnector,
+  McpHealthCheck,
+  McpServer,
+  StdioMcpConnector,
+  StdioServer,
+} from './tools/mcp.js'
 
 // ── telemetry ───────────────────────────────────────────────────────────────
 
