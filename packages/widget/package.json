@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@preact/signals": "^2.10.1",
+    "ai": "^6.0.240",
     "preact": "^10.29.8"
   },
   "devDependencies": {

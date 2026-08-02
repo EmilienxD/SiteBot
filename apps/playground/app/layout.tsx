@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
-import { DevConsole } from './dev-console'
+import { SiteBotWidget } from './sitebot-widget'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -11,9 +11,7 @@ export const metadata: Metadata = {
 /**
  * The demo site's shell.
  *
- * Phase 4 adds the widget's `<script>` tag here and deletes `<DevConsole/>`.
- * Until then the console is how a browser can exercise the endpoint, and the
- * page content below is what page-context extraction will be measured against.
+ * The real Phase 4 widget runs against the production-shaped endpoint.
  */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
@@ -36,7 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             exists so the assistant has something real to be wrong about.
           </div>
         </footer>
-        <DevConsole />
+        <SiteBotWidget />
       </body>
     </html>
   )

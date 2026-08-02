@@ -22,6 +22,7 @@ export default defineConfig({
       formats: ['iife', 'es'],
       fileName: (format) => (format === 'iife' ? 'sitebot.js' : 'sitebot.mjs'),
     },
+    rollupOptions: { output: { inlineDynamicImports: true } },
     // Preact is bundled rather than externalised — the script tag has to be
     // self-contained. It costs ~6 kB of the 25 kB budget. Code splitting stays
     // on so the panel can be a lazy chunk (docs/07-widget.md §1).

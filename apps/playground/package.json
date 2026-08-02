@@ -14,6 +14,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.104",
     "@sitebot/config": "workspace:*",
+    "@sitebot/react": "workspace:*",
     "@sitebot/server": "workspace:*",
     "next": "^16.2.12",
     "react": "^19.2.8",

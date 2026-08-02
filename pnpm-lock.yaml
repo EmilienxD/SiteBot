@@ -59,6 +59,9 @@ importers:
       '@sitebot/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@sitebot/react':
+        specifier: workspace:*
+        version: link:../../packages/react
       '@sitebot/server':
         specifier: workspace:*
         version: link:../../packages/server
@@ -255,6 +258,9 @@ importers:
       '@preact/signals':
         specifier: ^2.10.1
         version: 2.10.1(preact@10.29.8)
+      ai:
+        specifier: ^6.0.240
+        version: 6.0.240(zod@4.4.3)
       preact:
         specifier: ^10.29.8
         version: 10.29.8
