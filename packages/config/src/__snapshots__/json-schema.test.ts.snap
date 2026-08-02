@@ -228,6 +228,32 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
           "description": "For provider: custom — path to a module exporting a LanguageModel factory, e.g. ./providers/x.ts#factory",
           "type": "string",
         },
+        "pricing": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "inputUsdPerMillion": {
+                "minimum": 0,
+                "type": "number",
+              },
+              "outputUsdPerMillion": {
+                "minimum": 0,
+                "type": "number",
+              },
+            },
+            "required": [
+              "inputUsdPerMillion",
+              "outputUsdPerMillion",
+            ],
+            "type": "object",
+          },
+          "default": {},
+          "description": "Per-model USD prices keyed by provider:model; overrides the shipped table.",
+          "propertyNames": {
+            "type": "string",
+          },
+          "type": "object",
+        },
         "provider": {
           "description": "Model provider.",
           "enum": [
@@ -929,6 +955,7 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
                 },
                 "jwksUrl": {
                   "description": "For RS*/ES* verification.",
+                  "format": "uri",
                   "type": "string",
                 },
                 "maxTokenAgeSeconds": {
@@ -1135,6 +1162,11 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
                 "memory",
                 "redis",
               ],
+              "type": "string",
+            },
+            "url": {
+              "description": "Redis URL. Defaults to storage.url.",
+              "minLength": 1,
               "type": "string",
             },
           },

@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { RateLimitRuleSchema } from './primitives.js'
 import { BackendEntrySchema } from './backend.js'
+import { RateLimitRuleSchema } from './primitives.js'
 
 export const AUTH_MODES = ['none', 'optional', 'required'] as const
 export const JWT_ALGORITHMS = [
@@ -24,28 +24,35 @@ export const RateLimitSchema = z.strictObject({
     .enum(RATE_LIMIT_STORES)
     .default('memory')
     .describe('memory is single-process only — use redis for multi-replica.'),
+  url: z.string().min(1).optional().describe('Redis URL. Defaults to storage.url.'),
 })
 
-export const BudgetSchema = z.strictObject({
-  maxTokensPerSession: z.number().int().positive().optional(),
-  maxTokensPerDay: z.number().int().positive().optional(),
-  maxUsdPerDay: z.number().positive().optional(),
-  onExceeded: z.enum(BUDGET_ACTIONS).default('message'),
-  degradeTo: BackendEntrySchema.optional().describe(
-    'Cheaper model to switch to when onExceeded is `degrade`.',
-  ),
-  resetHourUtc: z.number().int().min(0).max(23).default(0),
-})
+export const BudgetSchema = z
+  .strictObject({
+    maxTokensPerSession: z.number().int().positive().optional(),
+    maxTokensPerDay: z.number().int().positive().optional(),
+    maxUsdPerDay: z.number().positive().optional(),
+    onExceeded: z.enum(BUDGET_ACTIONS).default('message'),
+    degradeTo: BackendEntrySchema.optional().describe(
+      'Cheaper model to switch to when onExceeded is `degrade`.',
+    ),
+    resetHourUtc: z.number().int().min(0).max(23).default(0),
+  })
+  .check((ctx) => {
+    if (ctx.value.onExceeded === 'degrade' && ctx.value.degradeTo === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        path: ['degradeTo'],
+        message: 'budget.onExceeded "degrade" requires budget.degradeTo.',
+      })
+    }
+  })
 
-/**
- * docs/08-security.md §3. `maxTokenAgeSeconds` is enforced independently of
- * `exp` so a host site that mints ten-year tokens does not accidentally create
- * a permanent bearer token.
- */
 export const JwtSchema = z
   .strictObject({
     secret: z.string().optional().describe('HS* shared secret. Use ${env.*}.'),
-    jwksUrl: z.string().optional().describe('For RS*/ES* verification.'),
+    jwksUrl: z.string().url().optional().describe('For RS*/ES* verification.'),
     algorithm: z.enum(JWT_ALGORITHMS).default('HS256'),
     issuer: z.string().optional(),
     audience: z.string().optional(),
@@ -57,12 +64,37 @@ export const JwtSchema = z
     clockToleranceSeconds: z.number().int().min(0).default(60),
   })
   .check((ctx) => {
-    if (ctx.value.secret === undefined && ctx.value.jwksUrl === undefined) {
+    const symmetric = ctx.value.algorithm.startsWith('HS')
+    if (symmetric && ctx.value.secret === undefined) {
       ctx.issues.push({
         code: 'custom',
         input: ctx.value,
         path: ['secret'],
-        message: 'JWT verification needs either `secret` (HS*) or `jwksUrl` (RS*/ES*).',
+        message: `${ctx.value.algorithm} requires jwt.secret.`,
+      })
+    }
+    if (!symmetric && ctx.value.jwksUrl === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        path: ['jwksUrl'],
+        message: `${ctx.value.algorithm} requires jwt.jwksUrl.`,
+      })
+    }
+    if (symmetric && ctx.value.jwksUrl !== undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        path: ['jwksUrl'],
+        message: `${ctx.value.algorithm} cannot use jwt.jwksUrl.`,
+      })
+    }
+    if (!symmetric && ctx.value.secret !== undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        input: ctx.value,
+        path: ['secret'],
+        message: `${ctx.value.algorithm} cannot use jwt.secret.`,
       })
     }
   })

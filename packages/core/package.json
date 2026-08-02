@@ -5,7 +5,8 @@
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "pricing.json"
   ],
   "exports": {
     ".": {
@@ -28,6 +29,7 @@
         "default": "./dist/node/index.cjs"
       }
     },
+    "./pricing.json": "./pricing.json",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
@@ -42,6 +44,8 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sitebot/config": "workspace:*",
     "ai": "^6.0.240",
+    "jose": "^6.2.7",
+    "redis": "^6.2.0",
     "undici": "^5.29.0",
     "zod": "^4.1.8"
   },

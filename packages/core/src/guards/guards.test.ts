@@ -274,6 +274,7 @@ describe('runGuards ordering (docs/04 §8)', () => {
   it('passes a well-formed request', async () => {
     await expect(runGuards(input(), deps())).resolves.toEqual({
       identity: null,
+      budget: 'ok',
       allowOrigin: 'https://acme.com',
     })
   })

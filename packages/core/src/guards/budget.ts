@@ -1,25 +1,36 @@
 import type { Budget } from '@sitebot/config'
-import type { BudgetTracker, TokenUsage } from '../types.js'
+import defaultPricing from '../../pricing.json'
+import type { BudgetTracker, Logger, TokenUsage } from '../types.js'
+import type { RateLimitStore } from './rate-limit.js'
 
-/**
- * Budgets — docs/04-providers-and-engine.md §8, docs/08-security.md §8.
- *
- * Enforcement (pricing table, daily counters in the rate-limit store,
- * `degrade`/`message`/`error`) is Phase 8. What exists now is a tracker that
- * accumulates real usage in memory and always answers `ok`, so that
- * `RequestContext.budget` is a live object from the first phase that has one
- * and tool executors written in Phase 5 do not have to guess at the shape.
- */
+export interface ModelPrice {
+  inputUsdPerMillion: number
+  outputUsdPerMillion: number
+}
+
+export type PricingTable = Record<string, ModelPrice>
 
 export interface BudgetTrackerOptions {
   budget?: Budget
-  /** Called when a limit would have been hit. Phase 8 replaces this wholesale. */
-  onWouldExceed?: (which: 'session' | 'day') => void
+  sessionId?: string
+  store?: RateLimitStore
+  pricing?: PricingTable
+  logger?: Logger
+  now?: () => number
 }
+
+const warnedModels = new Set<string>()
 
 export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetTracker {
   const zero = () => ({ tokens: 0, usd: 0 })
   const calls = new Map<string, number>()
+  const now = options.now ?? (() => Date.now())
+  const pricing = { ...(defaultPricing as PricingTable), ...options.pricing }
+  const sessionKey = `budget:session:${options.sessionId ?? 'anonymous'}`
+  const day = dayBucket(now(), options.budget?.resetHourUtc ?? 0)
+  const dayKey = `budget:day:${day.id}`
+  let loaded = false
+
   const tracker: BudgetTracker = {
     session: zero(),
     day: zero(),
@@ -30,22 +41,93 @@ export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetT
       return count - 1
     },
 
-    check(estimateTokens: number) {
-      const limit = options.budget?.maxTokensPerSession
-      if (limit !== undefined && tracker.session.tokens + estimateTokens > limit) {
-        options.onWouldExceed?.('session')
-      }
-      // Always `ok` until Phase 8: reporting `block` without the daily counters
-      // and the reset boundary behind it would enforce a limit inconsistently
-      // across replicas, which is worse than not enforcing it yet.
-      return 'ok'
+    async check(estimateTokens, modelId) {
+      await load()
+      const estimatedUsd =
+        modelId === undefined
+          ? 0
+          : costOf(
+              { inputTokens: estimateTokens, outputTokens: 0, totalTokens: estimateTokens },
+              modelId,
+              pricing,
+              options.logger,
+            )
+      const budget = options.budget
+      const exceeded =
+        (budget?.maxTokensPerSession !== undefined &&
+          tracker.session.tokens + estimateTokens > budget.maxTokensPerSession) ||
+        (budget?.maxTokensPerDay !== undefined &&
+          tracker.day.tokens + estimateTokens > budget.maxTokensPerDay) ||
+        (budget?.maxUsdPerDay !== undefined && tracker.day.usd + estimatedUsd > budget.maxUsdPerDay)
+
+      if (!exceeded) return 'ok'
+      return budget?.onExceeded === 'degrade' && budget.degradeTo !== undefined
+        ? 'degrade'
+        : 'block'
     },
 
-    async record(usage: TokenUsage) {
-      tracker.session.tokens += usage.totalTokens
-      tracker.day.tokens += usage.totalTokens
+    async record(usage, modelId) {
+      await load()
+      const delta = {
+        tokens: usage.totalTokens,
+        usd: costOf(usage, modelId, pricing, options.logger),
+      }
+      tracker.session = await add(sessionKey, delta, 30 * 24 * 60 * 60 * 1000)
+      tracker.day = await add(dayKey, delta, day.ttlMs)
     },
   }
 
+  async function load(): Promise<void> {
+    if (loaded) return
+    loaded = true
+    tracker.session = await get(sessionKey)
+    tracker.day = await get(dayKey)
+  }
+
+  async function get(key: string): Promise<{ tokens: number; usd: number }> {
+    return options.store?.getUsage?.(key) ?? zero()
+  }
+
+  async function add(
+    key: string,
+    delta: { tokens: number; usd: number },
+    ttlMs: number,
+  ): Promise<{ tokens: number; usd: number }> {
+    if (options.store?.addUsage !== undefined) return options.store.addUsage(key, delta, ttlMs)
+    const current = key === sessionKey ? tracker.session : tracker.day
+    return { tokens: current.tokens + delta.tokens, usd: current.usd + delta.usd }
+  }
+
   return tracker
+}
+
+function costOf(
+  usage: TokenUsage,
+  modelId: string,
+  pricing: PricingTable,
+  logger?: Logger,
+): number {
+  const price = pricing[modelId]
+  if (price === undefined) {
+    if (!warnedModels.has(modelId)) {
+      warnedModels.add(modelId)
+      logger?.warn('no pricing entry for model; USD budgets are token-only for it', {
+        model: modelId,
+      })
+    }
+    return 0
+  }
+  return (
+    (usage.inputTokens * price.inputUsdPerMillion +
+      usage.outputTokens * price.outputUsdPerMillion) /
+    1_000_000
+  )
+}
+
+function dayBucket(time: number, resetHourUtc: number): { id: string; ttlMs: number } {
+  const shifted = time - resetHourUtc * 60 * 60 * 1000
+  const date = new Date(shifted)
+  const id = date.toISOString().slice(0, 10)
+  const next = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1)
+  return { id, ttlMs: Math.max(1, next - shifted) }
 }

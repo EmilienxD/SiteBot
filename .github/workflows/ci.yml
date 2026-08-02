@@ -45,5 +45,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Security test
+        run: pnpm test:security
+
       - name: Bundle size
         run: pnpm size

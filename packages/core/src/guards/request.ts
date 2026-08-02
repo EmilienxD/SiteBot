@@ -93,15 +93,30 @@ export function parseChatRequest(body: unknown): ChatRequest {
     request.trigger = raw.trigger
   }
   if (raw.resume !== undefined) {
-    if (typeof raw.resume !== 'object' || raw.resume === null) throw new EngineError('invalid_request', { detail: 'resume must be an object' })
+    if (typeof raw.resume !== 'object' || raw.resume === null)
+      throw new EngineError('invalid_request', { detail: 'resume must be an object' })
     const resume = raw.resume as Record<string, unknown>
-    if (typeof resume.runId !== 'string' || resume.runId === '') throw new EngineError('invalid_request', { detail: 'resume.runId is required' })
+    if (typeof resume.runId !== 'string' || resume.runId === '')
+      throw new EngineError('invalid_request', { detail: 'resume.runId is required' })
     const parsed: ChatRequest['resume'] = { runId: resume.runId }
     if (Array.isArray(resume.approvals)) {
-      parsed.approvals = resume.approvals.filter((item): item is { approvalId: string; decision: 'approve' | 'deny' } => typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).approvalId === 'string' && ((item as Record<string, unknown>).decision === 'approve' || (item as Record<string, unknown>).decision === 'deny'))
+      parsed.approvals = resume.approvals.filter(
+        (item): item is { approvalId: string; decision: 'approve' | 'deny' } =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as Record<string, unknown>).approvalId === 'string' &&
+          ((item as Record<string, unknown>).decision === 'approve' ||
+            (item as Record<string, unknown>).decision === 'deny'),
+      )
     }
     if (Array.isArray(resume.clientToolResults)) {
-      parsed.clientToolResults = resume.clientToolResults.filter((item): item is { toolCallId: string; output: unknown } => typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).toolCallId === 'string' && 'output' in (item as Record<string, unknown>))
+      parsed.clientToolResults = resume.clientToolResults.filter(
+        (item): item is { toolCallId: string; output: unknown } =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as Record<string, unknown>).toolCallId === 'string' &&
+          'output' in (item as Record<string, unknown>),
+      )
     }
     request.resume = parsed
   }
@@ -131,7 +146,7 @@ export function compileBlockedPatterns(patterns: readonly string[]): RegExp[] {
   const compiled: RegExp[] = []
   for (const source of patterns) {
     try {
-      compiled.push(new RegExp(source, 'i'))
+      compiled.push(new RegExp(source.startsWith('(?i)') ? source.slice(4) : source, 'i'))
     } catch {
       // Reported by `sitebot validate`; ignored here.
     }

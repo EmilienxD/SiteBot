@@ -1,0 +1,9 @@
+{
+  "openai:gpt-4o-mini": { "inputUsdPerMillion": 0.15, "outputUsdPerMillion": 0.6 },
+  "openai:gpt-4o": { "inputUsdPerMillion": 2.5, "outputUsdPerMillion": 10 },
+  "anthropic:claude-haiku-4-5-20251001": {
+    "inputUsdPerMillion": 1,
+    "outputUsdPerMillion": 5
+  },
+  "google:gemini-2.0-flash": { "inputUsdPerMillion": 0.1, "outputUsdPerMillion": 0.4 }
+}

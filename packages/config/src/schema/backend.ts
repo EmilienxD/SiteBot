@@ -97,9 +97,18 @@ const BackendEntryShape = {
 
 export const BackendEntrySchema = z.strictObject(BackendEntryShape)
 
+export const ModelPricingSchema = z.strictObject({
+  inputUsdPerMillion: z.number().nonnegative(),
+  outputUsdPerMillion: z.number().nonnegative(),
+})
+
 export const BackendSchema = z
   .strictObject({
     ...BackendEntryShape,
+    pricing: z
+      .record(z.string(), ModelPricingSchema)
+      .default({})
+      .describe('Per-model USD prices keyed by provider:model; overrides the shipped table.'),
     fallback: z
       .array(BackendEntrySchema)
       .default([])
@@ -111,3 +120,4 @@ export const BackendSchema = z
 
 export type BackendEntry = z.output<typeof BackendEntrySchema>
 export type Backend = z.output<typeof BackendSchema>
+export type ModelPricing = z.output<typeof ModelPricingSchema>

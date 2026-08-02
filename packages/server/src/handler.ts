@@ -1,10 +1,12 @@
 import type { ResolvedConfig } from '@sitebot/config'
+import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import {
   checkContentLength,
   checkPublicKey,
   createBudgetTracker,
   createEngine,
   createEventDispatcher,
+  createJwtVerifier,
   createLogger,
   EngineError,
   errorResponse,
@@ -12,6 +14,7 @@ import {
   MemoryRateLimitStore,
   noopDispatcher,
   parseChatRequest,
+  redactPiiMessages,
   runGuards,
   type Engine,
   type EngineDeps,
@@ -111,7 +114,22 @@ export function createSiteBotHandler(
   // One rate-limit store for the whole deployment: the guards here and any
   // future budget accounting in the engine must agree on the counters, and two
   // stores would silently double every limit.
-  const rateLimitStore = options.rateLimitStore ?? new MemoryRateLimitStore()
+  const rateLimitStore =
+    options.rateLimitStore ??
+    (config.security.rateLimit.store === 'memory'
+      ? new MemoryRateLimitStore()
+      : (() => {
+          throw new EngineError('not_ready', {
+            detail: 'rateLimit.store is redis but no Redis rate-limit store was supplied',
+          })
+        })())
+  const verifier =
+    options.verifier ??
+    (config.security.auth.jwt === undefined
+      ? undefined
+      : createJwtVerifier({
+          ...(options.deps?.fetchImpl === undefined ? {} : { fetchImpl: options.deps.fetchImpl }),
+        }))
 
   const dispatcher: EventDispatcher =
     config.telemetry.enabled && config.telemetry.events.webhook !== undefined
@@ -145,10 +163,18 @@ export function createSiteBotHandler(
     checkContentLength(request.headers.get('content-length'), security.maxRequestBytes)
     const raw = await readBodyWithLimit(request, security.maxRequestBytes)
     const chatRequest = parseChatRequest(parseJsonBody(raw))
+    const token = extractToken(request, chatRequest.auth)
+    const budget = createBudgetTracker({
+      budget: security.budget,
+      sessionId: chatRequest.sessionId,
+      store: rateLimitStore,
+      pricing: config.backend.pricing,
+      logger,
+    })
 
     const ip = resolveClientIp(request.headers, security.trustProxy, info.clientIp)
 
-    const { identity } = await runGuards(
+    const guarded = await runGuards(
       {
         config,
         origin: request.headers.get('origin'),
@@ -156,37 +182,103 @@ export function createSiteBotHandler(
         ip,
         sessionId: chatRequest.sessionId,
         messages: chatRequest.messages,
-        token: extractToken(request, chatRequest.auth),
+        token,
         selfOrigin: selfOriginOf(request),
       },
       {
         rateLimitStore,
+        budget,
         logger,
-        ...(options.verifier === undefined ? {} : { verifier: options.verifier }),
+        ...(verifier === undefined ? {} : { verifier }),
       },
     )
+
+    if (guarded.budget !== 'ok') {
+      dispatcher.emit(
+        'budget_exceeded',
+        { action: security.budget.onExceeded, decision: guarded.budget },
+        { sessionId: chatRequest.sessionId },
+      )
+      logger.error('budget exceeded', {
+        sessionId: chatRequest.sessionId,
+        action: security.budget.onExceeded,
+      })
+    }
+    if (guarded.budget === 'block') {
+      if (security.budget.onExceeded === 'error') throw new EngineError('budget_exceeded')
+      return budgetMessageResponse(cors)
+    }
+
+    await engine.bindSessionIdentity?.(
+      chatRequest.sessionId,
+      guarded.identity === null ? null : token,
+      await requestFingerprint(request, ip),
+    )
+
+    const safeRequest = {
+      ...chatRequest,
+      messages:
+        security.redactPii && security.piiPatterns.length > 0
+          ? redactPiiMessages(chatRequest.messages, security.piiPatterns)
+          : chatRequest.messages,
+    }
 
     const requestId = newRequestId()
     const ctx: RequestContext = {
       requestId,
       sessionId: chatRequest.sessionId,
-      identity,
+      identity: guarded.identity,
       pageContext: config.prompt.includePageContext ? (chatRequest.pageContext ?? null) : null,
       origin: request.headers.get('origin') ?? selfOriginOf(request) ?? '',
       locale: resolveLocale(request.headers, config.ui.locale),
       ip,
       signal: request.signal,
       logger: logger.child({ requestId, sessionId: chatRequest.sessionId }),
-      budget: createBudgetTracker({ budget: security.budget }),
+      budget,
     }
 
-    const response = await engine.handleChat(chatRequest, ctx)
+    const response = await engine.handleChat(safeRequest, ctx)
     return withHeaders(response, {
       ...cors,
       'x-sitebot-request-id': requestId,
       // docs/03 §11: defeat nginx and Cloudflare buffering of the SSE body.
       'x-accel-buffering': 'no',
     })
+  }
+
+  function budgetMessageResponse(cors: Record<string, string>): Response {
+    const id = 'budget-message'
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: 'text-start', id })
+        writer.write({
+          type: 'text-delta',
+          id,
+          delta: 'The assistant has reached its usage limit for now. Please try again later.',
+        })
+        writer.write({ type: 'text-end', id })
+      },
+    })
+    return withHeaders(createUIMessageStreamResponse({ stream }), cors)
+  }
+
+  async function requestFingerprint(request: Request, ip: string | null): Promise<string> {
+    const origin = request.headers.get('origin') ?? selfOriginOf(request) ?? ''
+    const userAgent = request.headers.get('user-agent') ?? ''
+    const digest = await globalThis.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(userAgent),
+    )
+    const userAgentHash = Array.from(new Uint8Array(digest).slice(0, 8), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('')
+    return `${coarseIp(ip)}|${origin}|${userAgentHash}`
+  }
+
+  function coarseIp(ip: string | null): string {
+    if (ip === null) return 'unknown'
+    if (ip.includes(':')) return ip.split(':').slice(0, 4).join(':')
+    return ip.split('.').slice(0, 3).join('.')
   }
 
   /**

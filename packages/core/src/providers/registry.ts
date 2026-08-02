@@ -60,7 +60,7 @@ export const BACKEND_ENTRY_DEFAULTS = {
  * Element 0 is always the primary.
  */
 export function resolveChain(backend: Backend): BackendEntry[] {
-  const { fallback, ...primary } = backend
+  const { fallback, pricing: _pricing, ...primary } = backend
   return [primary, ...fallback.map((entry) => inherit(entry, primary))]
 }
 

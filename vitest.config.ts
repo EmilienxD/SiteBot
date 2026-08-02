@@ -11,6 +11,7 @@ const nodeProject = (name: string) => ({
     root: `./packages/${name}`,
     environment: 'node' as const,
     include: ['src/**/*.test.ts'],
+    exclude: ['src/**/*.security.test.ts', 'src/**/*.live.test.ts'],
   },
 })
 
@@ -28,6 +29,7 @@ export default defineConfig({
           root: './packages/widget',
           environment: 'jsdom',
           include: ['src/**/*.test.{ts,tsx}'],
+          exclude: ['src/**/*.security.test.{ts,tsx}', 'src/**/*.live.test.{ts,tsx}'],
         },
       },
       {
@@ -36,6 +38,7 @@ export default defineConfig({
           root: './packages/react',
           environment: 'jsdom',
           include: ['src/**/*.test.{ts,tsx}'],
+          exclude: ['src/**/*.security.test.{ts,tsx}', 'src/**/*.live.test.{ts,tsx}'],
         },
       },
       {
@@ -44,6 +47,27 @@ export default defineConfig({
           name: 'boundaries',
           include: ['test/**/*.test.ts'],
           environment: 'node',
+        },
+      },
+      {
+        test: {
+          name: 'security-node',
+          include: [
+            'packages/config/src/**/*.security.test.ts',
+            'packages/cli/src/**/*.security.test.ts',
+            'packages/core/src/**/*.security.test.ts',
+            'packages/server/src/**/*.security.test.ts',
+            'packages/core/src/tools.test.ts',
+            'packages/config/src/public.test.ts',
+          ],
+          environment: 'node',
+        },
+      },
+      {
+        test: {
+          name: 'security-widget',
+          include: ['packages/widget/src/**/*.security.test.tsx'],
+          environment: 'jsdom',
         },
       },
       {

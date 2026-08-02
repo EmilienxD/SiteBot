@@ -76,7 +76,7 @@ export interface BudgetTracker {
   session: { tokens: number; usd: number }
   day: { tokens: number; usd: number }
   toolCalls(name?: string): Promise<number>
-  check(estimateTokens: number): 'ok' | 'degrade' | 'block'
+  check(estimateTokens: number, modelId?: string): Promise<'ok' | 'degrade' | 'block'>
   record(usage: TokenUsage, modelId: string): Promise<void>
 }
 
@@ -111,6 +111,8 @@ export interface HealthReport {
 
 export interface Engine {
   handleChat(req: ChatRequest, ctx: RequestContext): Promise<Response>
+  /** Bind a verified bearer token to a session, resetting on identity switches. */
+  bindSessionIdentity?(sessionId: string, token: string | null, fingerprint?: string): Promise<void>
   getPublicConfig(): PublicConfig
   health(): Promise<HealthReport>
   dispose(): Promise<void>

@@ -11,8 +11,9 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "test": "vitest run --project=!live",
-    "test:watch": "vitest --project=!live",
+    "test": "vitest run --project=!live --project=!security-*",
+    "test:security": "vitest run --project=security-*",
+    "test:watch": "vitest --project=!live --project=!security-*",
     "test:live": "vitest run --project=live",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

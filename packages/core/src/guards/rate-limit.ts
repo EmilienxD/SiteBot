@@ -48,6 +48,12 @@ export interface RateLimitResult {
 export interface RateLimitStore {
   /** Record one hit against `key` and report whether it was within the rule. */
   hit(key: string, rule: RateLimitRule): Promise<RateLimitResult>
+  getUsage?(key: string): Promise<{ tokens: number; usd: number }>
+  addUsage?(
+    key: string,
+    delta: { tokens: number; usd: number },
+    ttlMs: number,
+  ): Promise<{ tokens: number; usd: number }>
   dispose?(): Promise<void>
 }
 
@@ -71,6 +77,7 @@ export interface MemoryRateLimitStoreOptions {
  */
 export class MemoryRateLimitStore implements RateLimitStore {
   private readonly hits = new Map<string, number[]>()
+  private readonly usage = new Map<string, { tokens: number; usd: number; expiresAt: number }>()
   private readonly now: () => number
   private readonly maxKeys: number
 
@@ -123,6 +130,31 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   async dispose(): Promise<void> {
     this.hits.clear()
+    this.usage.clear()
+  }
+
+  async getUsage(key: string): Promise<{ tokens: number; usd: number }> {
+    const current = this.usage.get(key)
+    if (current === undefined || current.expiresAt <= this.now()) {
+      this.usage.delete(key)
+      return { tokens: 0, usd: 0 }
+    }
+    return { tokens: current.tokens, usd: current.usd }
+  }
+
+  async addUsage(
+    key: string,
+    delta: { tokens: number; usd: number },
+    ttlMs: number,
+  ): Promise<{ tokens: number; usd: number }> {
+    const current = await this.getUsage(key)
+    const next = {
+      tokens: current.tokens + delta.tokens,
+      usd: current.usd + delta.usd,
+      expiresAt: this.now() + ttlMs,
+    }
+    this.usage.set(key, next)
+    return { tokens: next.tokens, usd: next.usd }
   }
 
   /** Test/introspection helper. Not part of the `RateLimitStore` contract. */

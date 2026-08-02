@@ -1,5 +1,6 @@
 import {
   convertToModelMessages,
+  createUIMessageStream,
   createUIMessageStreamResponse,
   generateId,
   streamText,
@@ -151,6 +152,7 @@ export function createEngine(
     ctx: RequestContext,
     session: Awaited<ReturnType<SessionStore['get']>>,
     resumeRunId?: string,
+    activeChain = chain,
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
     const policy = resolvePolicy(config)
     const runId = resumeRunId ?? `r_${generateId()}`
@@ -175,7 +177,7 @@ export function createEngine(
     }).build()
 
     const result = await runChain({
-      entries: chain,
+      entries: activeChain,
       onFallback: (event) => {
         // Silent degradation is a bug — docs/04 §3 rule 6.
         ctx.logger.warn('provider fallback', { ...event })
@@ -252,30 +254,30 @@ export function createEngine(
         })
 
         const uiStream = streamed.toUIMessageStream<UIMessage>({
-            originalMessages,
-            sendReasoning: config.ui.behaviour.showReasoning,
-            onError: (error) => mapError(error, errorOptions).message,
-            onFinish: async ({ responseMessage }) => {
-              if (responseMessage.id === '' && responseMessage.parts.length === 0) return
-              const current =
-                (await sessionStore.get(ctx.sessionId)) ??
-                ({
-                  id: ctx.sessionId,
-                  messages: [],
-                  createdAt: now(),
-                  updatedAt: now(),
-                } satisfies NonNullable<typeof session>)
-              const messages = replaceOrAppend(current.messages, responseMessage)
-              const next = { ...current, messages }
-              const pending = pendingRun(responseMessage, runId, now())
-              if (pending === null) {
-                if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
-                else await sessionStore.set(next)
-              } else {
-                await savePendingRun(sessionStore, next, pending)
-              }
-            },
-          }) as ReadableStream<UIMessageChunk>
+          originalMessages,
+          sendReasoning: config.ui.behaviour.showReasoning,
+          onError: (error) => mapError(error, errorOptions).message,
+          onFinish: async ({ responseMessage }) => {
+            if (responseMessage.id === '' && responseMessage.parts.length === 0) return
+            const current =
+              (await sessionStore.get(ctx.sessionId)) ??
+              ({
+                id: ctx.sessionId,
+                messages: [],
+                createdAt: now(),
+                updatedAt: now(),
+              } satisfies NonNullable<typeof session>)
+            const messages = replaceOrAppend(current.messages, responseMessage)
+            const next = { ...current, messages }
+            const pending = pendingRun(responseMessage, runId, now())
+            if (pending === null) {
+              if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
+              else await sessionStore.set(next)
+            } else {
+              await savePendingRun(sessionStore, next, pending)
+            }
+          },
+        }) as ReadableStream<UIMessageChunk>
 
         const stream = await awaitFirstOutput(
           annotateAgentStream(uiStream, { runId, clientTools, config }),
@@ -338,6 +340,24 @@ export function createEngine(
               maxOutputTokens: config.backend.maxOutputTokens,
             }),
           })
+          const estimatedTokens =
+            estimateTokens(composed.text) +
+            Math.ceil(JSON.stringify(truncated.messages).length / 4) +
+            config.backend.maxOutputTokens
+          const budgetDecision = await ctx.budget.check(
+            estimatedTokens,
+            `${config.backend.provider}:${config.backend.model}`,
+          )
+          if (budgetDecision === 'block') {
+            if (config.security.budget.onExceeded === 'message') {
+              return budgetMessageResponse(ctx.requestId)
+            }
+            throw new EngineError('budget_exceeded')
+          }
+          const selectedChain =
+            budgetDecision === 'degrade' && config.security.budget.degradeTo !== undefined
+              ? [config.security.budget.degradeTo]
+              : chain
           if (truncated.dropped > 0) {
             ctx.logger.debug('history truncated', {
               dropped: truncated.dropped,
@@ -358,6 +378,7 @@ export function createEngine(
             ctx,
             session,
             resumeRunId,
+            selectedChain,
           )
           span.setAttribute('sitebot.model', modelId)
 
@@ -384,6 +405,76 @@ export function createEngine(
         )
         return errorResponse(error, errorOptions)
       }
+    },
+
+    async bindSessionIdentity(
+      sessionId: string,
+      token: string | null,
+      fingerprint?: string,
+    ): Promise<void> {
+      if (config.storage.type === 'none') return
+      let existing = await sessionStore.get(sessionId)
+      const oldHash = existing?.state?.authTokenHash
+
+      if (
+        existing?.fingerprint !== undefined &&
+        fingerprint !== undefined &&
+        existing.fingerprint !== fingerprint
+      ) {
+        if (typeof oldHash === 'string') await sessionStore.delete(authOwnerKey(oldHash))
+        await sessionStore.delete(sessionId)
+        existing = null
+      }
+
+      if (token === null) {
+        if (typeof oldHash === 'string') {
+          await sessionStore.delete(authOwnerKey(oldHash))
+          await sessionStore.delete(sessionId)
+          existing = null
+        }
+        if (existing === null && fingerprint !== undefined) {
+          await sessionStore.set({
+            id: sessionId,
+            messages: [],
+            createdAt: now(),
+            updatedAt: now(),
+            fingerprint,
+          })
+        }
+        return
+      }
+
+      const tokenHash = await hashToken(token)
+      const owner = await sessionStore.get(authOwnerKey(tokenHash))
+      const ownerSession = owner?.state?.sessionId
+      if (typeof ownerSession === 'string' && ownerSession !== sessionId) {
+        throw new EngineError('auth_required', {
+          detail: 'the verified token is already bound to a different session',
+        })
+      }
+      if (typeof oldHash === 'string' && oldHash !== tokenHash) {
+        await sessionStore.delete(authOwnerKey(oldHash))
+        await sessionStore.delete(sessionId)
+        existing = null
+      }
+      const session = existing ?? {
+        id: sessionId,
+        messages: [],
+        createdAt: now(),
+        updatedAt: now(),
+      }
+      await sessionStore.set({
+        ...session,
+        ...(fingerprint === undefined ? {} : { fingerprint }),
+        state: { ...(session.state ?? {}), authTokenHash: tokenHash },
+      })
+      await sessionStore.set({
+        id: authOwnerKey(tokenHash),
+        messages: [],
+        createdAt: now(),
+        updatedAt: now(),
+        state: { sessionId },
+      })
     },
 
     getPublicConfig() {
@@ -487,6 +578,34 @@ export function createEngine(
     },
   }
 
+  function budgetMessageResponse(requestId: string): Response {
+    const id = 'budget-message'
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: 'text-start', id })
+        writer.write({
+          type: 'text-delta',
+          id,
+          delta: 'The assistant has reached its usage limit for now. Please try again later.',
+        })
+        writer.write({ type: 'text-end', id })
+      },
+    })
+    return createUIMessageStreamResponse({
+      stream,
+      headers: { 'x-sitebot-request-id': requestId },
+    })
+  }
+
+  async function hashToken(token: string): Promise<string> {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  function authOwnerKey(tokenHash: string): string {
+    return `sitebot-auth:${tokenHash}`
+  }
+
   async function applyResume(
     session: NonNullable<Awaited<ReturnType<SessionStore['get']>>>,
     pending: PendingRun,
@@ -496,16 +615,16 @@ export function createEngine(
     let nextSession = session
 
     for (const approval of resume.approvals ?? []) {
-      const part = findToolPart(responseMessage, (candidate) =>
-        candidate.state === 'approval-requested' && candidate.approval?.id === approval.approvalId,
+      const part = findToolPart(
+        responseMessage,
+        (candidate) =>
+          candidate.state === 'approval-requested' &&
+          candidate.approval?.id === approval.approvalId,
       )
       if (part === undefined) throw new CheckpointError('Approval replay was rejected.', 403)
       part.state = 'approval-responded'
       part.approval = { ...part.approval, approved: approval.decision === 'approve' }
-      if (
-        approval.decision === 'approve' &&
-        config.agent.approvalPolicy === 'once-per-session'
-      ) {
+      if (approval.decision === 'approve' && config.agent.approvalPolicy === 'once-per-session') {
         nextSession = await grantApproval(nextSession, toolName(part), part.input)
       }
     }
@@ -578,9 +697,7 @@ function pendingRun(message: UIMessage, runId: string, now: number): PendingRun 
       part.type.startsWith('tool-') &&
       (part.state === 'approval-requested' || part.state === 'input-available'),
   )
-  return pending
-    ? { runId, responseMessage: message, expiresAt: now + CHECKPOINT_TTL_MS }
-    : null
+  return pending ? { runId, responseMessage: message, expiresAt: now + CHECKPOINT_TTL_MS } : null
 }
 
 function annotateAgentStream(

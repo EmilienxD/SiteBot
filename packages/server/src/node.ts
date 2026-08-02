@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ResolvedConfig } from '@sitebot/config'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
+import { connectStdioMcp, createRedisRateLimitStore, createSafeFetch } from '@sitebot/core/node'
 import { createSiteBotHandler, type SiteBotHandler, type SiteBotHandlerOptions } from './handler.js'
 import { sendWebResponse, socketIp, toWebRequest } from './http/node-bridge.js'
 
@@ -26,7 +26,21 @@ export function createNodeHandler(
   options: SiteBotHandlerOptions = {},
 ): NodeHandler {
   const safe = createSafeFetch()
-  const handler = createSiteBotHandler(config, { ...options, deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp, ...options.deps } })
+  const rateLimitStore =
+    options.rateLimitStore ??
+    (config.security.rateLimit.store === 'redis'
+      ? createRedisRateLimitStore({ url: resolveRedisUrl(config) })
+      : undefined)
+  const handler = createSiteBotHandler(config, {
+    ...options,
+    ...(rateLimitStore === undefined ? {} : { rateLimitStore }),
+    deps: {
+      fetchImpl: safe.fetch,
+      resolveHost: safe.resolveHost,
+      connectStdioMcp,
+      ...options.deps,
+    },
+  })
 
   const listener = async function siteBotNodeHandler(
     incoming: IncomingMessage,
@@ -39,4 +53,17 @@ export function createNodeHandler(
   listener.handler = handler
   listener.dispose = handler.dispose
   return listener
+}
+
+function resolveRedisUrl(config: ResolvedConfig): string {
+  const configured =
+    config.security.rateLimit.url ??
+    (config.storage.type === 'redis' ? config.storage.url : undefined)
+  const value = configured ?? process.env.SITEBOT_REDIS_URL
+  if (value === undefined || value === '') {
+    throw new Error(
+      'security.rateLimit.store is redis but no URL is configured; set security.rateLimit.url, storage.url, or SITEBOT_REDIS_URL',
+    )
+  }
+  return value
 }
