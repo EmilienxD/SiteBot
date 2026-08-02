@@ -67,6 +67,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/coverage/**',
       '**/.turbo/**',
+      '**/.next/**',
       '**/node_modules/**',
       '**/*.d.ts',
       'docs/**',

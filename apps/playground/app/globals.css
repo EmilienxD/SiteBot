@@ -1,0 +1,203 @@
+/*
+ * Deliberately plain, and deliberately opinionated about typography and colour.
+ *
+ * The playground is where the widget has to prove it survives a host page's
+ * styles (docs/09 Phase 4), so the page needs styles of its own to be a fair
+ * test. The hostile-CSS fixtures come later; this is the ordinary case.
+ */
+
+:root {
+  --page: #ffffff;
+  --ink: #101828;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --accent: #1d4ed8;
+  --surface: #f9fafb;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0c111d;
+    --ink: #eaecf0;
+    --muted: #98a2b3;
+    --line: #1f242f;
+    --accent: #84adff;
+    --surface: #161b26;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font:
+    16px/1.65 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+}
+
+header.site {
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+
+header.site nav {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+  display: flex;
+  gap: 1.75rem;
+  align-items: baseline;
+}
+
+header.site .brand {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+header.site nav a:not(.brand) {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+
+header.site nav a:not(.brand):hover {
+  color: var(--ink);
+}
+
+main {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 6rem;
+}
+
+main.wide {
+  max-width: 72rem;
+}
+
+h1 {
+  font-size: clamp(2rem, 1.4rem + 2vw, 2.75rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.75rem;
+}
+
+h2 {
+  font-size: 1.375rem;
+  letter-spacing: -0.015em;
+  margin: 2.75rem 0 0.75rem;
+}
+
+h3 {
+  font-size: 1.0625rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+.lede {
+  font-size: 1.1875rem;
+  color: var(--muted);
+  margin: 0 0 2rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+  background: var(--surface);
+}
+
+.card h3 {
+  margin-top: 0;
+}
+
+.card .price {
+  font-size: 1.75rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.card ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  margin: 1rem 0;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 550;
+}
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+
+:not(pre) > code {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+}
+
+footer.site {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+footer.site div {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}

@@ -2,6 +2,8 @@ node_modules/
 dist/
 coverage/
 .turbo/
+.next/
+next-env.d.ts
 *.tsbuildinfo
 
 # Generated from the Zod schema during `pnpm build` and published from `files`.

@@ -17,3 +17,112 @@ export type Mode = (typeof MODES)[number]
 /** Tool executor kinds. docs/00-overview.md D8, docs/05-tools.md. */
 export const EXECUTOR_KINDS = ['http', 'mcp', 'module', 'builtin', 'client'] as const
 export type ExecutorKind = (typeof EXECUTOR_KINDS)[number]
+
+// ── the engine ──────────────────────────────────────────────────────────────
+
+export { createEngine, HEALTH_CACHE_MS } from './engine.js'
+export type { EngineDeps } from './engine.js'
+
+export { resolvePolicy, tokenBudgetIs, wallClockIs } from './agent/policy.js'
+export type { Policy } from './agent/policy.js'
+
+// ── guards ──────────────────────────────────────────────────────────────────
+// Exported in full because @sitebot/server runs them: the adapter is what
+// builds `RequestContext`, and identity is a guard output (docs/01 §5).
+
+export * from './guards/index.js'
+
+// ── providers ───────────────────────────────────────────────────────────────
+
+export { ADAPTERS } from './providers/adapters.js'
+export type { ProviderFactory } from './providers/adapters.js'
+export {
+  backoffDelay,
+  classifyError,
+  FATAL_STATUSES,
+  RETRYABLE_STATUSES,
+  runChain,
+} from './providers/fallback.js'
+export type {
+  ChainResult,
+  Classification,
+  FallbackEvent,
+  RunChainOptions,
+} from './providers/fallback.js'
+export { BACKEND_ENTRY_DEFAULTS, resolveChain, resolveModel } from './providers/registry.js'
+export type { ResolvedModel } from './providers/registry.js'
+export {
+  importProviderPackage,
+  installHint,
+  isModuleNotFound,
+  readEnv,
+} from './providers/optional-import.js'
+
+// ── prompt ──────────────────────────────────────────────────────────────────
+
+export { composePrompt } from './prompt/compose.js'
+export type {
+  ComposeContext,
+  ComposeInput,
+  ComposedPrompt,
+  KnowledgeSnippet,
+} from './prompt/compose.js'
+export {
+  DELIMITER_PATTERN,
+  randomDelimiterId,
+  stripDelimiters,
+  untrustedBlock,
+} from './prompt/untrusted.js'
+export { substituteVariables } from './prompt/variables.js'
+
+// ── session ─────────────────────────────────────────────────────────────────
+
+export { createSessionStore } from './session/factory.js'
+export { lastUserMessage, mergeHistory } from './session/history.js'
+export type { MergeHistoryInput } from './session/history.js'
+export { MemorySessionStore, NoneSessionStore } from './session/store.js'
+export type { SessionStore, SessionStoreOptions, StoredSession } from './session/store.js'
+export {
+  contextBudget,
+  DEFAULT_CONTEXT_WINDOW,
+  estimateMessageTokens,
+  estimateTokens,
+  maxContextTokens,
+  truncateHistory,
+} from './session/truncate.js'
+export type { ContextBudgetInput, TruncateOptions, TruncateResult } from './session/truncate.js'
+
+// ── stream ──────────────────────────────────────────────────────────────────
+
+export { EngineError, ERROR_CODES, ERROR_TABLE, errorResponse, mapError } from './stream/errors.js'
+export type { ErrorCode, ErrorSpec, MapErrorOptions, MappedError } from './stream/errors.js'
+export { awaitFirstOutput, EmptyStreamError, StreamStartError } from './stream/start.js'
+
+// ── telemetry ───────────────────────────────────────────────────────────────
+
+export { createEventDispatcher, noopDispatcher } from './telemetry/events.js'
+export type { EventDispatcher, EventName, TelemetryEvent } from './telemetry/events.js'
+export { createLogger, redact, redactString, silentLogger } from './telemetry/logger.js'
+export type { LoggerOptions, LogRecord } from './telemetry/logger.js'
+export { createRecordingTracer, noopTracer, withSpan } from './telemetry/span.js'
+export type { Span, Tracer } from './telemetry/span.js'
+
+// ── types ───────────────────────────────────────────────────────────────────
+
+export type {
+  AuthMode,
+  BudgetTracker,
+  ChatRequest,
+  Engine,
+  EngineOptions,
+  HealthReport,
+  HealthStatus,
+  Identity,
+  LogLevel,
+  Logger,
+  PageContext,
+  PublicConfig,
+  RequestContext,
+  ResolvedConfig,
+  TokenUsage,
+} from './types.js'

@@ -1,0 +1,29 @@
+{
+  "name": "@sitebot/playground",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The demo site, and the living integration test for every phase after 3.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf .next"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.104",
+    "@sitebot/config": "workspace:*",
+    "@sitebot/server": "workspace:*",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "rimraf": "^6.1.3",
+    "typescript": "^5.9.3"
+  }
+}

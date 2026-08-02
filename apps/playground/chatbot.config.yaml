@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=../../packages/config/schema/chatbot.schema.json
+#
+# The playground's assistant. This file is the demo *and* the fixture: every
+# phase after 3 is exercised against a site that is configured the way a real
+# one would be, rather than against a config written to make a test pass.
+
+version: 1
+name: Northwind Assistant
+
+# Phase 3 ships chat mode only. Phase 5 flips this to `agent` and adds tools.
+mode: chat
+
+backend:
+  provider: anthropic
+  model: claude-sonnet-5
+  apiKey: ${env.ANTHROPIC_API_KEY}
+  maxOutputTokens: 1024
+  temperature: 0.3
+  fallback:
+    - provider: anthropic
+      model: claude-haiku-4-5-20251001
+
+prompt:
+  system: |
+    You are the assistant for Northwind Logistics' website.
+
+    Answer questions about the company, its products, pricing and documentation
+    using the site context you are given. Keep answers short — two or three
+    sentences unless the user asks for detail. When you do not know something,
+    say so and point the user at the relevant page.
+  includePageContext: true
+  includeSiteContext: true
+  guardrails:
+    refuseOffTopic: true
+    offTopicMessage: I can only help with questions about Northwind Logistics.
+    maxUserMessageChars: 4000
+
+siteContext:
+  company: Northwind Logistics
+  description: B2B freight forwarding and customs brokerage for mid-market importers.
+  primaryUrl: https://northwind.example.com
+  supportUrl: https://northwind.example.com/support
+  tone: Direct and practical. No filler.
+  facts:
+    - Support hours are 09:00–18:00 CET, Monday to Friday.
+    - Customs clearance is included in every plan at no extra cost.
+    - Quotes are valid for 30 days from issue.
+  routes:
+    - path: /pricing
+      summary: Plans, per-shipment pricing, and what each tier includes.
+    - path: /docs
+      summary: Integration guide for the shipments API and webhooks.
+    - path: /support
+      summary: Contact routes, SLAs, and how to escalate a stuck shipment.
+  glossary:
+    - term: HS code
+      definition: The Harmonised System code that classifies a good for customs.
+    - term: Incoterms
+      definition: Standard trade terms setting who pays freight, duty and insurance.
+
+storage:
+  type: memory
+  ttlSeconds: 3600
+
+ui:
+  panel:
+    title: Ask Northwind
+  theme:
+    mode: auto
+    primary: '#1d4ed8'
+  messages:
+    greeting: Ask me anything about shipping, pricing or the API.
+    suggestions:
+      - label: What does a plan include?
+        action: { type: send, text: What is included in each pricing plan? }
+      - label: How do webhooks work?
+        action: { type: send, text: How do the shipment webhooks work? }
+      - label: See pricing
+        action: { type: navigate, path: /pricing }
+  footer:
+    text: Answers are AI-generated and may be wrong. Verify anything that matters.
+    linkText: Privacy
+    linkUrl: /privacy
+
+security:
+  # Same-origin only: the playground serves the page and the API from one origin,
+  # so there is nothing to add here. A sidecar deployment would list its origins.
+  allowedOrigins: []
+  rateLimit:
+    perSession: 30/5m
+    perIp: 100/1h
+  maxRequestBytes: 262144
+
+telemetry:
+  logLevel: debug
+  redactPromptsInLogs: false

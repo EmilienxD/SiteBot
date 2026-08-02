@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["app/**", "lib/**", "chatbot.config.yaml", "next.config.ts", "tsconfig.json"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    }
+  }
+}

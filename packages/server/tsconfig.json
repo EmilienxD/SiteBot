@@ -1,9 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
+    // tsup owns emit; tsc is only ever run here as a typechecker, which is why
+    // there is no rootDir — test helpers live outside src.
+    "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src", "test", "tsup.config.ts"]
 }

@@ -1,10 +1,17 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  // Phase 3 adds one entry per adapter (fetch, next, express, fastify, hono,
-  // node) plus the matching `exports` subpaths, so importing
-  // `@sitebot/server/next` never pulls in Express or Fastify.
-  entry: ['src/index.ts'],
+  // One entry per adapter, matching the `exports` subpaths, so importing
+  // `@sitebot/server/next` never pulls in Express, Fastify or Hono.
+  entry: [
+    'src/index.ts',
+    'src/fetch.ts',
+    'src/next.ts',
+    'src/express.ts',
+    'src/fastify.ts',
+    'src/hono.ts',
+    'src/node.ts',
+  ],
   format: ['esm', 'cjs'],
   dts: true,
   sourcemap: true,

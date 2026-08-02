@@ -108,4 +108,7 @@ export const SecuritySchema = z
   .describe('docs/02-configuration.md §12, docs/08-security.md.')
 
 export type Security = z.output<typeof SecuritySchema>
+export type Auth = z.output<typeof AuthSchema>
+export type Budget = z.output<typeof BudgetSchema>
+export type RateLimit = z.output<typeof RateLimitSchema>
 export type AuthMode = (typeof AUTH_MODES)[number]
