@@ -51,9 +51,23 @@ export function checkCrossFields(
   ruleNoWildcardOrigin(config, errors)
 
   warnMcpImportWithoutAllow(config, errors, warnings)
+  warnUnapprovedWritableTools(config, warnings)
   warnPublicFieldFromEnv(config, context, warnings)
 
   return { errors, warnings }
+}
+
+function warnUnapprovedWritableTools(config: SiteBotConfig, warnings: ConfigWarning[]): void {
+  if (config.mode !== 'agent' || config.agent.approvalPolicy !== 'never') return
+  config.tools.forEach((entry, index) => {
+    if (isMcpImport(entry) || entry.readOnly || entry.requiresApproval || config.agent.approvalRequired.includes(entry.name)) return
+    warnings.push({
+      path: `tools[${index}]`,
+      message: `Writable tool "${entry.name}" is reachable without approval because agent.approvalPolicy is "never".`,
+      fix: 'Set approvalPolicy to `always` or `once-per-session`, or mark the tool readOnly if it has no side effects.',
+      rule: 'tools/unapproved-writable',
+    })
+  })
 }
 
 // ── 1 ───────────────────────────────────────────────────────────────────────

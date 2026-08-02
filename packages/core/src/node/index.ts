@@ -17,6 +17,9 @@ export const NODE_RUNTIME_MARKER = 'node' as const
 
 export { createSqliteSessionStore } from './sqlite-store.js'
 export type { SqliteSessionStoreOptions } from './sqlite-store.js'
+export { createSafeFetch } from './safe-fetch.js'
+export type { SafeFetch } from './safe-fetch.js'
+export { connectStdioMcp } from './mcp.js'
 
 /**
  * Build the session store for a config, including the backends the edge-safe

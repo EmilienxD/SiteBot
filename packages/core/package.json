@@ -39,8 +39,10 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@sitebot/config": "workspace:*",
     "ai": "^6.0.240",
+    "undici": "^5.29.0",
     "zod": "^4.1.8"
   },
   "peerDependencies": {

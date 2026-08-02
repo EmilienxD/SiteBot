@@ -19,9 +19,16 @@ export interface BudgetTrackerOptions {
 
 export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetTracker {
   const zero = () => ({ tokens: 0, usd: 0 })
+  const calls = new Map<string, number>()
   const tracker: BudgetTracker = {
     session: zero(),
     day: zero(),
+
+    async toolCalls(name = '*') {
+      const count = (calls.get(name) ?? 0) + 1
+      calls.set(name, count)
+      return count - 1
+    },
 
     check(estimateTokens: number) {
       const limit = options.budget?.maxTokensPerSession

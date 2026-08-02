@@ -18,6 +18,7 @@ export interface Policy {
   toolChoice: 'auto' | 'required' | 'none'
   retrieval: 'tool' | 'always' | 'hybrid'
   approvals: boolean
+  summarizeAtStep?: number
 }
 
 /**
@@ -62,5 +63,8 @@ export function resolvePolicy(config: ResolvedConfig): Policy {
     toolChoice: config.agent.toolChoice,
     retrieval: config.knowledge.retrieval.mode ?? 'tool',
     approvals: true,
+    ...(config.agent.onMaxSteps === 'summarize'
+      ? { summarizeAtStep: Math.max(0, config.agent.stopWhen.steps - 1) }
+      : {}),
   }
 }

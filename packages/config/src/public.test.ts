@@ -86,6 +86,7 @@ describe('toPublicConfig — the allowlist', () => {
       // Only client tools; the server-side ones are none of the browser's
       // business, and this list is the authoritative execution allowlist.
       clientTools: ['highlight_section', 'get_cart'],
+      routes: [],
       authMode: 'required',
     })
   })

@@ -1,7 +1,7 @@
 import type { PublicConfig } from '@sitebot/config'
 
 export const defaultConfig: PublicConfig = {
-  name: 'Assistant', mode: 'chat', capabilities: { streaming: true, fileUpload: false, clientTools: [], authMode: 'none' },
+  name: 'Assistant', mode: 'chat', capabilities: { streaming: true, fileUpload: false, clientTools: [], routes: [], authMode: 'none' },
   ui: {
     position: 'bottom-right', offset: { x: 24, y: 24 }, zIndex: 2147483000, isolation: 'shadow',
     launcher: { icon: 'sparkle', showAfterMs: 0, hideOnPaths: [], badge: { enabled: false, text: '' } },

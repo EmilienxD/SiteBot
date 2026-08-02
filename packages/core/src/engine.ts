@@ -1,6 +1,7 @@
 import {
   convertToModelMessages,
   createUIMessageStreamResponse,
+  generateId,
   streamText,
   type ModelMessage,
   type UIMessage,
@@ -8,6 +9,16 @@ import {
 } from 'ai'
 import { toPublicConfig, type ProviderId, type ResolvedConfig } from '@sitebot/config'
 import { resolvePolicy } from './agent/policy.js'
+import {
+  CHECKPOINT_TTL_MS,
+  CheckpointError,
+  clearPendingRun,
+  grantApproval,
+  hasApprovalGrant,
+  loadPendingRun,
+  savePendingRun,
+  type PendingRun,
+} from './agent/checkpoint.js'
 import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.js'
 import { lastUserMessage, mergeHistory } from './session/history.js'
 import { composePrompt } from './prompt/compose.js'
@@ -18,10 +29,14 @@ import { createSessionStore } from './session/factory.js'
 import type { SessionStore } from './session/store.js'
 import { contextBudget, estimateTokens, truncateHistory } from './session/truncate.js'
 import { errorResponse, mapError } from './stream/errors.js'
+import { EngineError } from './stream/errors.js'
 import { awaitFirstOutput } from './stream/start.js'
 import { createEventDispatcher, noopDispatcher, type EventDispatcher } from './telemetry/events.js'
 import { createLogger } from './telemetry/logger.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
+import { createToolRegistry } from './tools/registry.js'
+import type { HostResolver } from './tools/http.js'
+import type { StdioMcpConnector } from './tools/mcp.js'
 import type {
   ChatRequest,
   Engine,
@@ -56,6 +71,8 @@ export interface EngineDeps {
   /** Injected so telemetry delivery never touches the real network in tests. */
   fetchImpl?: typeof fetch
   now?: () => number
+  resolveHost?: HostResolver
+  connectStdioMcp?: StdioMcpConnector
 }
 
 /** How long a `/health` provider check is reused — docs/03-protocol.md §8. */
@@ -121,10 +138,33 @@ export function createEngine(
 
   async function startStream(
     messages: ModelMessage[],
+    originalMessages: UIMessage[],
     system: string,
     ctx: RequestContext,
+    session: Awaited<ReturnType<SessionStore['get']>>,
+    resumeRunId?: string,
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
     const policy = resolvePolicy(config)
+    const runId = resumeRunId ?? `r_${generateId()}`
+    const clientTools = new Set(
+      config.tools.flatMap((entry) =>
+        !('from' in entry) && entry.executor?.type === 'client' ? [entry.name] : [],
+      ),
+    )
+    const tools = await createToolRegistry({
+      config,
+      ctx,
+      filter: policy.toolFilter,
+      approvals: policy.approvals,
+      isApprovalGranted: async (toolName, input) =>
+        config.agent.approvalPolicy === 'once-per-session'
+          ? hasApprovalGrant(session, toolName, input)
+          : false,
+      ...(deps.fetchImpl === undefined ? {} : { fetchImpl: deps.fetchImpl }),
+      baseDir: config.$meta.baseDir,
+      ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
+      ...(deps.connectStdioMcp === undefined ? {} : { connectStdioMcp: deps.connectStdioMcp }),
+    }).build()
 
     const result = await runChain({
       entries: chain,
@@ -153,8 +193,21 @@ export function createEngine(
           model: resolved.model,
           system,
           messages,
+          tools,
           stopWhen: policy.stopWhen,
-          toolChoice: 'none',
+          toolChoice: policy.toolChoice,
+          ...(policy.summarizeAtStep === undefined
+            ? {}
+            : {
+                prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+                  stepNumber >= policy.summarizeAtStep!
+                    ? {
+                        activeTools: [],
+                        toolChoice: 'none' as const,
+                        system: `${system}\n\nYou have reached the final step. Summarize the useful results already gathered and answer without calling another tool.`,
+                      }
+                    : undefined,
+              }),
           ...(entry.temperature === undefined ? {} : { temperature: entry.temperature }),
           ...(entry.topP === undefined ? {} : { topP: entry.topP }),
           ...(entry.topK === undefined ? {} : { topK: entry.topK }),
@@ -164,6 +217,7 @@ export function createEngine(
           // retry the errors we deliberately classify as fatal.
           maxRetries: 0,
           abortSignal: ctx.signal,
+          experimental_context: ctx,
           experimental_telemetry: {
             isEnabled: config.telemetry.otel.enabled,
             functionId: 'sitebot.run',
@@ -189,11 +243,34 @@ export function createEngine(
           },
         })
 
-        const stream = await awaitFirstOutput(
-          streamed.toUIMessageStream({
+        const uiStream = streamed.toUIMessageStream<UIMessage>({
+            originalMessages,
             sendReasoning: config.ui.behaviour.showReasoning,
             onError: (error) => mapError(error, errorOptions).message,
-          }) as ReadableStream<UIMessageChunk>,
+            onFinish: async ({ responseMessage }) => {
+              if (responseMessage.id === '' && responseMessage.parts.length === 0) return
+              const current =
+                (await sessionStore.get(ctx.sessionId)) ??
+                ({
+                  id: ctx.sessionId,
+                  messages: [],
+                  createdAt: now(),
+                  updatedAt: now(),
+                } satisfies NonNullable<typeof session>)
+              const messages = replaceOrAppend(current.messages, responseMessage)
+              const next = { ...current, messages }
+              const pending = pendingRun(responseMessage, runId, now())
+              if (pending === null) {
+                if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
+                else await sessionStore.set(next)
+              } else {
+                await savePendingRun(sessionStore, next, pending)
+              }
+            },
+          }) as ReadableStream<UIMessageChunk>
+
+        const stream = await awaitFirstOutput(
+          annotateAgentStream(uiStream, { runId, clientTools, config }),
           { rawError: () => rawError },
         )
 
@@ -226,7 +303,26 @@ export function createEngine(
             })
           }
 
-          const history = await buildHistory(request)
+          let history: UIMessage[]
+          let session = await sessionStore.get(request.sessionId)
+          let resumeRunId: string | undefined
+          if (request.trigger === 'resume') {
+            if (request.resume === undefined) {
+              throw new EngineError('invalid_request', { detail: 'resume payload is required' })
+            }
+            const loaded = await loadPendingRun(
+              sessionStore,
+              request.sessionId,
+              request.resume.runId,
+              now(),
+            )
+            session = await applyResume(loaded.session, loaded.pending, request.resume)
+            await sessionStore.set(session)
+            history = session.messages
+            resumeRunId = request.resume.runId
+          } else {
+            history = await buildHistory(request)
+          }
           const truncated = truncateHistory(history, {
             budgetTokens: contextBudget({
               modelId: `${config.backend.provider}:${config.backend.model}`,
@@ -249,8 +345,11 @@ export function createEngine(
 
           const { stream, modelId } = await startStream(
             await convertToModelMessages(truncated.messages),
+            truncated.messages,
             composed.text,
             ctx,
+            session,
+            resumeRunId,
           )
           span.setAttribute('sitebot.model', modelId)
 
@@ -258,7 +357,7 @@ export function createEngine(
           // answering. Storing it before the call would leave an unanswered
           // question in the transcript every time a provider is down, and the
           // next request would replay it as history.
-          const latest = lastUserMessage(request.messages)
+          const latest = request.trigger === 'resume' ? null : lastUserMessage(request.messages)
           if (config.storage.type !== 'none' && latest !== null) {
             await sessionStore.append(request.sessionId, [latest])
           }
@@ -364,4 +463,149 @@ export function createEngine(
       await rateLimitStore.dispose?.()
     },
   }
+
+  async function applyResume(
+    session: NonNullable<Awaited<ReturnType<SessionStore['get']>>>,
+    pending: PendingRun,
+    resume: NonNullable<ChatRequest['resume']>,
+  ): Promise<typeof session> {
+    let responseMessage = structuredClone(pending.responseMessage)
+    let nextSession = session
+
+    for (const approval of resume.approvals ?? []) {
+      const part = findToolPart(responseMessage, (candidate) =>
+        candidate.state === 'approval-requested' && candidate.approval?.id === approval.approvalId,
+      )
+      if (part === undefined) throw new CheckpointError('Approval replay was rejected.', 403)
+      part.state = 'approval-responded'
+      part.approval = { ...part.approval, approved: approval.decision === 'approve' }
+      if (
+        approval.decision === 'approve' &&
+        config.agent.approvalPolicy === 'once-per-session'
+      ) {
+        nextSession = await grantApproval(nextSession, toolName(part), part.input)
+      }
+    }
+
+    for (const result of resume.clientToolResults ?? []) {
+      const part = findToolPart(
+        responseMessage,
+        (candidate) =>
+          candidate.toolCallId === result.toolCallId &&
+          candidate.state === 'input-available' &&
+          isClientTool(toolName(candidate)),
+      )
+      if (part === undefined) throw new CheckpointError('Client tool replay was rejected.', 403)
+      part.state = 'output-available'
+      part.output = result.output
+    }
+
+    if ((resume.approvals?.length ?? 0) + (resume.clientToolResults?.length ?? 0) === 0) {
+      throw new CheckpointError('A resume result is required.', 403)
+    }
+
+    responseMessage = { ...responseMessage, parts: responseMessage.parts }
+    return {
+      ...nextSession,
+      messages: replaceOrAppend(nextSession.messages, responseMessage),
+      state: { ...nextSession.state, pendingRun: { ...pending, responseMessage } },
+    }
+  }
+
+  function isClientTool(name: string): boolean {
+    return config.tools.some(
+      (entry) => !('from' in entry) && entry.name === name && entry.executor?.type === 'client',
+    )
+  }
+}
+
+type MutableToolPart = {
+  type: string
+  toolCallId?: string
+  state?: string
+  input?: unknown
+  output?: unknown
+  approval?: { id?: string; approved?: boolean }
+}
+
+function findToolPart(
+  message: UIMessage,
+  predicate: (part: MutableToolPart) => boolean,
+): MutableToolPart | undefined {
+  return (message.parts as MutableToolPart[]).find(
+    (part) => part.type.startsWith('tool-') && predicate(part),
+  )
+}
+
+function toolName(part: MutableToolPart): string {
+  return part.type.replace(/^tool-/, '')
+}
+
+function replaceOrAppend(messages: UIMessage[], response: UIMessage): UIMessage[] {
+  const index = messages.findIndex((message) => message.id === response.id)
+  if (index < 0) return [...messages, response]
+  const next = [...messages]
+  next[index] = response
+  return next
+}
+
+function pendingRun(message: UIMessage, runId: string, now: number): PendingRun | null {
+  const pending = (message.parts as MutableToolPart[]).some(
+    (part) =>
+      part.type.startsWith('tool-') &&
+      (part.state === 'approval-requested' || part.state === 'input-available'),
+  )
+  return pending
+    ? { runId, responseMessage: message, expiresAt: now + CHECKPOINT_TTL_MS }
+    : null
+}
+
+function annotateAgentStream(
+  stream: ReadableStream<UIMessageChunk>,
+  options: {
+    runId: string
+    clientTools: Set<string>
+    config: ResolvedConfig
+  },
+): ReadableStream<UIMessageChunk> {
+  const calls = new Map<string, { toolName: string; input: unknown }>()
+  const approvals = new Set<string>()
+  return stream.pipeThrough(
+    new TransformStream<UIMessageChunk, UIMessageChunk>({
+      transform(chunk, controller) {
+        if (chunk.type === 'tool-input-available') {
+          calls.set(chunk.toolCallId, { toolName: chunk.toolName, input: chunk.input })
+        }
+        if (chunk.type === 'tool-approval-request') {
+          approvals.add(chunk.toolCallId)
+          const call = calls.get(chunk.toolCallId)
+          const entry = options.config.tools.find(
+            (candidate) => !('from' in candidate) && candidate.name === call?.toolName,
+          )
+          controller.enqueue({
+            type: 'data-approval-request',
+            data: {
+              approvalId: chunk.approvalId,
+              runId: options.runId,
+              toolCallId: chunk.toolCallId,
+              toolName: call?.toolName,
+              input: call?.input,
+              risk: entry && !('from' in entry) ? entry.approvalRisk : 'medium',
+              description: entry && !('from' in entry) ? entry.approvalSummary : undefined,
+            },
+          } as UIMessageChunk)
+        }
+        if (chunk.type === 'finish') {
+          for (const [toolCallId, call] of calls) {
+            if (!options.clientTools.has(call.toolName) || approvals.has(toolCallId)) continue
+            controller.enqueue({
+              type: 'data-client-tool-call',
+              data: { runId: options.runId, toolCallId, ...call },
+            } as UIMessageChunk)
+          }
+        }
+        controller.enqueue(chunk)
+      },
+    }),
+  )
 }

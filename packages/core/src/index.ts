@@ -98,6 +98,17 @@ export { EngineError, ERROR_CODES, ERROR_TABLE, errorResponse, mapError } from '
 export type { ErrorCode, ErrorSpec, MapErrorOptions, MappedError } from './stream/errors.js'
 export { awaitFirstOutput, EmptyStreamError, StreamStartError } from './stream/start.js'
 
+export { createToolRegistry } from './tools/registry.js'
+export { createHttpExecutor } from './tools/http.js'
+export type { HostResolver } from './tools/http.js'
+export { validateJsonSchema } from './tools/schema.js'
+export type { ToolRegistry, ToolRegistryOptions } from './tools/registry.js'
+export type { JsonSchemaObject, SchemaIssue, SchemaResult } from './tools/schema.js'
+export { ApprovalError, MemoryApprovalStore, argumentHash } from './tools/approvals.js'
+export type { ApprovalCheckpoint, ApprovalDecision, ApprovalResolution } from './tools/approvals.js'
+export { lintTools } from './tools/lint.js'
+export type { ToolLintFinding, ToolLintSeverity } from './tools/lint.js'
+
 // ── telemetry ───────────────────────────────────────────────────────────────
 
 export { createEventDispatcher, noopDispatcher } from './telemetry/events.js'
@@ -123,6 +134,7 @@ export type {
   PageContext,
   PublicConfig,
   RequestContext,
+  ResumeRequest,
   ResolvedConfig,
   TokenUsage,
 } from './types.js'

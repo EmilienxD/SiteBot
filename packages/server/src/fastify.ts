@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ResolvedConfig } from '@sitebot/config'
+import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
 import { createSiteBotHandler, type SiteBotHandler, type SiteBotHandlerOptions } from './handler.js'
 import { sendWebResponse, socketIp, toWebRequest } from './http/node-bridge.js'
 
@@ -47,7 +48,8 @@ export function createFastifyPlugin(
   config: ResolvedConfig,
   options: SiteBotHandlerOptions = {},
 ): FastifyPlugin {
-  const handler = createSiteBotHandler(config, options)
+  const safe = createSafeFetch()
+  const handler = createSiteBotHandler(config, { ...options, deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp, ...options.deps } })
 
   const plugin = async function siteBotFastifyPlugin(
     instance: FastifyLikeInstance,

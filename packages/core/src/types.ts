@@ -40,7 +40,13 @@ export interface ChatRequest {
   auth?: string
   trigger?: 'submit-message' | 'regenerate' | 'resume'
   /** Populated in Phase 5; declared here so the type does not churn later. */
-  resume?: unknown
+  resume?: ResumeRequest
+}
+
+export interface ResumeRequest {
+  runId: string
+  approvals?: Array<{ approvalId: string; decision: 'approve' | 'deny' }>
+  clientToolResults?: Array<{ toolCallId: string; output: unknown }>
 }
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug'
@@ -69,6 +75,7 @@ export interface TokenUsage {
 export interface BudgetTracker {
   session: { tokens: number; usd: number }
   day: { tokens: number; usd: number }
+  toolCalls(name?: string): Promise<number>
   check(estimateTokens: number): 'ok' | 'degrade' | 'block'
   record(usage: TokenUsage, modelId: string): Promise<void>
 }

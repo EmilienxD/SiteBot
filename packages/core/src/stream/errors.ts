@@ -125,6 +125,12 @@ function isAbort(error: unknown): boolean {
   return name === 'AbortError' || name === 'TimeoutError'
 }
 
+function checkpointStatus(error: unknown): 403 | 410 | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+  const status = (error as { status?: unknown }).status
+  return status === 403 || status === 410 ? status : undefined
+}
+
 /**
  * Map anything thrown anywhere into the fixed table.
  *
@@ -134,12 +140,21 @@ function isAbort(error: unknown): boolean {
  */
 export function mapError(error: unknown, options: MapErrorOptions = {}): MappedError {
   const code: ErrorCode =
-    error instanceof EngineError ? error.code : isAbort(error) ? 'aborted' : 'internal_error'
+    error instanceof EngineError
+      ? error.code
+      : checkpointStatus(error) !== undefined
+        ? 'invalid_request'
+        : isAbort(error)
+          ? 'aborted'
+          : 'internal_error'
   const spec = ERROR_TABLE[code]
 
   const mapped: MappedError = {
     code,
-    message: error instanceof EngineError ? error.message : spec.message,
+    message:
+      error instanceof EngineError || checkpointStatus(error) !== undefined
+        ? (error as Error).message
+        : spec.message,
     retryable: spec.retryable,
   }
 
@@ -159,7 +174,10 @@ export function mapError(error: unknown, options: MapErrorOptions = {}): MappedE
 /** Render a mapped error as the pre-stream JSON response of docs/03 §2. */
 export function errorResponse(error: unknown, options: MapErrorOptions = {}): Response {
   const mapped = mapError(error, options)
-  const status = error instanceof EngineError ? error.status : ERROR_TABLE[mapped.code].status
+  const status =
+    error instanceof EngineError
+      ? error.status
+      : (checkpointStatus(error) ?? ERROR_TABLE[mapped.code].status)
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     ...(error instanceof EngineError ? error.headers : {}),

@@ -46,6 +46,8 @@ export class SiteChatElement extends HTMLElement {
     render(<>{this.#open && <Panel controller={controller} close={() => this.close()} />}<button ref={(node) => { this.#launcher = node ?? undefined }} class={`launcher ${ui.position === 'bottom-left' ? 'left' : ''} ${ui.launcher.label ? 'pill' : ''}`} aria-label={ui.a11y.launcherAriaLabel} aria-expanded={this.#open} onClick={() => this.toggle()}>{this.#open ? 'X' : icon(ui.launcher.icon)}{ui.launcher.label && <span>{ui.launcher.label}</span>}{ui.launcher.badge.enabled && <span class="badge">{ui.launcher.badge.text}</span>}</button></>, mount)
     if (ui.panel.rememberOpenState) writeValue(storageKey(controller.options.publicKey || 'anonymous', 'open'), String(this.#open), 'local')
   }
+  registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void { this.#controller?.registerTool(name, handler) }
+  unregisterTool(name: string): void { this.#controller?.unregisterTool(name) }
   dispatch(type: 'open' | 'close' | 'reset'): void { this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true })); this.#options.onEvent?.({ type }) }
   safe(action: () => void): void { try { action() } catch (error) { console.warn('[SiteBot] widget recovered from an error', error); this.#options.onEvent?.({ type: 'error', detail: error }) } }
 }

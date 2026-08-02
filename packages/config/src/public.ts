@@ -28,6 +28,8 @@ export interface PublicCapabilities {
    * for any name not in this list (docs/05-tools.md §5 rule 1).
    */
   clientTools: string[]
+  /** Server-declared routes that the navigate client tool may target. */
+  routes: string[]
   authMode: AuthMode
 }
 
@@ -66,6 +68,7 @@ export function toPublicConfig(
       streaming: config.ui.behaviour.streaming,
       fileUpload: config.ui.behaviour.allowFileUpload,
       clientTools,
+      routes: config.siteContext.routes.map((route) => route.path),
       authMode: config.security.auth.mode,
     },
   }

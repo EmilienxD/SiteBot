@@ -11,5 +11,5 @@ export default defineConfig({
   clean: true,
   treeshake: true,
   target: 'es2022',
-  external: [/^@ai-sdk\//],
+  external: [/^@ai-sdk\//, /^@modelcontextprotocol\//, 'undici'],
 })
