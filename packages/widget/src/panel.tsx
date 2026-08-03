@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { UIMessage } from 'ai'
 import { Markdown } from './markdown.js'
-import type { WidgetController } from './types.js'
+import type { Citation, WidgetController } from './types.js'
+
+/** `data-citations` part, as emitted by the engine's `appendCitations`. */
+interface CitationsPart { type: 'data-citations'; data: { items: Citation[] } }
+function isCitationsPart(part: unknown): part is CitationsPart { return typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'data-citations' && Array.isArray((part as CitationsPart).data?.items) }
 
 export function Panel({ controller, close }: { controller: WidgetController; close: () => void }) {
   const [, redraw] = useState(0)
@@ -38,7 +42,7 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
       </header>
       <div class="messages" ref={list} role="log" aria-live="polite" aria-relevant="additions" onScroll={() => { const node = list.current; if (node) setFollow(node.scrollHeight - node.scrollTop - node.clientHeight < 72) }}>
         {ui.messages.greeting && controller.messages.length === 0 && <Message role="assistant" text={ui.messages.greeting} attribution={controller.config.name} markdown={ui.behaviour.markdown} />}
-        {controller.messages.map((message) => <Message key={message.id} role={message.role} text={messageText(message)} attribution={message.role === 'assistant' ? controller.config.name : undefined} markdown={ui.behaviour.markdown} />)}
+        {controller.messages.map((message) => <Message key={message.id} role={message.role} text={messageText(message)} attribution={message.role === 'assistant' ? controller.config.name : undefined} markdown={ui.behaviour.markdown} controller={controller} message={message} />)}
         {controller.messages.flatMap((message) => message.parts).filter(isToolPart).map((part, index) => <ToolChip key={index} part={part} />)}
         {controller.messages.flatMap((message) => message.parts).filter((part) => isApprovalPart(part)).map((part) => { const approval = part as unknown as ApprovalPart; return <ApprovalCard key={approval.approval.id} part={approval} approve={(approved) => void controller.approve(approval.approval.id, approved)} /> })}
         {busy && ui.behaviour.showTypingIndicator && <div class="message assistant"><div class="bubble typing" aria-label="Assistant is typing"><i /><i /><i /></div></div>}
@@ -58,9 +62,32 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
   )
 }
 
-function Message({ role, text, attribution, markdown }: { role: UIMessage['role']; text: string; attribution?: string; markdown: boolean }) {
+function Message({ role, text, attribution, markdown, controller, message }: { role: UIMessage['role']; text: string; attribution?: string; markdown: boolean; controller?: WidgetController; message?: UIMessage }) {
   if (!text || role === 'system') return null
-  return <div class={`message ${role}`}><div class="bubble">{markdown ? <Markdown text={text} /> : text}</div>{attribution && <div class="attribution">{attribution}</div>}</div>
+  const citations = message === undefined ? [] : citationList(message, text)
+  return <div class={`message ${role}`}><div class="bubble">{markdown ? <Markdown text={text} /> : text}</div>{citations.length > 0 && <CitationRow citations={citations} onClick={(citation) => controller?.clickCitation?.(citation)} />}{attribution && <div class="attribution">{attribution}</div>}</div>
+}
+
+/**
+ * Numbered source chips under an assistant bubble — docs/06 §3.9 rule 5.
+ * The `data-citations` part carries every retrieval hit; the widget shows only
+ * those the model actually cited (`[n]` in the text), which is what keeps the
+ * UI honest when retrieval surfaced context the model did not use.
+ */
+export function citationList(message: UIMessage, text: string): Citation[] {
+  const part = (message.parts as unknown[]).find(isCitationsPart)
+  if (part === undefined) return []
+  const used = new Set<number>()
+  for (const match of text.matchAll(/\[(\d+)\]/g)) used.add(Number(match[1]))
+  // No visible markers (e.g. tool-only answer): still render the sources the
+  // engine attached — the intent of `includeCitations` is transparency, and
+  // hiding them because the model phrased around [n] would surprise a dev.
+  if (used.size === 0) return part.data.items
+  return part.data.items.filter((_, index) => used.has(index + 1))
+}
+
+function CitationRow({ citations, onClick }: { citations: Citation[]; onClick: (citation: Citation) => void }) {
+  return <div class="citations" role="group" aria-label="Sources">{citations.map((citation, index) => <button key={citation.id} type="button" class="citation-chip" title={citation.snippet || citation.title} aria-label={`Source ${index + 1}: ${citation.title}`} onClick={() => onClick(citation)}><span class="citation-n">{index + 1}</span><span class="citation-title">{citation.title}</span></button>)}</div>
 }
 
 type ToolPart = { type: string; state?: string; toolName?: string; errorText?: string }

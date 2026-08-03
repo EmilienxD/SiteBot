@@ -6,25 +6,15 @@
  * chunk → embed → write pipeline itself belongs to `@sitebot/ingest`, which is
  * layer 3 and importable directly so a CI job can do the same work without the
  * CLI (docs/01-architecture.md §2).
- *
- * **The pipeline is not implemented yet.** `@sitebot/ingest` still exports only
- * the source-type and chunk-strategy constants from the Phase 0 skeleton, so
- * everything below the seam at {@link loadPipeline} is missing. That seam is
- * deliberately narrow and runtime-checked rather than assumed: when Phase 6
- * lands the pipeline, this command needs no change beyond deleting the
- * unavailability branch, and until then it fails with a message that says what
- * is missing instead of a `TypeError`.
- *
- * What does work today: config resolution, the cross-field preflight
- * (`knowledge.sources` without `knowledge.embedding` is rejected by the schema,
- * but an unreachable store or a bad `--source` is not), and `--dry-run`'s plan.
  */
 
-import * as ingest from '@sitebot/ingest'
+import { runIngest as runIngestPipeline, type IngestOptions, type IngestRun } from '@sitebot/ingest'
 import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import type { FlagSpecs } from '../args.js'
 import { formatCount, type Ui } from '../terminal.js'
 import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+
+export type { IngestOptions, IngestRun }
 
 export const INGEST_FLAGS: FlagSpecs = {
   source: {
@@ -42,41 +32,6 @@ export const INGEST_FLAGS: FlagSpecs = {
   },
   concurrency: { type: 'number', summary: 'Parallel fetches. Default 4.', placeholder: '<n>' },
 }
-
-/**
- * The contract this command needs from `@sitebot/ingest`.
- *
- * Declared here as a structural type rather than imported, because the export
- * does not exist yet. When it does, this becomes a plain import and the runtime
- * check below collapses into a type error if the shapes disagree — which is the
- * right time to find out.
- */
-export interface IngestRun {
-  sources: {
-    id: string
-    type: KnowledgeSource['type']
-    label: string
-    found: number
-    unchanged: number
-    changed: number
-    added: number
-    removed: number
-  }[]
-  chunksAffected: number
-  embedding: { chunks: number; batches: number; tokens: number; estimatedUsd: number }
-  index: { chunks: number; documents: number; lastIndexed: string }
-  dryRun: boolean
-}
-
-export interface IngestOptions {
-  sourceIds?: string[]
-  force?: boolean
-  dryRun?: boolean
-  concurrency?: number
-  onProgress?: (message: string) => void
-}
-
-type IngestPipeline = (config: ResolvedConfig, options: IngestOptions) => Promise<IngestRun>
 
 export async function runIngestCommand(context: CommandContext): Promise<CommandResult> {
   const { ui, flags } = context
@@ -119,16 +74,6 @@ export async function runIngestCommand(context: CommandContext): Promise<Command
   const dryRun = flags['dry-run'] === true
   printPlan(ui, config, selected, dryRun)
 
-  const pipeline = loadPipeline()
-  if (pipeline === null) {
-    ui.line()
-    ui.fatal(
-      '@sitebot/ingest does not implement the pipeline yet.',
-      'The crawl → extract → chunk → embed → write stages are Phase 6 work (docs/06-knowledge.md). Everything above this line is real; nothing was written or spent.',
-    )
-    return { exitCode: 1 }
-  }
-
   const options: IngestOptions = {
     sourceIds: selected.map(sourceId),
     force: flags['force'] === true,
@@ -138,25 +83,13 @@ export async function runIngestCommand(context: CommandContext): Promise<Command
   }
 
   try {
-    const run = await pipeline(config, options)
+    const run = await runIngestPipeline(config, options)
     printRun(ui, run)
     return { exitCode: 0 }
   } catch (error) {
     ui.fatal(error instanceof Error ? error.message : String(error))
     return { exitCode: 1 }
   }
-}
-
-/**
- * The pipeline entry point, or null when the package does not export one.
- *
- * A runtime lookup rather than a static import: a static import of a missing
- * export is a build error in some bundlers and `undefined` in others, and
- * neither produces a message a developer can act on.
- */
-function loadPipeline(): IngestPipeline | null {
-  const candidate = (ingest as Record<string, unknown>)['runIngest']
-  return typeof candidate === 'function' ? (candidate as IngestPipeline) : null
 }
 
 function printPlan(

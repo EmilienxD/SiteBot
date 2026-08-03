@@ -92,6 +92,33 @@ export {
 } from './session/truncate.js'
 export type { ContextBudgetInput, TruncateOptions, TruncateResult } from './session/truncate.js'
 
+// ── knowledge ───────────────────────────────────────────────────────────────
+
+export { MemoryVectorStore } from './knowledge/memory-store.js'
+export {
+  cosineSimilarity,
+  matchesFilter,
+} from './knowledge/store.js'
+export type {
+  Chunk,
+  ChunkMetadata,
+  QueryOptions,
+  ScoredChunk,
+  StoreMeta,
+  VectorStore,
+  VectorStoreStats,
+} from './knowledge/store.js'
+export { finalize, retrieve } from './knowledge/retrieve.js'
+export { knowledgeEnabled } from './knowledge/types.js'
+export type {
+  Citation,
+  CitationsPayload,
+  KnowledgeDeps,
+  QueryEmbedder,
+  RetrievalHit,
+  RetrievalResult,
+} from './knowledge/types.js'
+
 // ── stream ──────────────────────────────────────────────────────────────────
 
 export { EngineError, ERROR_CODES, ERROR_TABLE, errorResponse, mapError } from './stream/errors.js'

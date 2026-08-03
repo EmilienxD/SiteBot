@@ -58,7 +58,10 @@
     "@ai-sdk/groq": "^3",
     "@ai-sdk/mistral": "^3",
     "@ai-sdk/openai": "^3",
-    "@ai-sdk/openai-compatible": "^3"
+    "@ai-sdk/openai-compatible": "^3",
+    "@upstash/vector": "^1",
+    "pg": "^8",
+    "sqlite-vec": "^0.1"
   },
   "peerDependenciesMeta": {
     "@ai-sdk/amazon-bedrock": {
@@ -86,6 +89,15 @@
       "optional": true
     },
     "@ai-sdk/openai-compatible": {
+      "optional": true
+    },
+    "@upstash/vector": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "sqlite-vec": {
       "optional": true
     }
   },

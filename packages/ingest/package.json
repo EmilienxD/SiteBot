@@ -30,7 +30,40 @@
   },
   "dependencies": {
     "@sitebot/config": "workspace:*",
-    "@sitebot/core": "workspace:*"
+    "@sitebot/core": "workspace:*",
+    "ai": "^6.0.240"
+  },
+  "peerDependencies": {
+    "@ai-sdk/google": "^3",
+    "@ai-sdk/mistral": "^3",
+    "@ai-sdk/openai": "^3",
+    "@ai-sdk/openai-compatible": "^3",
+    "@upstash/vector": "^1",
+    "pg": "^8",
+    "sqlite-vec": "^0.1"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/google": {
+      "optional": true
+    },
+    "@ai-sdk/mistral": {
+      "optional": true
+    },
+    "@ai-sdk/openai": {
+      "optional": true
+    },
+    "@ai-sdk/openai-compatible": {
+      "optional": true
+    },
+    "@upstash/vector": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "sqlite-vec": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "rimraf": "^6.1.3",

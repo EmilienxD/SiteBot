@@ -30,7 +30,7 @@ export class SiteChatElement extends HTMLElement {
     this.#root = this.attachShadow({ mode: 'closed' }); const style = document.createElement('style'); style.textContent = styles; const nonce = options.nonce ?? this.dataset.nonce; if (nonce) style.nonce = nonce; this.#mount = document.createElement('div'); this.#root.append(style, this.#mount)
     const config = mergeConfig(await fetchConfig(endpoint, publicKey)); if (options.position) config.ui.position = options.position; if (options.theme) config.ui.theme.mode = options.theme; this.dataset.theme = config.ui.theme.mode
     this.style.setProperty('--sb-panel-w', `${config.ui.panel.width}px`); this.style.setProperty('--sb-panel-h', `${config.ui.panel.height}px`); this.style.setProperty('--sb-offset-x', `${config.ui.offset.x}px`); this.style.setProperty('--sb-offset-y', `${config.ui.offset.y}px`); this.style.setProperty('z-index', `${config.ui.zIndex}`, 'important'); applyTheme(this, config)
-    this.#controller = createController(options, config, () => this.render()); this.#controller.open = () => this.open(); this.#controller.close = () => this.close(); this.#controller.toggle = () => this.toggle()
+    this.#controller = createController(options, config, () => this.render()); this.#controller.open = () => this.open(); this.#controller.close = () => this.close(); this.#controller.toggle = () => this.toggle(); this.#controller.clickCitation = (citation) => this.citationClick(citation)
     if (matchesAny(location.pathname, config.ui.launcher.hideOnPaths)) return
     const remembered = readValue(storageKey(publicKey || 'anonymous', 'open'), 'local') === 'true'; this.#open = Boolean(options.autoOpen ?? (this.dataset.autoOpen === 'true' || (config.ui.panel.rememberOpenState && remembered) || config.ui.panel.openOnFirstVisit))
     setTimeout(() => this.render(), config.ui.launcher.showAfterMs)
@@ -49,6 +49,15 @@ export class SiteChatElement extends HTMLElement {
   registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void { this.#controller?.registerTool(name, handler) }
   unregisterTool(name: string): void { this.#controller?.unregisterTool(name) }
   dispatch(type: 'open' | 'close' | 'reset'): void { this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true })); this.#options.onEvent?.({ type }) }
+  /** docs/03 §7 — a citation chip click opens the source and notifies the host. */
+  citationClick(citation: { url: string; title: string }): void {
+    this.safe(() => {
+      window.open(citation.url, '_blank', 'noopener,noreferrer')
+      const detail = { url: citation.url, title: citation.title }
+      this.dispatchEvent(new CustomEvent('sitebot:citation-click', { bubbles: true, detail }))
+      this.#options.onEvent?.({ type: 'citation-click', detail })
+    })
+  }
   safe(action: () => void): void { try { action() } catch (error) { console.warn('[SiteBot] widget recovered from an error', error); this.#options.onEvent?.({ type: 'error', detail: error }) } }
 }
 

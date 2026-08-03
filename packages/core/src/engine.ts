@@ -2,7 +2,9 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  dynamicTool,
   generateId,
+  jsonSchema,
   streamText,
   type ModelMessage,
   type UIMessage,
@@ -22,7 +24,9 @@ import {
 } from './agent/checkpoint.js'
 import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.js'
 import { lastUserMessage, mergeHistory } from './session/history.js'
-import { composePrompt } from './prompt/compose.js'
+import { retrieve } from './knowledge/retrieve.js'
+import type { KnowledgeDeps, Citation } from './knowledge/types.js'
+import { composePrompt, type KnowledgeSnippet } from './prompt/compose.js'
 import type { ProviderFactory } from './providers/adapters.js'
 import { runChain } from './providers/fallback.js'
 import { resolveChain, resolveModel } from './providers/registry.js'
@@ -75,6 +79,12 @@ export interface EngineDeps {
   resolveHost?: HostResolver
   connectStdioMcp?: StdioMcpConnector
   mcpPool?: McpClientPool
+  /**
+   * Phase 6: the reachable knowledge index plus the query embedder. Absent
+   * (or failed at boot) → `/health` reports the knowledge check as degraded
+   * and no knowledge tool is registered, but chat keeps working.
+   */
+  knowledge?: KnowledgeDeps
 }
 
 /** How long a `/health` provider check is reused — docs/03-protocol.md §8. */
@@ -128,6 +138,17 @@ export function createEngine(
       ?.NODE_ENV === 'production'
   const errorOptions = { debug, production }
 
+  const knowledgeConfigured =
+    config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
+  // `knowledgeDeps` reads live at request time: the server assembles the store
+  // asynchronously (a cold host must not fail to boot on an unreachable
+  // index), so the deps object it built the engine with is filled in behind
+  // this closure. When knowledge is not configured at all the subsystem is
+  // inert regardless.
+  const knowledgeDeps: KnowledgeDeps | undefined = knowledgeConfigured
+    ? (deps.knowledge ?? {})
+    : deps.knowledge
+
   let providerCheck: ProviderCheck | undefined
 
   // ── history ───────────────────────────────────────────────────────────────
@@ -153,6 +174,7 @@ export function createEngine(
     session: Awaited<ReturnType<SessionStore['get']>>,
     resumeRunId?: string,
     activeChain = chain,
+    knowledge?: { enabled: boolean; citations: Citation[] },
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
     const policy = resolvePolicy(config)
     const runId = resumeRunId ?? `r_${generateId()}`
@@ -174,7 +196,71 @@ export function createEngine(
       baseDir: config.$meta.baseDir,
       ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
       mcpPool,
+      ...(knowledgeDeps === undefined ? {} : { knowledge: knowledgeDeps }),
     }).build()
+
+    // `search_knowledge_base` — the engine-owned side of retrieval mode `tool`
+    // and `hybrid`. It exists without a `tools` config entry because the model
+    // cannot call what the config does not declare in a chat-mode policy, and
+    // the tool policy block must be able to describe it unconditionally.
+    if (knowledge?.enabled && policy.retrieval !== 'always') {
+      tools['search_knowledge_base'] = dynamicTool({
+        description:
+          "Search the site's knowledge base for pages relevant to a question. Returns numbered results with [n], title, url and text.",
+        inputSchema: jsonSchema({
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to search for.' },
+          },
+          required: ['query'],
+        } as never),
+        execute: async (input: unknown) => {
+          if (knowledgeDeps?.store === undefined || knowledgeDeps.embedder === undefined) {
+            return { error: 'not_configured' }
+          }
+          const query =
+            typeof input === 'object' && input !== null
+              ? String((input as Record<string, unknown>).query ?? '')
+              : ''
+          if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
+          try {
+            const result = await retrieve(
+              { store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
+              query,
+              config,
+            )
+            knowledge.citations = result.hits.map((hit, index) => ({
+              id: `c${index + 1}`,
+              title: hit.title,
+              url: hit.url,
+              snippet: hit.text.slice(0, 280),
+              score: hit.score,
+            }))
+            if (result.hits.length === 0) {
+              return {
+                results: [],
+                note: 'No relevant documentation found. Say so rather than guessing.',
+              }
+            }
+            return {
+              results: result.hits.map((hit, index) => ({
+                n: index + 1,
+                title: hit.title,
+                url: hit.url,
+                text: hit.text,
+                score: hit.score,
+              })),
+            }
+          } catch (error) {
+            ctx.logger.warn('knowledge retrieval failed', { error })
+            return {
+              results: [],
+              note: 'Search is temporarily unavailable. Answer from the page context or say you do not know.',
+            }
+          }
+        },
+      } as unknown as Parameters<typeof dynamicTool>[0]) as unknown as (typeof tools)[string]
+    }
 
     const result = await runChain({
       entries: activeChain,
@@ -204,8 +290,8 @@ export function createEngine(
           system,
           messages,
           tools,
-          stopWhen: policy.stopWhen,
           toolChoice: policy.toolChoice,
+          stopWhen: policy.stopWhen,
           ...(policy.summarizeAtStep === undefined
             ? {}
             : {
@@ -284,7 +370,15 @@ export function createEngine(
           { rawError: () => rawError },
         )
 
-        return { stream, modelId: resolved.id }
+        const withCitations =
+          knowledge === undefined || knowledge.citations.length === 0
+            ? stream
+            : appendCitations(stream, {
+                items: knowledge.citations,
+                include: config.knowledge.retrieval.includeCitations,
+              })
+
+        return { stream: withCitations, modelId: resolved.id }
       },
     })
 
@@ -302,10 +396,64 @@ export function createEngine(
 
           const policy = resolvePolicy(config)
 
+          // ── knowledge retrieval (docs/06 §3.8) ─────────────────────────
+          // Modes: `always`/`hybrid` embed the latest user message and inject
+          // hits into the system prompt; `tool`/`hybrid` register
+          // `search_knowledge_base`. Degraded knowledge never fails the chat:
+          // the block is omitted and the tool absent.
+          const knowledgeRequest: { enabled: boolean; citations: Citation[] } = {
+            enabled: false,
+            citations: [],
+          }
+          let documents: KnowledgeSnippet[] = []
+          let knowledgeNote: string | undefined
+          if (
+            knowledgeConfigured &&
+            knowledgeDeps?.store !== undefined &&
+            knowledgeDeps.embedder !== undefined
+          ) {
+            knowledgeRequest.enabled = true
+            if (policy.retrieval !== 'tool' && request.trigger !== 'resume') {
+              const latest = lastUserMessage(request.messages)
+              const query = latest?.parts
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+                .join('\n')
+              if (query !== undefined && query.trim() !== '') {
+                try {
+                  const result = await retrieve(
+                    { store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
+                    query,
+                    config,
+                  )
+                  documents = result.hits
+                  knowledgeRequest.citations = result.hits.map((hit, index) => ({
+                    id: `c${index + 1}`,
+                    title: hit.title,
+                    url: hit.url,
+                    snippet: hit.text.slice(0, 280),
+                    score: hit.score,
+                  }))
+                  if (result.hits.length === 0 && result.belowThreshold) {
+                    knowledgeNote =
+                      'No relevant documentation was found for this question. Say so rather than guessing.'
+                  } else if (result.hits.length === 0) {
+                    knowledgeNote =
+                      'The knowledge base contains no indexed content yet. Answer from what you have.'
+                  }
+                } catch (error) {
+                  ctx.logger.warn('knowledge retrieval failed', { error })
+                }
+              }
+            }
+          }
+
           const composed = composePrompt({
             config,
             ctx: { pageContext: ctx.pageContext, identity: ctx.identity },
             retrieval: policy.retrieval,
+            documents,
+            note: knowledgeNote,
           })
           if (composed.missingVariables.length > 0) {
             ctx.logger.warn('prompt has unresolved {{variables}}', {
@@ -379,6 +527,7 @@ export function createEngine(
             session,
             resumeRunId,
             selectedChain,
+            knowledgeRequest,
           )
           span.setAttribute('sitebot.model', modelId)
 
@@ -553,6 +702,36 @@ export function createEngine(
         }),
       )
 
+      // Knowledge: unreachable store → `degraded`, never `error` — chat keeps
+      // working without retrieval (docs/06 §3.7).
+      if (knowledgeConfigured) {
+        const started = now()
+        try {
+          if (knowledgeDeps?.store === undefined) {
+            throw new EngineError('not_ready', {
+              detail: 'knowledge sources are configured but no store is reachable',
+            })
+          }
+          const stats = await knowledgeDeps.store.stats()
+          checks.knowledge = {
+            status: 'ok',
+            latencyMs: now() - started,
+            type: config.knowledge.store.type,
+            chunks: stats.chunks,
+            documents: stats.documents,
+            lastIndexed: stats.lastIndexed,
+            model: stats.model,
+          }
+        } catch (error) {
+          checks.knowledge = {
+            status: 'degraded',
+            latencyMs: now() - started,
+            error: mapError(error, errorOptions).message,
+            type: config.knowledge.store.type,
+          }
+        }
+      }
+
       // `error` when the provider or storage is unusable, `degraded` when
       // something non-essential is (knowledge and MCP, from Phases 6 and 7).
       const statuses = Object.values(checks).map((check) => check.status)
@@ -574,6 +753,7 @@ export function createEngine(
       await dispatcher.drain()
       await sessionStore.dispose?.()
       await rateLimitStore.dispose?.()
+      await knowledgeDeps?.store?.close()
       await mcpPool.dispose()
     },
   }
@@ -659,6 +839,44 @@ export function createEngine(
       (entry) => !('from' in entry) && entry.name === name && entry.executor?.type === 'client',
     )
   }
+}
+
+// ── citations ───────────────────────────────────────────────────────────────
+
+/**
+ * Attaches the `data-citations` message part once the assistant text finishes
+ * (docs/06 §3.9). The part carries every retrieved chunk; the widget filters
+ * to the `[n]` markers actually used in the text, so the UI stays honest.
+ */
+function appendCitations(
+  stream: ReadableStream<UIMessageChunk>,
+  options: { items: Citation[]; include: boolean },
+): ReadableStream<UIMessageChunk> {
+  if (!options.include || options.items.length === 0) return stream
+  let textDone = false
+  return stream.pipeThrough(
+    new TransformStream<UIMessageChunk, UIMessageChunk>({
+      transform(chunk, controller) {
+        if (chunk.type === 'text-end' && !textDone) {
+          textDone = true
+          controller.enqueue({
+            type: 'data-citations',
+            data: { items: options.items },
+          } as UIMessageChunk)
+        }
+        controller.enqueue(chunk)
+      },
+      flush(controller) {
+        // A response with no text part (tool-only) still cites what the tool found.
+        if (!textDone) {
+          controller.enqueue({
+            type: 'data-citations',
+            data: { items: options.items },
+          } as UIMessageChunk)
+        }
+      },
+    }),
+  )
 }
 
 type MutableToolPart = {

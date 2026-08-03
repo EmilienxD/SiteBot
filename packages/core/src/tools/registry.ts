@@ -2,6 +2,8 @@ import { jsonSchema, tool, type ToolSet } from 'ai'
 import type { ResolvedConfig, ToolEntry } from '@sitebot/config'
 import { isMcpImport } from '@sitebot/config'
 import type { RequestContext } from '../types.js'
+import type { KnowledgeDeps } from '../knowledge/types.js'
+import { retrieve } from '../knowledge/retrieve.js'
 import { randomDelimiterId, untrustedBlock } from '../prompt/untrusted.js'
 import { EngineError } from '../stream/errors.js'
 import { createHttpExecutor } from './http.js'
@@ -20,6 +22,8 @@ export interface ToolRegistryOptions {
   connectStdioMcp?: StdioMcpConnector
   approvals: boolean
   isApprovalGranted?: (toolName: string, input: unknown) => Promise<boolean>
+  /** Phase 6: the reachable knowledge index. Absent → tool is not registered. */
+  knowledge?: KnowledgeDeps | null
 }
 
 export interface ToolRegistry {
@@ -194,6 +198,37 @@ function builtinExecutor(
   options: ToolRegistryOptions,
 ) {
   return async (input: unknown, ctx: RequestContext): Promise<unknown> => {
+    if (id === 'search_knowledge_base') {
+      const knowledge = options.knowledge
+      if (knowledge?.store === undefined || knowledge.embedder === undefined) {
+        return { error: 'not_configured', tool: id }
+      }
+      const query =
+        typeof input === 'object' && input !== null
+          ? String((input as Record<string, unknown>).query ?? '')
+          : ''
+      if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
+      const result = await retrieve(
+        { store: knowledge.store, embedder: knowledge.embedder },
+        query,
+        options.config,
+      )
+      if (result.hits.length === 0) {
+        return {
+          results: [],
+          note: 'No relevant documentation found. Say so rather than guessing.',
+        }
+      }
+      return {
+        results: result.hits.map((hit, index) => ({
+          n: index + 1,
+          title: hit.title,
+          url: hit.url,
+          text: hit.text,
+          score: hit.score,
+        })),
+      }
+    }
     switch (id) {
       case 'list_site_sections':
         return options.config.siteContext.routes

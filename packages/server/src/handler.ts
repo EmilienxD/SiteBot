@@ -136,13 +136,48 @@ export function createSiteBotHandler(
       ? createEventDispatcher({ telemetry: config.telemetry, logger })
       : noopDispatcher
 
+  // `engineDeps` is assembled here so the knowledge block below can attach
+  // itself post-hoc when it resolves. Callers who passed `options.engine`
+  // supplied their own deps and manage knowledge themselves.
+  const engineDeps: EngineDeps = {
+    logger,
+    rateLimitStore,
+    dispatcher,
+    ...options.deps,
+  }
   const engine =
     options.engine ??
     createEngine(
       config,
-      { logger, rateLimitStore, dispatcher, ...options.deps },
+      engineDeps,
       { ...(options.version === undefined ? {} : { version: options.version }) },
     )
+
+  // Phase 6: build the knowledge store when sources are configured (the
+  // engine, not the CLI, owns query-time retrieval). Boot is lazy — the
+  // promise resolves on the first request, so a cold start pays nothing when
+  // knowledge is not configured at all. A store that fails to open degrades
+  // knowledge; chat keeps working, per docs/06 §3.7.
+  let knowledgeReady: Promise<void> | undefined
+  function ensureKnowledge(): Promise<void> {
+    knowledgeReady ??= (async () => {
+      if (options.engine !== undefined) return // external engine, external deps
+      if (config.knowledge.sources.length === 0 || config.knowledge.embedding === undefined) return
+      try {
+        const { createNodeVectorStore } = await import('@sitebot/core/node')
+        const { createQueryEmbedder } = await import('@sitebot/ingest')
+        const store = await createNodeVectorStore(config.knowledge.store, {
+          model: config.knowledge.embedding.model,
+          baseDir: config.$meta.baseDir ?? null,
+        })
+        const embedder = await createQueryEmbedder(config.knowledge.embedding)
+        engineDeps.knowledge = { store, embedder }
+      } catch (error) {
+        logger.warn('knowledge store unreachable; chat continues without RAG', { error })
+      }
+    })()
+    return knowledgeReady
+  }
 
   const debug = config.telemetry.logLevel === 'debug'
   const production =
@@ -158,6 +193,10 @@ export function createSiteBotHandler(
     info: RequestInfo,
   ): Promise<Response> {
     const { security } = config
+
+    // Knowledge is boot-lazy; the first chat request awaits it so retrieval
+    // is present from the first answer, not the second.
+    await ensureKnowledge()
 
     // Cheap first: the declared size, before a byte of the body is read.
     checkContentLength(request.headers.get('content-length'), security.maxRequestBytes)
@@ -336,6 +375,7 @@ export function createSiteBotHandler(
    * instance out of rotation.
    */
   async function handleHealth(cors: Record<string, string>): Promise<Response> {
+    await ensureKnowledge()
     const report = await engine.health()
     return Response.json(report, {
       status: report.status === 'error' ? 503 : 200,

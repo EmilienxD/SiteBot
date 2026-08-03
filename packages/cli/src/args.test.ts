@@ -62,7 +62,7 @@ describe('didYouMean', () => {
 
 describe('formatFlags', () => {
   it('renders aligned rows with shorts and placeholders', () => {
-    const lines = formatFlags({ ...SPECS, config: GLOBAL_FLAGS['config'] })
+    const lines = formatFlags({ ...SPECS, config: GLOBAL_FLAGS['config']! })
     expect(lines.some((line) => line.includes('-p, --port'))).toBe(true)
     expect(lines.some((line) => line.includes('-c, --config <path>'))).toBe(true)
     expect(lines.every((line) => line.startsWith('  '))).toBe(true)

@@ -22,6 +22,13 @@ export type { SafeFetch } from './safe-fetch.js'
 export { connectStdioMcp } from './mcp.js'
 export { createRedisRateLimitStore, RedisRateLimitStore } from './redis-rate-limit.js'
 export type { RedisRateLimitStoreOptions } from './redis-rate-limit.js'
+export { createNodeVectorStore } from './vector-store.js'
+export { createSqliteVectorStore } from './vector-sqlite.js'
+export type { SqliteVectorStoreOptions } from './vector-sqlite.js'
+export { createPgVectorStore } from './vector-pgvector.js'
+export type { PgVectorStoreOptions } from './vector-pgvector.js'
+export { createUpstashVectorStore } from './vector-upstash.js'
+export type { UpstashVectorStoreOptions } from './vector-upstash.js'
 
 /**
  * Build the session store for a config, including the backends the edge-safe

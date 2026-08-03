@@ -12,7 +12,7 @@ import { substituteVariables } from './variables.js'
  * caching work — see the note on block ordering at the bottom of this file.
  */
 
-/** One retrieved chunk. Phase 6 fills these in; the shape is fixed here. */
+/** One retrieved chunk. */
 export interface KnowledgeSnippet {
   id: string
   title?: string
@@ -32,6 +32,12 @@ export interface ComposeInput {
   /** Resolved retrieval mode. Only `always` and `hybrid` inline knowledge. */
   retrieval?: 'tool' | 'always' | 'hybrid'
   documents?: readonly KnowledgeSnippet[]
+  /**
+   * Injected in place of the knowledge block when retrieval ran but found
+   * nothing — the explicit "no relevant documentation" note of docs/06 §3.8,
+   * which is what stops the model confabulating.
+   */
+  note?: string
   /**
    * Fixed delimiter id. Supplied by tests for stable snapshots; production
    * leaves it undefined so every request gets a fresh one (docs/08 §4).
@@ -80,7 +86,10 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   // 4 — <knowledge>: untrusted, inline only when retrieval is always | hybrid.
   const retrieval = input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool')
   if (retrieval !== 'tool') {
-    push('knowledge', knowledgeBlock(input.documents ?? [], delimiterId))
+    push(
+      'knowledge',
+      knowledgeBlock(input.documents ?? [], delimiterId, input.note),
+    )
   }
 
   // 5 — <tool_policy>: generated from the tool set and the current identity.
@@ -159,8 +168,10 @@ function pageContextBlock(page: PageContext | null, delimiterId: string): string
 function knowledgeBlock(
   documents: readonly KnowledgeSnippet[],
   delimiterId: string,
+  note?: string,
 ): string | undefined {
-  if (documents.length === 0) return undefined
+  if (documents.length === 0 && note === undefined) return undefined
+  if (documents.length === 0) return `<knowledge>\n${note}\n</knowledge>`
 
   const rendered = documents
     .map((doc, index) => {
@@ -209,8 +220,18 @@ function toolPolicyBlock(
     }
   }
 
+  const knowledgeAvailable = config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
   if (retrieval !== 'tool' && config.knowledge.retrieval.includeCitations) {
     lines.push('- Cite sources with [n] when you use knowledge results.')
+  }
+  if (
+    retrieval !== 'always' &&
+    knowledgeAvailable &&
+    config.knowledge.retrieval.includeCitations
+  ) {
+    lines.push(
+      '- `search_knowledge_base` searches the indexed site content. Cite its results with [n] when you use them.',
+    )
   }
 
   if (config.mode === 'chat' && config.tools.length > 0) {
