@@ -139,7 +139,8 @@ function samePath(href: string, base: URL): string | null {
     return null
   }
   if (resolved.origin !== base.origin) return null
-  if (/\.(png|jpe?g|svg|gif|webp|ico|pdf|zip|css|js|xml|json)$/i.test(resolved.pathname)) return null
+  if (/\.(png|jpe?g|svg|gif|webp|ico|pdf|zip|css|js|xml|json)$/i.test(resolved.pathname))
+    return null
 
   const path = resolved.pathname.replace(/\/+$/, '')
   return path === '' ? null : path

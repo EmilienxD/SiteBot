@@ -15,8 +15,7 @@ import { runVectorStoreConformance } from '../../test/vector-store-conformance.j
 
 runVectorStoreConformance({
   name: 'memory',
-  create: async (model) =>
-    new MemoryVectorStore({ ...(model === undefined ? {} : { model }) }),
+  create: async (model) => new MemoryVectorStore({ ...(model === undefined ? {} : { model }) }),
 })
 
 /** An in-memory SQL stand-in exercising the sqlite store's real code path. */
@@ -159,15 +158,18 @@ function fakePg(rows: PgRows = { chunks: new Map(), meta: new Map() }) {
       }
       if (text.startsWith('SELECT id, text, metadata FROM')) {
         return {
-          rows: [...rows.chunks.values()].filter((row) => row['url'] === params[0]).map((row) => ({
-            id: row['id'],
-            text: row['text'],
-            metadata: row['metadata'],
-          })),
+          rows: [...rows.chunks.values()]
+            .filter((row) => row['url'] === params[0])
+            .map((row) => ({
+              id: row['id'],
+              text: row['text'],
+              metadata: row['metadata'],
+            })),
         }
       }
       if (text.startsWith('DELETE FROM') && text.includes('source_id')) {
-        for (const [id, row] of rows.chunks) if (row['source_id'] === params[0]) rows.chunks.delete(id)
+        for (const [id, row] of rows.chunks)
+          if (row['source_id'] === params[0]) rows.chunks.delete(id)
         return { rows: [] }
       }
       if (text.startsWith('DELETE FROM') && text.includes('id = ANY')) {

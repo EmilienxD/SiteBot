@@ -18,7 +18,12 @@ import { isEnvSourced, type ResolvedConfig } from '@sitebot/config'
 import { lintTools } from '@sitebot/core'
 import type { FlagSpecs } from '../args.js'
 import type { Ui } from '../terminal.js'
-import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+import {
+  loadForCommand,
+  reportConfigError,
+  type CommandContext,
+  type CommandResult,
+} from './context.js'
 
 export const VALIDATE_FLAGS: FlagSpecs = {
   json: { type: 'boolean', summary: 'Print the resolved config as JSON.' },

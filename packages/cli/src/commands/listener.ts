@@ -12,7 +12,12 @@
  * caller remembering to pass it.
  */
 
-import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { ResolvedConfig } from '@sitebot/config'
 import { createNodeHandler, type NodeHandler } from '@sitebot/server/node'
@@ -24,10 +29,7 @@ export interface ListenerOptions {
   port: number
   version?: string
   /** Extra routes tried before the SiteBot handler. Returns true when handled. */
-  extraRoutes?: (
-    request: IncomingMessage,
-    response: ServerResponse,
-  ) => boolean | Promise<boolean>
+  extraRoutes?: (request: IncomingMessage, response: ServerResponse) => boolean | Promise<boolean>
   onRequest?: (info: { method: string; url: string }) => void
   onResponse?: (info: { method: string; url: string; status: number; durationMs: number }) => void
   /**
@@ -262,5 +264,10 @@ export function untilShutdown(): { promise: Promise<string>; dispose: () => void
     process.once('SIGINT', () => onSignal?.('SIGINT'))
     process.once('SIGTERM', () => onSignal?.('SIGTERM'))
   })
-  return { promise, dispose: () => { onSignal = null } }
+  return {
+    promise,
+    dispose: () => {
+      onSignal = null
+    },
+  }
 }

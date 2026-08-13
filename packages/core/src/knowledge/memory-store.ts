@@ -26,7 +26,13 @@ export class MemoryVectorStore implements VectorStore {
   #lastIndexed: string
   readonly #persist?: (snapshot: unknown) => Promise<void>
 
-  constructor(options: { model?: string; chunks?: Chunk[]; persist?: (snapshot: unknown) => Promise<void> } = {}) {
+  constructor(
+    options: {
+      model?: string
+      chunks?: Chunk[]
+      persist?: (snapshot: unknown) => Promise<void>
+    } = {},
+  ) {
     this.#model = options.model ?? ''
     this.#lastIndexed = new Date(0).toISOString()
     this.#persist = options.persist

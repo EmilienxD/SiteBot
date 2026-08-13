@@ -47,18 +47,21 @@ function countingEmbedder(dimensions = 3) {
 }
 
 function configFor(content: string, model = 'text-embedding-3-small'): ResolvedConfig {
-  const result = validateConfig({
-    version: 1,
-    name: 'Acme',
-    backend: { provider: 'anthropic', model: 'claude-opus-5', apiKey: 'test' },
-    prompt: { system: 'You are a test assistant.' },
-    knowledge: {
-      sources: [{ type: 'text', id: 'docs', content }],
-      embedding: { provider: 'ollama', model },
-      store: { type: 'memory' },
-      chunk: { minTokens: 0 },
+  const result = validateConfig(
+    {
+      version: 1,
+      name: 'Acme',
+      backend: { provider: 'anthropic', model: 'claude-opus-5', apiKey: 'test' },
+      prompt: { system: 'You are a test assistant.' },
+      knowledge: {
+        sources: [{ type: 'text', id: 'docs', content }],
+        embedding: { provider: 'ollama', model },
+        store: { type: 'memory' },
+        chunk: { minTokens: 0 },
+      },
     },
-  }, { env: {} })
+    { env: {} },
+  )
   if (!result.ok) {
     throw new Error(`config failed: ${JSON.stringify(result.errors)}`)
   }
@@ -199,7 +202,9 @@ describe('runIngest()', () => {
     expect(Object.keys(manifest!.sources)).toContain('docs')
     // Atomic by inspection: a `.tmp` file must not exist after a clean run.
     expect(
-      await import('node:fs').then((fs) => fs.existsSync(join(dir, '.sitebot', 'manifest.json.tmp'))),
+      await import('node:fs').then((fs) =>
+        fs.existsSync(join(dir, '.sitebot', 'manifest.json.tmp')),
+      ),
     ).toBe(false)
   })
 
@@ -216,19 +221,22 @@ describe('runIngest()', () => {
 })
 
 function filesConfig(glob: string): ResolvedConfig {
-  const result = validateConfig({
-    version: 1,
-    name: 'Acme',
-    backend: { provider: 'anthropic', model: 'claude-opus-5', apiKey: 'test' },
-    prompt: { system: 'You are a test assistant.' },
-    knowledge: {
-      sources: [{ type: 'files', id: 'site', glob, baseUrl: 'https://acme.test' }],
-      embedding: { provider: 'ollama', model: 'text-embedding-3-small' },
-      store: { type: 'memory' },
-      chunk: { minTokens: 0 },
-      extract: { minChars: 0 },
+  const result = validateConfig(
+    {
+      version: 1,
+      name: 'Acme',
+      backend: { provider: 'anthropic', model: 'claude-opus-5', apiKey: 'test' },
+      prompt: { system: 'You are a test assistant.' },
+      knowledge: {
+        sources: [{ type: 'files', id: 'site', glob, baseUrl: 'https://acme.test' }],
+        embedding: { provider: 'ollama', model: 'text-embedding-3-small' },
+        store: { type: 'memory' },
+        chunk: { minTokens: 0 },
+        extract: { minChars: 0 },
+      },
     },
-  }, { env: {} })
+    { env: {} },
+  )
   if (!result.ok) throw new Error(`config failed: ${JSON.stringify(result.errors)}`)
   return result.value
 }
@@ -241,4 +249,3 @@ function baseManifest(model: string) {
     sources: {},
   }
 }
-

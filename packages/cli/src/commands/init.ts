@@ -45,8 +45,16 @@ export const INIT_FLAGS: FlagSpecs = {
   },
   provider: { type: 'string', summary: 'Model provider.', placeholder: '<id>' },
   model: { type: 'string', summary: 'Model ID.', placeholder: '<id>' },
-  'site-url': { type: 'string', summary: 'Site homepage, used to draft siteContext.', placeholder: '<url>' },
-  name: { type: 'string', summary: 'Assistant name, shown as the panel title.', placeholder: '<name>' },
+  'site-url': {
+    type: 'string',
+    summary: 'Site homepage, used to draft siteContext.',
+    placeholder: '<url>',
+  },
+  name: {
+    type: 'string',
+    summary: 'Assistant name, shown as the panel title.',
+    placeholder: '<name>',
+  },
   framework: {
     type: 'string',
     summary: `Override detection: ${FRAMEWORKS.join(' | ')}.`,
@@ -129,7 +137,13 @@ export async function runInit(context: CommandContext): Promise<CommandResult> {
   })
 
   try {
-    const answers = await collect(context, prompter, framework, detection.typescript, detection.srcDir)
+    const answers = await collect(
+      context,
+      prompter,
+      framework,
+      detection.typescript,
+      detection.srcDir,
+    )
     const files = buildScaffold(answers)
 
     if (dryRun) {
@@ -175,13 +189,13 @@ async function collect(
   const { ui, flags, cwd } = context
 
   const provider = await resolveProvider(prompter, flags['provider'], ui)
-  const model =
-    asString(flags['model']) ??
-    (await prompter.text('Model', DEFAULT_MODELS[provider]))
+  const model = asString(flags['model']) ?? (await prompter.text('Model', DEFAULT_MODELS[provider]))
 
-  const siteUrl = flags['skip-draft'] === true
-    ? null
-    : (asString(flags['site-url']) ?? (await prompter.text('Site URL (used to draft siteContext)', '')))
+  const siteUrl =
+    flags['skip-draft'] === true
+      ? null
+      : (asString(flags['site-url']) ??
+        (await prompter.text('Site URL (used to draft siteContext)', '')))
 
   let draft: SiteDraft | null = null
   if (siteUrl !== null && siteUrl !== '') {
@@ -223,11 +237,7 @@ async function collect(
   }
 }
 
-async function resolveProvider(
-  prompter: Prompter,
-  flag: unknown,
-  ui: Ui,
-): Promise<ProviderId> {
+async function resolveProvider(prompter: Prompter, flag: unknown, ui: Ui): Promise<ProviderId> {
   const requested = asString(flag)
   if (requested !== undefined) {
     if ((PROVIDERS as readonly string[]).includes(requested)) return requested as ProviderId
@@ -282,16 +292,16 @@ function printNextSteps(
 
   next(`Install: ${ui.style(`npm i ${packages.join(' ')}`, 'cyan')}`)
   if (envVar !== null) {
-    next(
-      `Put your key in ${ui.style('.env.local', 'cyan')}: ${ui.style(`${envVar}=…`, 'dim')}`,
-    )
+    next(`Put your key in ${ui.style('.env.local', 'cyan')}: ${ui.style(`${envVar}=…`, 'dim')}`)
   }
 
   if (answers.framework === 'static') {
     next(`Run the sidecar: ${ui.style('npx sitebot dev', 'cyan')}`)
     next('Add the script tag to your page template, before </body>:')
   } else {
-    next(`Add the script tag to ${ui.style(scriptTagLocation(answers.framework, answers.srcDir), 'cyan')}:`)
+    next(
+      `Add the script tag to ${ui.style(scriptTagLocation(answers.framework, answers.srcDir), 'cyan')}:`,
+    )
   }
 
   ui.line()

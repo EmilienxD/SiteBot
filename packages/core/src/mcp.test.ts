@@ -109,9 +109,9 @@ describe('MCP pool lifecycle', () => {
     const sleeps: number[] = []
     const first = fakeConnection({ list: vi.fn().mockRejectedValue(new Error('socket closed')) })
     const second = fakeConnection({
-      list: vi.fn().mockResolvedValue([
-        { name: 'search_docs', description: 'Search docs.', inputSchema: {} },
-      ]),
+      list: vi
+        .fn()
+        .mockResolvedValue([{ name: 'search_docs', description: 'Search docs.', inputSchema: {} }]),
     })
     const connect = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
     const pool = new McpClientPool({

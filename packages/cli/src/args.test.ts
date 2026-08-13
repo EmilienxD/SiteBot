@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { ArgError, didYouMean, formatFlags, GLOBAL_FLAGS, parseArgs, type FlagSpecs } from './args.js'
+import {
+  ArgError,
+  didYouMean,
+  formatFlags,
+  GLOBAL_FLAGS,
+  parseArgs,
+  type FlagSpecs,
+} from './args.js'
 
 const SPECS: FlagSpecs = {
   port: { type: 'number', summary: 'Port.', short: 'p' },

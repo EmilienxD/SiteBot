@@ -44,16 +44,36 @@ beforeAll(async () => {
         return
       }
       case '/docs/getting-started':
-        res.end(page('Getting Started', 'Install the package and write your first config file in a minute or two of total work.'))
+        res.end(
+          page(
+            'Getting Started',
+            'Install the package and write your first config file in a minute or two of total work.',
+          ),
+        )
         return
       case '/docs/api':
-        res.end(page('API', 'The API surface is four endpoints: chat, config, feedback and health, each documented in detail.'))
+        res.end(
+          page(
+            'API',
+            'The API surface is four endpoints: chat, config, feedback and health, each documented in detail.',
+          ),
+        )
         return
       case '/pricing':
-        res.end(page('Pricing', 'Pricing is published openly. Starter is ten dollars, scale is fifty, and enterprise is annual.'))
+        res.end(
+          page(
+            'Pricing',
+            'Pricing is published openly. Starter is ten dollars, scale is fifty, and enterprise is annual.',
+          ),
+        )
         return
       case '/admin/panel':
-        res.end(page('Admin', 'Administrative internals that must never be indexed by the knowledge pipeline.'))
+        res.end(
+          page(
+            'Admin',
+            'Administrative internals that must never be indexed by the knowledge pipeline.',
+          ),
+        )
         return
       default:
         res.statusCode = 404
@@ -72,7 +92,10 @@ afterAll(async () => {
   await new Promise((resolve) => server.close(resolve))
 })
 
-function configWith(source: Record<string, unknown>, overrides: Record<string, unknown> = {}): ResolvedConfig {
+function configWith(
+  source: Record<string, unknown>,
+  overrides: Record<string, unknown> = {},
+): ResolvedConfig {
   const result = validateConfig(
     {
       version: 1,
@@ -145,7 +168,10 @@ describe('sources: openapi', () => {
       openapi: '3.0.0',
       paths: {
         '/users': {
-          get: { summary: 'List users', parameters: [{ name: 'limit', in: 'query', required: false, description: 'Page size' }] },
+          get: {
+            summary: 'List users',
+            parameters: [{ name: 'limit', in: 'query', required: false, description: 'Page size' }],
+          },
           post: { summary: 'Create a user' },
         },
         '/users/{id}': { delete: { summary: 'Delete a user', description: 'Irreversible.' } },

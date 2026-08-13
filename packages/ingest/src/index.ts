@@ -18,11 +18,7 @@ export { chunkDocument } from './chunk.js'
 export type { DocumentInput, RawChunk } from './chunk.js'
 export { extract, parseHtml, querySelectorAll } from './extract.js'
 export type { ExtractedPage, ExtractOptions } from './extract.js'
-export {
-  createEmbeddingModel,
-  dollarsPerMillionTokens,
-  embedChunks,
-} from './embedding.js'
+export { createEmbeddingModel, dollarsPerMillionTokens, embedChunks } from './embedding.js'
 export type { EmbeddingAdapter, EmbeddingConfigLike } from './embedding.js'
 export { createQueryEmbedder } from './query-embedder.js'
 export {

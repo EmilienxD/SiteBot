@@ -65,7 +65,9 @@ export async function fetchPage(
     status: response.status,
     body,
     notModified: false,
-    ...(response.headers.get('etag') === null ? {} : { etag: response.headers.get('etag') ?? undefined }),
+    ...(response.headers.get('etag') === null
+      ? {}
+      : { etag: response.headers.get('etag') ?? undefined }),
     ...(response.headers.get('last-modified') === null
       ? {}
       : { lastModified: response.headers.get('last-modified') ?? undefined }),
@@ -206,7 +208,9 @@ export async function loadOpenApi(
           const bits = [parameter.name, parameter.in, parameter.required ? 'required' : '']
             .filter((part) => part !== undefined && part !== '')
             .join(', ')
-          lines.push(`- ${bits}${parameter.description === undefined ? '' : ` — ${parameter.description}`}`)
+          lines.push(
+            `- ${bits}${parameter.description === undefined ? '' : ` — ${parameter.description}`}`,
+          )
         }
       }
       const textDocument = lines.join('\n').trim()
@@ -450,10 +454,7 @@ export async function loadSitemap(
   return documents
 }
 
-function placeholder(
-  url: string,
-  contentHash: string,
-): RawDocument {
+function placeholder(url: string, contentHash: string): RawDocument {
   return {
     url: normalizeUrl(url),
     title: '',

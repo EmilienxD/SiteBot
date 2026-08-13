@@ -12,7 +12,12 @@ import { runIngest as runIngestPipeline, type IngestOptions, type IngestRun } fr
 import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import type { FlagSpecs } from '../args.js'
 import { formatCount, type Ui } from '../terminal.js'
-import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+import {
+  loadForCommand,
+  reportConfigError,
+  type CommandContext,
+  type CommandResult,
+} from './context.js'
 
 export type { IngestOptions, IngestRun }
 

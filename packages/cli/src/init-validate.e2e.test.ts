@@ -38,7 +38,9 @@ afterEach(async () => {
   await rm(cwd, { recursive: true, force: true })
 })
 
-function context(overrides: Partial<CommandContext> = {}): CommandContext & { out: () => string; err: () => string } {
+function context(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { out: () => string; err: () => string } {
   const lines: string[] = []
   const errors: string[] = []
   return {

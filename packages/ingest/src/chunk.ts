@@ -208,10 +208,7 @@ function packSemantic(
  * embedding time* (the pipeline concatenates it), not of `RawChunk.text` —
  * keeping them separate is what lets `expandNeighbours` present clean prose.
  */
-export function chunkDocument(
-  document: DocumentInput,
-  options: Knowledge['chunk'],
-): RawChunk[] {
+export function chunkDocument(document: DocumentInput, options: Knowledge['chunk']): RawChunk[] {
   const chunks: RawChunk[] = []
   const ordinal = { value: 0 }
   switch (options.strategy) {

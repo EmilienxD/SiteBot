@@ -8,4 +8,9 @@
  * so the command imports this alias instead.
  */
 
-export { productionDoctor, findInlineSecrets, type DoctorReport, type ProductionCheck } from './index.js'
+export {
+  productionDoctor,
+  findInlineSecrets,
+  type DoctorReport,
+  type ProductionCheck,
+} from './index.js'

@@ -85,8 +85,7 @@ export function finalize(raw: ScoredChunk[], config: ResolvedConfig): RetrievalH
     if (seenIds.has(hit.chunk.id)) continue
     if (retrieval.dedupeByUrl && seenUrls.has(url) && distinctUrls >= topK) continue
     const headingPrefix = hit.chunk.metadata.headingPath.join(' > ')
-    const text =
-      headingPrefix === '' ? hit.chunk.text : `${headingPrefix}\n\n${hit.chunk.text}`
+    const text = headingPrefix === '' ? hit.chunk.text : `${headingPrefix}\n\n${hit.chunk.text}`
     const tokens = estimateTokens(text)
     if (budget - tokens < 0 && out.length > 0) continue
     budget -= tokens

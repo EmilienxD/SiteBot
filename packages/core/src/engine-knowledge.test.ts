@@ -35,7 +35,11 @@ function textModel(chunks: string[]): MockLanguageModelV3 {
   ]
   return new MockLanguageModelV3({
     doStream: async () => ({
-      stream: simulateReadableStream({ chunks: parts, chunkDelayInMs: null, initialDelayInMs: null }),
+      stream: simulateReadableStream({
+        chunks: parts,
+        chunkDelayInMs: null,
+        initialDelayInMs: null,
+      }),
     }),
   })
 }
@@ -111,7 +115,12 @@ describe('engine knowledge (docs/06)', () => {
   it('injects a <knowledge> block when retrieval scores a hit', async () => {
     const store = new MemoryVectorStore({ model: 'test-embed' })
     await store.upsert([
-      testChunk('c-ship', 'https://acme.com/shipping', 'Orders ship in 2 business days.', [1, 0, 0]),
+      testChunk(
+        'c-ship',
+        'https://acme.com/shipping',
+        'Orders ship in 2 business days.',
+        [1, 0, 0],
+      ),
       testChunk('c-hours', 'https://acme.com/hours', 'Support is weekdays 9 to 5.', [0, 1, 0]),
     ])
     let systemSeen = ''
@@ -147,7 +156,10 @@ describe('engine knowledge (docs/06)', () => {
       knowledge: { store, embedder: needleEmbedder({ ship: 0 }) },
     })
     const response = await engine.handleChat(
-      { sessionId: SESSION, messages: [userMessage('When will my order ship?')] } satisfies ChatRequest,
+      {
+        sessionId: SESSION,
+        messages: [userMessage('When will my order ship?')],
+      } satisfies ChatRequest,
       testContext(),
     )
     expect(response.status).toBe(200)

@@ -150,7 +150,11 @@ function editDistance(a: string, b: string): number {
     const current = [i]
     for (let j = 1; j <= b.length; j += 1) {
       const substitution = (previous[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1)
-      current[j] = Math.min((previous[j] as number) + 1, (current[j - 1] as number) + 1, substitution)
+      current[j] = Math.min(
+        (previous[j] as number) + 1,
+        (current[j - 1] as number) + 1,
+        substitution,
+      )
     }
     previous = current
   }

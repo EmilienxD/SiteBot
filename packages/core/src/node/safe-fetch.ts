@@ -25,8 +25,9 @@ export function createSafeFetch(): SafeFetch {
           .then((addresses) => {
             const family = options.family === 6 ? 6 : 4
             const address =
-              addresses.find((candidate) => family === 6 ? candidate.includes(':') : !candidate.includes(':')) ??
-              addresses[0]
+              addresses.find((candidate) =>
+                family === 6 ? candidate.includes(':') : !candidate.includes(':'),
+              ) ?? addresses[0]
             if (address === undefined) throw new Error(`No address found for ${hostname}.`)
             callback(null, address, address.includes(':') ? 6 : 4)
           })
@@ -35,9 +36,12 @@ export function createSafeFetch(): SafeFetch {
     },
   })
   const fetchImpl: typeof fetch = (input, init) =>
-    undiciFetch(input as Parameters<typeof undiciFetch>[0], {
-      ...init,
-      dispatcher,
-    } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>
+    undiciFetch(
+      input as Parameters<typeof undiciFetch>[0],
+      {
+        ...init,
+        dispatcher,
+      } as Parameters<typeof undiciFetch>[1],
+    ) as unknown as Promise<Response>
   return { fetch: fetchImpl, resolveHost }
 }

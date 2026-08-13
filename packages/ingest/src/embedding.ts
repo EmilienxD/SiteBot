@@ -50,7 +50,7 @@ const PRICING: Record<string, number> = {
   // USD per 1M tokens — unknown models return undefined.
   'text-embedding-3-small': 0.02,
   'text-embedding-3-large': 0.13,
-  'text-embedding-004': 0.000, // free tier
+  'text-embedding-004': 0.0, // free tier
   'mistral-embed': 0.1,
   'embed-v4.0': 0.12,
   'voyage-3': 0.06,
@@ -151,7 +151,9 @@ export async function createEmbeddingModel(
 }
 
 function missingFactory(pkg: string, name: string): Error {
-  return new Error(`${pkg} was found but does not export ${name} — the installed version is too old.`)
+  return new Error(
+    `${pkg} was found but does not export ${name} — the installed version is too old.`,
+  )
 }
 
 interface HttpSpec {
@@ -205,7 +207,11 @@ function createHttpEmbeddingModel(
     modelId: config.model,
     maxEmbeddingsPerCall: config.batchSize,
     supportsParallelCalls: false,
-    async doEmbed(options: { values: string[]; abortSignal?: AbortSignal; headers?: Record<string, string | undefined> }) {
+    async doEmbed(options: {
+      values: string[]
+      abortSignal?: AbortSignal
+      headers?: Record<string, string | undefined>
+    }) {
       const response = await fetch(resolved.url, {
         method: 'POST',
         headers: resolved.headers,
@@ -246,13 +252,12 @@ export async function embedChunks(
       while (cursor < batches.length) {
         const batchIndex = cursor++
         const batch = batches[batchIndex]!
-        const result = await withRetry(() =>
-          embedMany({ model, values: batch, maxRetries: 0 }),
-        )
+        const result = await withRetry(() => embedMany({ model, values: batch, maxRetries: 0 }))
         for (let offset = 0; offset < batch.length; offset++) {
           embeddings[batchIndex * batchSize + offset] = result.embeddings[offset]!
         }
-        tokens += result.usage?.tokens ?? batch.reduce((total, t) => total + Math.ceil(t.length / 4), 0)
+        tokens +=
+          result.usage?.tokens ?? batch.reduce((total, t) => total + Math.ceil(t.length / 4), 0)
       }
     }),
   )

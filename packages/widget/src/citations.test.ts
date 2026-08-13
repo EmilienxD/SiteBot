@@ -7,7 +7,10 @@ import { citationList } from './panel.js'
  * `data-citations` part, and shows only those the model actually cited.
  */
 
-function messageWith(citations: { id: string; title: string; url: string; snippet: string; score: number }[], text: string): UIMessage {
+function messageWith(
+  citations: { id: string; title: string; url: string; snippet: string; score: number }[],
+  text: string,
+): UIMessage {
   return {
     id: 'm1',
     role: 'assistant',
@@ -19,8 +22,20 @@ function messageWith(citations: { id: string; title: string; url: string; snippe
 }
 
 const CITATIONS = [
-  { id: 'c1', title: 'Shipping', url: 'https://acme.com/shipping', snippet: 'Ships in 2 days.', score: 0.9 },
-  { id: 'c2', title: 'Returns', url: 'https://acme.com/returns', snippet: '30-day returns.', score: 0.8 },
+  {
+    id: 'c1',
+    title: 'Shipping',
+    url: 'https://acme.com/shipping',
+    snippet: 'Ships in 2 days.',
+    score: 0.9,
+  },
+  {
+    id: 'c2',
+    title: 'Returns',
+    url: 'https://acme.com/returns',
+    snippet: '30-day returns.',
+    score: 0.8,
+  },
   { id: 'c3', title: 'Hours', url: 'https://acme.com/hours', snippet: 'Weekdays 9–5.', score: 0.5 },
 ]
 
@@ -37,7 +52,11 @@ describe('citationList', () => {
   })
 
   it('returns nothing for a message without a citations part', () => {
-    const message: UIMessage = { id: 'm1', role: 'assistant', parts: [{ type: 'text', text: 'hi' }] }
+    const message: UIMessage = {
+      id: 'm1',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'hi' }],
+    }
     expect(citationList(message, 'hi')).toHaveLength(0)
   })
 

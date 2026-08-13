@@ -49,7 +49,15 @@ export function createFastifyPlugin(
   options: SiteBotHandlerOptions = {},
 ): FastifyPlugin {
   const safe = createSafeFetch()
-  const handler = createSiteBotHandler(config, { ...options, deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp, ...options.deps } })
+  const handler = createSiteBotHandler(config, {
+    ...options,
+    deps: {
+      fetchImpl: safe.fetch,
+      resolveHost: safe.resolveHost,
+      connectStdioMcp,
+      ...options.deps,
+    },
+  })
 
   const plugin = async function siteBotFastifyPlugin(
     instance: FastifyLikeInstance,

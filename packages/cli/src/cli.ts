@@ -44,7 +44,15 @@ function summaryOf(name: string): string {
 function usage(): string {
   const width = Math.max(...COMMANDS.map((c) => c.name.length))
   const lines = COMMANDS.map((c) => `  ${c.name.padEnd(width)}  ${c.summary}`)
-  return ['Usage: sitebot <command> [options]', '', 'Commands:', ...lines, '', '  -h, --help  Show help for a command, e.g. sitebot dev --help', ''].join('\n')
+  return [
+    'Usage: sitebot <command> [options]',
+    '',
+    'Commands:',
+    ...lines,
+    '',
+    '  -h, --help  Show help for a command, e.g. sitebot dev --help',
+    '',
+  ].join('\n')
 }
 
 function commandUsage(name: string, entry: CommandEntry): string {
@@ -112,7 +120,9 @@ async function main(argv: readonly string[]): Promise<number> {
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`)
+    process.stderr.write(
+      `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    )
     process.exit(1)
   },
 )

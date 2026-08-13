@@ -73,12 +73,12 @@ export class McpClientPool {
       options.connect ??
       ((server) =>
         server.transport === 'stdio'
-          ? options.connectStdio?.(server) ??
+          ? (options.connectStdio?.(server) ??
             Promise.reject(
               new EngineError('not_ready', {
                 message: 'MCP stdio transport requires @sitebot/core/node.',
               }),
-            )
+            ))
           : connectRemote(server, options.fetchImpl))
     this.#now = options.now ?? (() => Date.now())
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
@@ -221,7 +221,9 @@ async function expandFromConnection(
   const allow = entry.allow === undefined ? null : new Set(entry.allow)
   const deny = new Set(entry.deny)
   return listed
-    .filter((definition) => (allow === null || allow.has(definition.name)) && !deny.has(definition.name))
+    .filter(
+      (definition) => (allow === null || allow.has(definition.name)) && !deny.has(definition.name),
+    )
     .map((definition) => ({
       name: `${entry.prefix}${definition.name}`,
       description: frameDescription(
@@ -244,7 +246,10 @@ export async function createMcpExecutor(
   return (input) => connection.call(executor.tool, input)
 }
 
-async function connectRemote(server: RemoteServer, fetchImpl?: typeof fetch): Promise<McpConnection> {
+async function connectRemote(
+  server: RemoteServer,
+  fetchImpl?: typeof fetch,
+): Promise<McpConnection> {
   const { Client } = await import('@modelcontextprotocol/sdk/client')
   const requestInit = { headers: server.headers }
   const transport =
@@ -277,9 +282,7 @@ async function connectRemote(server: RemoteServer, fetchImpl?: typeof fetch): Pr
       const result = await client.callTool({
         name,
         arguments:
-          typeof input === 'object' && input !== null
-            ? (input as Record<string, unknown>)
-            : {},
+          typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
       })
       return capResult(result)
     },

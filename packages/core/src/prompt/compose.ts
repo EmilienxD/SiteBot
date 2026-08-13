@@ -86,10 +86,7 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   // 4 — <knowledge>: untrusted, inline only when retrieval is always | hybrid.
   const retrieval = input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool')
   if (retrieval !== 'tool') {
-    push(
-      'knowledge',
-      knowledgeBlock(input.documents ?? [], delimiterId, input.note),
-    )
+    push('knowledge', knowledgeBlock(input.documents ?? [], delimiterId, input.note))
   }
 
   // 5 — <tool_policy>: generated from the tool set and the current identity.
@@ -220,15 +217,12 @@ function toolPolicyBlock(
     }
   }
 
-  const knowledgeAvailable = config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
+  const knowledgeAvailable =
+    config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
   if (retrieval !== 'tool' && config.knowledge.retrieval.includeCitations) {
     lines.push('- Cite sources with [n] when you use knowledge results.')
   }
-  if (
-    retrieval !== 'always' &&
-    knowledgeAvailable &&
-    config.knowledge.retrieval.includeCitations
-  ) {
+  if (retrieval !== 'always' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {
     lines.push(
       '- `search_knowledge_base` searches the indexed site content. Cite its results with [n] when you use them.',
     )

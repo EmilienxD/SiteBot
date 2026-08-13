@@ -84,7 +84,13 @@ describe('doctor diagnose (offline, no network)', () => {
 
   it('flags literal secrets inline in the config', async () => {
     const report = await diagnose(
-      makeConfig({ backend: { provider: 'openai', model: 'gpt-4o-mini', apiKey: 'sk-inline-secret-with-plenty-of-length' } }),
+      makeConfig({
+        backend: {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          apiKey: 'sk-inline-secret-with-plenty-of-length',
+        },
+      }),
       { cwd: process.cwd(), env: {}, offline: true },
     )
     const secrets = report.checks.find((check) => check.name === 'inline secrets')

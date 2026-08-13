@@ -60,7 +60,13 @@ export function checkCrossFields(
 function warnUnapprovedWritableTools(config: SiteBotConfig, warnings: ConfigWarning[]): void {
   if (config.mode !== 'agent' || config.agent.approvalPolicy !== 'never') return
   config.tools.forEach((entry, index) => {
-    if (isMcpImport(entry) || entry.readOnly || entry.requiresApproval || config.agent.approvalRequired.includes(entry.name)) return
+    if (
+      isMcpImport(entry) ||
+      entry.readOnly ||
+      entry.requiresApproval ||
+      config.agent.approvalRequired.includes(entry.name)
+    )
+      return
     warnings.push({
       path: `tools[${index}]`,
       message: `Writable tool "${entry.name}" is reachable without approval because agent.approvalPolicy is "never".`,

@@ -69,7 +69,10 @@ const CORPUS: Chunk[] = [
   }),
 ]
 
-async function buildStore(factory: StoreFactory, model = 'test-embed-1'): Promise<VectorStore | undefined> {
+async function buildStore(
+  factory: StoreFactory,
+  model = 'test-embed-1',
+): Promise<VectorStore | undefined> {
   try {
     return await factory.create(model)
   } catch {

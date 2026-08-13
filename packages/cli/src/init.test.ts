@@ -19,11 +19,17 @@ afterEach(async () => {
 function capture() {
   const lines: string[] = []
   const errors: string[] = []
-  const ui = new Ui({ color: false, write: (text) => lines.push(text), writeError: (text) => errors.push(text) })
+  const ui = new Ui({
+    color: false,
+    write: (text) => lines.push(text),
+    writeError: (text) => errors.push(text),
+  })
   return { ui, lines: lines, errors, text: () => lines.join(''), errText: () => errors.join('') }
 }
 
-function context(overrides: Partial<CommandContext> = {}): CommandContext & { output: ReturnType<typeof capture> } {
+function context(
+  overrides: Partial<CommandContext> = {},
+): CommandContext & { output: ReturnType<typeof capture> } {
   const output = capture()
   return {
     output,
@@ -106,9 +112,9 @@ describe('sitebot init', () => {
     const result = await runInit(ctx)
 
     expect(result.exitCode).toBe(0)
-    await expect(
-      readFile(join(cwd, 'chatbot.config.yaml'), 'utf8'),
-    ).resolves.toContain('mode: chat')
+    await expect(readFile(join(cwd, 'chatbot.config.yaml'), 'utf8')).resolves.toContain(
+      'mode: chat',
+    )
     expect(ctx.output.text()).toContain('npx sitebot dev')
   })
 

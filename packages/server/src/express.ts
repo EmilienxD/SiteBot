@@ -41,7 +41,15 @@ export function createExpressMiddleware(
   options: SiteBotHandlerOptions = {},
 ): ExpressMiddleware {
   const safe = createSafeFetch()
-  const handler = createSiteBotHandler(config, { ...options, deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp, ...options.deps } })
+  const handler = createSiteBotHandler(config, {
+    ...options,
+    deps: {
+      fetchImpl: safe.fetch,
+      resolveHost: safe.resolveHost,
+      connectStdioMcp,
+      ...options.deps,
+    },
+  })
 
   const middleware = function siteBotExpressMiddleware(
     request: ExpressRequest,

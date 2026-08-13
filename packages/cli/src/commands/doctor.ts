@@ -29,7 +29,12 @@ import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
 import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { findInlineSecrets, productionDoctor } from '../production.js'
-import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+import {
+  loadForCommand,
+  reportConfigError,
+  type CommandContext,
+  type CommandResult,
+} from './context.js'
 
 export const DOCTOR_FLAGS: FlagSpecs = {
   production: {
@@ -234,10 +239,7 @@ function envChecks(config: ResolvedConfig, env: NodeJS.ProcessEnv): Check[] {
  * `GET /health` cannot disagree — and, as documented there, it resolves the
  * model without spending a token.
  */
-async function providerChecks(
-  config: ResolvedConfig,
-  options: DiagnoseOptions,
-): Promise<Check[]> {
+async function providerChecks(config: ResolvedConfig, options: DiagnoseOptions): Promise<Check[]> {
   const checks: Check[] = []
   const entries = [config.backend, ...config.backend.fallback]
 
@@ -258,7 +260,11 @@ async function providerChecks(
 
     try {
       await importProviderPackage(entry.provider)
-      checks.push({ name: `provider ${entry.provider}`, status: 'pass', detail: `${specifier} installed` })
+      checks.push({
+        name: `provider ${entry.provider}`,
+        status: 'pass',
+        detail: `${specifier} installed`,
+      })
     } catch (error) {
       checks.push({
         name: `provider ${entry.provider}`,
@@ -392,10 +398,7 @@ function corsChecks(config: ResolvedConfig): Check[] {
  * work without an index (docs/06 §1) and reporting a missing index as a failure
  * would make a perfectly good chat-only deployment look broken.
  */
-async function knowledgeChecks(
-  config: ResolvedConfig,
-  options: DiagnoseOptions,
-): Promise<Check[]> {
+async function knowledgeChecks(config: ResolvedConfig, options: DiagnoseOptions): Promise<Check[]> {
   const { knowledge } = config
 
   if (knowledge.sources.length === 0) {
@@ -509,5 +512,10 @@ function mask(value: string): string {
 }
 
 function firstLine(message: string): string {
-  return message.split('\n').map((line) => line.trim()).filter(Boolean)[1] ?? message
+  return (
+    message
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)[1] ?? message
+  )
 }

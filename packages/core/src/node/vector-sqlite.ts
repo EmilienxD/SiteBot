@@ -112,8 +112,7 @@ class SqliteVectorStore implements VectorStore {
       );
     `)
     const row = db.prepare(`SELECT value FROM store_meta WHERE key = 'model'`).get() as
-      | { value: string }
-      | undefined
+      { value: string } | undefined
     if (row !== undefined) this.#model = row.value
   }
 
@@ -138,12 +137,16 @@ class SqliteVectorStore implements VectorStore {
       )
     }
     this.#db
-      .prepare(`INSERT INTO store_meta (key, value) VALUES ('model', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .prepare(
+        `INSERT INTO store_meta (key, value) VALUES ('model', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
       .run(this.#model)
     this.#db
-      .prepare(`INSERT INTO store_meta (key, value) VALUES ('lastIndexed', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .prepare(
+        `INSERT INTO store_meta (key, value) VALUES ('lastIndexed', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
       .run(new Date().toISOString())
   }
 

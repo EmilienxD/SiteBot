@@ -32,7 +32,15 @@ export function createRouteHandlers(
   options: SiteBotHandlerOptions = {},
 ): NextRouteHandlers {
   const safe = createSafeFetch()
-  const handler = createSiteBotHandler(config, { ...options, deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp, ...options.deps } })
+  const handler = createSiteBotHandler(config, {
+    ...options,
+    deps: {
+      fetchImpl: safe.fetch,
+      resolveHost: safe.resolveHost,
+      connectStdioMcp,
+      ...options.deps,
+    },
+  })
   return {
     GET: handler,
     POST: handler,

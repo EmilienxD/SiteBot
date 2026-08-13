@@ -16,7 +16,10 @@ interface AgentSessionState extends Record<string, unknown> {
 }
 
 export class CheckpointError extends Error {
-  constructor(message: string, readonly status: 403 | 410) {
+  constructor(
+    message: string,
+    readonly status: 403 | 410,
+  ) {
     super(message)
     this.name = 'CheckpointError'
   }

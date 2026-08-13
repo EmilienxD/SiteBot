@@ -13,7 +13,14 @@
 import { access, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-export const FRAMEWORKS = ['next-app', 'next-pages', 'nuxt', 'sveltekit', 'astro', 'static'] as const
+export const FRAMEWORKS = [
+  'next-app',
+  'next-pages',
+  'nuxt',
+  'sveltekit',
+  'astro',
+  'static',
+] as const
 export type Framework = (typeof FRAMEWORKS)[number]
 
 export interface Detection {
@@ -146,7 +153,9 @@ async function readProject(cwd: string): Promise<ProjectFacts> {
 async function readJson(path: string): Promise<Record<string, unknown> | null> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null
   } catch {
     return null
   }

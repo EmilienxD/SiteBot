@@ -147,11 +147,9 @@ export function createSiteBotHandler(
   }
   const engine =
     options.engine ??
-    createEngine(
-      config,
-      engineDeps,
-      { ...(options.version === undefined ? {} : { version: options.version }) },
-    )
+    createEngine(config, engineDeps, {
+      ...(options.version === undefined ? {} : { version: options.version }),
+    })
 
   // Phase 6: build the knowledge store when sources are configured (the
   // engine, not the CLI, owns query-time retrieval). Boot is lazy — the

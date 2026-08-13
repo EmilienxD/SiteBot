@@ -95,10 +95,7 @@ export type { ContextBudgetInput, TruncateOptions, TruncateResult } from './sess
 // ── knowledge ───────────────────────────────────────────────────────────────
 
 export { MemoryVectorStore } from './knowledge/memory-store.js'
-export {
-  cosineSimilarity,
-  matchesFilter,
-} from './knowledge/store.js'
+export { cosineSimilarity, matchesFilter } from './knowledge/store.js'
 export type {
   Chunk,
   ChunkMetadata,

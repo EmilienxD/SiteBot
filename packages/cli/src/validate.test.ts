@@ -15,7 +15,12 @@ function config(overrides: Record<string, unknown> = {}) {
       },
       ...overrides,
     },
-    { env: { OPENAI_API_KEY: 'sk-live-secret-value-long-enough', REDIS_URL: 'redis://:pw@host:6379' } },
+    {
+      env: {
+        OPENAI_API_KEY: 'sk-live-secret-value-long-enough',
+        REDIS_URL: 'redis://:pw@host:6379',
+      },
+    },
   )
   if (!result.ok) throw new Error(JSON.stringify(result.errors))
   return result.value
@@ -25,14 +30,19 @@ describe('maskConfig', () => {
   it('masks env-sourced values and secret-shaped paths', () => {
     const masked = maskConfig(config())
     const backend = masked['backend'] as Record<string, unknown>
-    const rateLimit = (masked['security'] as Record<string, unknown>)['rateLimit'] as Record<string, unknown>
+    const rateLimit = (masked['security'] as Record<string, unknown>)['rateLimit'] as Record<
+      string,
+      unknown
+    >
     expect(backend['apiKey']).toBe('***')
     expect(rateLimit['url']).toBe('***')
   })
 
   it('keeps the public key visible — it is an identifier, not a secret (docs/02 §12)', () => {
     const masked = maskConfig(config())
-    expect((masked['security'] as Record<string, unknown>)['publicKey']).toBe('pk_live_public_identifier')
+    expect((masked['security'] as Record<string, unknown>)['publicKey']).toBe(
+      'pk_live_public_identifier',
+    )
   })
 
   it('masks literal secrets by key name even when not env-sourced', () => {
@@ -44,7 +54,9 @@ describe('maskConfig', () => {
 
   it('shows everything under --show-secrets, and always drops $meta', () => {
     const shown = maskConfig(config(), true)
-    expect((shown['backend'] as Record<string, unknown>)['apiKey']).toBe('sk-live-secret-value-long-enough')
+    expect((shown['backend'] as Record<string, unknown>)['apiKey']).toBe(
+      'sk-live-secret-value-long-enough',
+    )
     expect(shown).not.toHaveProperty('$meta')
   })
 })

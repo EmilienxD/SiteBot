@@ -37,9 +37,7 @@ interface UpstashIndexLike {
     filter?: string
     includeMetadata?: boolean
     includeVectors?: boolean
-  }): Promise<
-    Array<{ id: string | number; score: number; metadata?: Record<string, unknown> }>
-  >
+  }): Promise<Array<{ id: string | number; score: number; metadata?: Record<string, unknown> }>>
   delete(ids: string[] | { filter: string }): Promise<unknown>
   info(): Promise<{
     vectorCount: number

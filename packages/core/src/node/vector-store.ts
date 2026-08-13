@@ -66,17 +66,13 @@ export async function createNodeVectorStore(
         ...(options.model === undefined ? {} : { model: options.model }),
       })
     case 'custom': {
-      const resolved = new URL(
-        store.module,
-        `file://${options.baseDir ?? process.cwd()}/`,
-      ).href
+      const resolved = new URL(store.module, `file://${options.baseDir ?? process.cwd()}/`).href
       const module = (await import(/* @vite-ignore */ resolved)) as Record<string, unknown>
       for (const exportName of ['createVectorStore', 'default']) {
         const candidate = module[exportName]
         if (typeof candidate !== 'function') continue
         const built = (await (candidate as (o: unknown) => Promise<VectorStore>)(store)) as
-          | VectorStore
-          | undefined
+          VectorStore | undefined
         if (built !== undefined) return built
       }
       throw new EngineError('not_ready', {

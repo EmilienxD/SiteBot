@@ -30,9 +30,7 @@ export const connectStdioMcp: StdioMcpConnector = async (server) => {
       const result = await client.callTool({
         name,
         arguments:
-          typeof input === 'object' && input !== null
-            ? (input as Record<string, unknown>)
-            : {},
+          typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
       })
       const serialized = JSON.stringify(result)
       return serialized.length <= 65_536

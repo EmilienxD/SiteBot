@@ -28,10 +28,20 @@ import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { WIDGET_CDN_URL } from '../init/templates.js'
 import { startListener, PortInUseError, untilShutdown, type RunningServer } from './listener.js'
-import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+import {
+  loadForCommand,
+  reportConfigError,
+  type CommandContext,
+  type CommandResult,
+} from './context.js'
 
 export const DEV_FLAGS: FlagSpecs = {
-  port: { type: 'number', summary: 'Port to listen on. Default 3000.', short: 'p', placeholder: '<n>' },
+  port: {
+    type: 'number',
+    summary: 'Port to listen on. Default 3000.',
+    short: 'p',
+    placeholder: '<n>',
+  },
   host: { type: 'string', summary: 'Interface to bind. Default localhost.', placeholder: '<host>' },
   'base-path': {
     type: 'string',
@@ -294,7 +304,12 @@ async function watchConfig(
   }
 
   for (const file of watched) {
-    if (!(await stat(file).then(() => true).catch(() => false))) continue
+    if (
+      !(await stat(file)
+        .then(() => true)
+        .catch(() => false))
+    )
+      continue
     try {
       // Watch the directory, not the file: editors that save by rename break a
       // file watcher's inode, and the watcher goes silent with no error.

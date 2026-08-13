@@ -53,7 +53,11 @@ describe('extract()', () => {
 })
 
 describe('chunkDocument()', () => {
-  const longText = Array.from({ length: 40 }, (_, index) => `Paragraph ${index} has enough words in it to be a real paragraph and chunk reliably.`.repeat(4)).join('\n\n')
+  const longText = Array.from({ length: 40 }, (_, index) =>
+    `Paragraph ${index} has enough words in it to be a real paragraph and chunk reliably.`.repeat(
+      4,
+    ),
+  ).join('\n\n')
 
   it('never emits a chunk over maxTokens (fixed)', () => {
     const chunks = chunkDocument(doc({ text: longText }), FIXED)

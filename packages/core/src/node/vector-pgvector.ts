@@ -124,9 +124,7 @@ class PgVectorStore implements VectorStore {
     await this.#pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.#table}_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)
     `)
-    const meta = await this.#pool.query(
-      `SELECT value FROM ${this.#table}_meta WHERE key = 'model'`,
-    )
+    const meta = await this.#pool.query(`SELECT value FROM ${this.#table}_meta WHERE key = 'model'`)
     const row = meta.rows[0]
     if (row !== undefined) this.#model = String(row['value'])
   }
@@ -219,9 +217,11 @@ class PgVectorStore implements VectorStore {
     // pgvector's server-side filter dialect differs from a local equality
     // check only in expressiveness; re-applying client-side is cheap against
     // a `topK * 2` set and guarantees behaviour across drivers.
-    return out.filter((entry) =>
-      pgMatches(entry.chunk.metadata as unknown as Record<string, unknown>, opts.filter),
-    ).slice(0, opts.topK)
+    return out
+      .filter((entry) =>
+        pgMatches(entry.chunk.metadata as unknown as Record<string, unknown>, opts.filter),
+      )
+      .slice(0, opts.topK)
   }
 
   async documentChunks(url: string): Promise<Chunk[]> {

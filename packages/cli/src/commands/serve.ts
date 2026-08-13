@@ -12,10 +12,20 @@
 import { DEFAULT_BASE_PATH } from '@sitebot/server'
 import type { FlagSpecs } from '../args.js'
 import { startListener, PortInUseError, untilShutdown } from './listener.js'
-import { loadForCommand, reportConfigError, type CommandContext, type CommandResult } from './context.js'
+import {
+  loadForCommand,
+  reportConfigError,
+  type CommandContext,
+  type CommandResult,
+} from './context.js'
 
 export const SERVE_FLAGS: FlagSpecs = {
-  port: { type: 'number', summary: 'Port to listen on. Default 8787.', short: 'p', placeholder: '<n>' },
+  port: {
+    type: 'number',
+    summary: 'Port to listen on. Default 8787.',
+    short: 'p',
+    placeholder: '<n>',
+  },
   host: { type: 'string', summary: 'Interface to bind. Default 0.0.0.0.', placeholder: '<host>' },
   'base-path': {
     type: 'string',
@@ -81,7 +91,10 @@ export async function runServe(context: CommandContext): Promise<CommandResult> 
   }
 
   ui.success(`sitebot serve — listening on ${running.url}`)
-  ui.detail('Endpoints:', `${basePath}, ${basePath}/config, ${basePath}/feedback, ${basePath}/health`)
+  ui.detail(
+    'Endpoints:',
+    `${basePath}, ${basePath}/config, ${basePath}/feedback, ${basePath}/health`,
+  )
   ui.detail('Probe:', '/health')
 
   if (config.security.allowedOrigins.length === 0) {

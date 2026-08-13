@@ -95,7 +95,9 @@ export async function runIngest(
 
   const manifest = options.force
     ? null
-    : await readManifest({ ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }) })
+    : await readManifest({
+        ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }),
+      })
   const fingerprint = {
     model: embedding.model,
     ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
@@ -128,7 +130,11 @@ export async function runIngest(
       }
       const before = existing?.documents[raw.url]
       const status: PlannedDocument['status'] =
-        before === undefined ? 'added' : before.contentHash === raw.contentHash ? 'unchanged' : 'changed'
+        before === undefined
+          ? 'added'
+          : before.contentHash === raw.contentHash
+            ? 'unchanged'
+            : 'changed'
       const chunks = chunkDocument(document, config.knowledge.chunk)
       for (const chunk of chunks) chunk.id = chunkId(id, raw.url, chunk.ordinal)
       plannedDocuments.push({ document, chunks, status })
@@ -164,7 +170,10 @@ export async function runIngest(
       total +
       plan.documents.reduce(
         (count, doc) =>
-          count + (doc.status === 'unchanged' ? 0 : doc.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0)),
+          count +
+          (doc.status === 'unchanged'
+            ? 0
+            : doc.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0)),
         0,
       ),
     0,
@@ -189,7 +198,9 @@ export async function runIngest(
 
   if (!options.dryRun && toEmbed.length > 0 && store !== undefined) {
     const texts = toEmbed.map(({ chunk }) =>
-      chunk.headingPath.length === 0 ? chunk.text : `${chunk.headingPath.join(' > ')}\n\n${chunk.text}`,
+      chunk.headingPath.length === 0
+        ? chunk.text
+        : `${chunk.headingPath.join(' > ')}\n\n${chunk.text}`,
     )
     const result =
       options.embedder !== undefined
@@ -289,7 +300,8 @@ export async function runIngest(
       stats === null
         ? {
             chunks: planned.reduce(
-              (total, plan) => total + plan.documents.reduce((count, doc) => count + doc.chunks.length, 0),
+              (total, plan) =>
+                total + plan.documents.reduce((count, doc) => count + doc.chunks.length, 0),
               0,
             ),
             documents: planned.reduce((total, plan) => total + plan.documents.length, 0),
@@ -360,7 +372,10 @@ async function loadSource(
         readFile: async (path: string) => {
           const fs = await import('node:fs/promises')
           const p = await import('node:path')
-          return fs.readFile(p.resolve(options.baseDir ?? config.$meta.baseDir ?? process.cwd(), path), 'utf8')
+          return fs.readFile(
+            p.resolve(options.baseDir ?? config.$meta.baseDir ?? process.cwd(), path),
+            'utf8',
+          )
         },
       })
   }

@@ -62,9 +62,7 @@ export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
   if (envVar !== null) {
     lines.push(`  apiKey: \${env.${envVar}}`)
   } else {
-    lines.push(
-      `  # This provider reads credentials from its own environment (see docs/02 §4).`,
-    )
+    lines.push(`  # This provider reads credentials from its own environment (see docs/02 §4).`)
   }
   if (answers.provider === 'openai-compatible') {
     lines.push('  baseUrl: ${env.OPENAI_BASE_URL} # required for openai-compatible')

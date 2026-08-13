@@ -40,8 +40,59 @@ interface Element {
 
 type Node = Element | string
 
-const VOID_TAGS = new Set(['br', 'img', 'hr', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'source', 'track', 'wbr'])
-const BLOCK_TAGS = new Set(['address', 'article', 'aside', 'blockquote', 'canvas', 'dd', 'div', 'dl', 'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'noscript', 'ol', 'p', 'pre', 'section', 'table', 'td', 'th', 'tr', 'ul', 'video'])
+const VOID_TAGS = new Set([
+  'br',
+  'img',
+  'hr',
+  'input',
+  'meta',
+  'link',
+  'area',
+  'base',
+  'col',
+  'embed',
+  'source',
+  'track',
+  'wbr',
+])
+const BLOCK_TAGS = new Set([
+  'address',
+  'article',
+  'aside',
+  'blockquote',
+  'canvas',
+  'dd',
+  'div',
+  'dl',
+  'dt',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'header',
+  'hr',
+  'li',
+  'main',
+  'nav',
+  'noscript',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'table',
+  'td',
+  'th',
+  'tr',
+  'ul',
+  'video',
+])
 
 /** Minimal permissive HTML parser. Tolerates unclosed tags and bare text. */
 export function parseHtml(html: string): Element {
@@ -280,7 +331,9 @@ export function extract(html: string, options: ExtractOptions = {}): ExtractedPa
       headings.push({ level, text, offset: 0 })
     },
   }
-  const text = renderer(content, offsets).replace(/\n{3,}/g, '\n\n').trim()
+  const text = renderer(content, offsets)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
   // Offsets are filled in by the renderer; recompute them after whitespace
   // collapsing so they point into the emitted text.
   recomputeOffsets(text, headings)
@@ -334,7 +387,10 @@ function renderMarkdown(element: Element, headings: HeadingCollector): string {
       const text = textOf(node).trim()
       const href = node.attrs['href']
       parts.push(
-        href !== undefined && text !== '' && !href.startsWith('#') && !href.startsWith('javascript:')
+        href !== undefined &&
+          text !== '' &&
+          !href.startsWith('#') &&
+          !href.startsWith('javascript:')
           ? `[${text}](${href})`
           : text,
       )
@@ -352,7 +408,14 @@ function renderMarkdown(element: Element, headings: HeadingCollector): string {
     }
     if (tag === 'blockquote') {
       const inner = node.children.map(walkCollect).join('').trim()
-      parts.push('\n' + inner.split('\n').map((line) => `> ${line}`).join('\n') + '\n')
+      parts.push(
+        '\n' +
+          inner
+            .split('\n')
+            .map((line) => `> ${line}`)
+            .join('\n') +
+          '\n',
+      )
       return
     }
     if (BLOCK_TAGS.has(tag)) parts.push('\n\n')
@@ -364,7 +427,11 @@ function renderMarkdown(element: Element, headings: HeadingCollector): string {
     return node.children.map(walkCollect).join('')
   }
   walk(element)
-  return parts.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return parts
+    .join('')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 function renderText(element: Element, headings: HeadingCollector): string {
@@ -382,7 +449,12 @@ function renderText(element: Element, headings: HeadingCollector): string {
     if (BLOCK_TAGS.has(node.tag)) parts.push('\n')
   }
   walk(element)
-  return parts.join('').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim()
+  return parts
+    .join('')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
 }
 
 function recomputeOffsets(
