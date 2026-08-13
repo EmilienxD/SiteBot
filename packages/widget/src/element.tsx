@@ -39,6 +39,9 @@ export class SiteChatElement extends HTMLElement {
   #open = false
   #options: SiteBotOptions = {}
   #launcher?: HTMLButtonElement
+  #readyResolve!: () => void
+  readonly ready: Promise<void> = new Promise((resolve) => (this.#readyResolve = resolve))
+  readonly version = '1.0.0'
   connectedCallback(): void {
     this.safe(() => void this.boot())
   }
@@ -66,10 +69,10 @@ export class SiteChatElement extends HTMLElement {
     if (this.#open) this.close()
     else this.open()
   }
-  send(text: string): void {
+  send(text: string, sendOptions?: { hidden?: boolean }): void {
     this.safe(() => {
       this.open()
-      this.withController((controller) => void controller.send(text))
+      this.withController((controller) => void controller.send(text, sendOptions))
     })
   }
   identify(jwt: string): void {
@@ -81,8 +84,32 @@ export class SiteChatElement extends HTMLElement {
       this.dispatch('reset')
     })
   }
+  destroy(): void {
+    this.safe(() => {
+      this.#controller?.stop()
+      this.remove()
+    })
+  }
+  isOpen(): boolean {
+    return this.#open
+  }
+  clearIdentity(): void {
+    this.safe(() => this.withController((controller) => controller.clearIdentity()))
+  }
+  setContext(data: Record<string, unknown>): void {
+    this.safe(() => this.withController((controller) => controller.setContext(data)))
+  }
+  setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void {
+    this.safe(() => this.withController((controller) => controller.setSuggestions(items)))
+  }
   refreshPageContext(): void {
-    this.safe(() => this.withController((controller) => void controller.refreshPageContext()))
+    this.safe(() =>
+      this.withController((controller) =>
+        controller.config.ui.behaviour.resetOnNavigate
+          ? controller.reset()
+          : void controller.refreshPageContext(),
+      ),
+    )
   }
 
   /**
@@ -115,6 +142,8 @@ export class SiteChatElement extends HTMLElement {
     if (options.theme) config.ui.theme.mode = options.theme
     this.#config = config
     this.#resolved = options
+    this.#readyResolve()
+    this.dispatch('ready', { config })
     this.dataset.theme = config.ui.theme.mode
     this.style.setProperty('--sb-panel-w', `${config.ui.panel.width}px`)
     this.style.setProperty('--sb-panel-h', `${config.ui.panel.height}px`)
@@ -188,12 +217,17 @@ export class SiteChatElement extends HTMLElement {
     if (!mount || !config) return
     const ui = config.ui
     const Panel = this.#chunk?.Panel
+    const IframePanel = this.#chunk?.IframePanel
     const controller = this.#controller
     render(
       <>
-        {this.#open && Panel && controller && (
-          <Panel controller={controller} close={() => this.close()} />
-        )}
+        {this.#open &&
+          controller &&
+          (config.ui.isolation === 'iframe' && IframePanel ? (
+            <IframePanel controller={controller} close={() => this.close()} styleText={styles} />
+          ) : Panel ? (
+            <Panel controller={controller} close={() => this.close()} />
+          ) : null)}
         <button
           ref={(node) => {
             this.#launcher = node ?? undefined
@@ -223,9 +257,9 @@ export class SiteChatElement extends HTMLElement {
   unregisterTool(name: string): void {
     this.withController((controller) => controller.unregisterTool(name))
   }
-  dispatch(type: 'open' | 'close' | 'reset'): void {
-    this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true }))
-    this.#options.onEvent?.({ type })
+  dispatch(type: 'open' | 'close' | 'reset' | 'ready', detail?: unknown): void {
+    this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true, detail }))
+    this.#options.onEvent?.({ type, detail })
   }
   /** docs/03 §7 — a citation chip click opens the source and notifies the host. */
   citationClick(citation: Citation): void {
@@ -256,8 +290,28 @@ async function fetchConfig(endpoint: string, key: string): Promise<PublicConfig 
     return undefined
   }
 }
-function icon(name: string): string {
-  return name === 'question' ? '?' : name === 'chat' ? 'Chat' : 'AI'
+function icon(name: string) {
+  const path =
+    name === 'question'
+      ? 'M12 17h.01M9.5 9a2.5 2.5 0 1 1 4.3 1.8c-.9.8-1.8 1.1-1.8 2.7'
+      : name === 'chat'
+        ? 'M4 5h16v11H8l-4 3V5Z'
+        : 'M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z'
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d={path} />
+    </svg>
+  )
 }
 function applyTheme(host: HTMLElement, config: PublicConfig): void {
   const theme = config.ui.theme

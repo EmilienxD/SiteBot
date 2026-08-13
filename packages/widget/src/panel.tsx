@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { UIMessage } from 'ai'
 import { Markdown } from './markdown.js'
 import type { Citation, WidgetController } from './types.js'
@@ -21,16 +21,20 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
   const [, redraw] = useState(0)
   const [input, setInput] = useState('')
   const [follow, setFollow] = useState(true)
+  const [working, setWorking] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const ui = controller.config.ui
+  const [emptyVisible, setEmptyVisible] = useState(ui.messages.emptyStateAfterMs === 0)
+  const strings = ui.strings[ui.locale] ?? ui.strings[ui.locale.split('-')[0] ?? ''] ?? {}
+  const text = (key: string, fallback: string) => strings[key] ?? fallback
 
   useEffect(() => controller.subscribe(() => redraw((value) => value + 1)), [controller])
-  useEffect(() => {
+  useLayoutEffect(() => {
     textarea.current?.focus()
   }, [])
   useEffect(() => {
-    if (follow) list.current?.scrollTo({ top: list.current.scrollHeight })
+    if (follow && list.current?.scrollTo) list.current.scrollTo({ top: list.current.scrollHeight })
   }, [controller.messages, controller.state, follow])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -39,8 +43,41 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
     addEventListener('keydown', escape)
     return () => removeEventListener('keydown', escape)
   }, [close])
+  const mobile = typeof matchMedia === 'function' && matchMedia('(max-width: 639px)').matches
+  useLayoutEffect(() => {
+    if (!mobile) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previous
+    }
+  }, [mobile])
+  useEffect(() => {
+    if (controller.state !== 'submitted') {
+      setWorking(false)
+      return
+    }
+    const timer = window.setTimeout(() => setWorking(true), 4000)
+    return () => window.clearTimeout(timer)
+  }, [controller.state])
+  useEffect(() => {
+    if (controller.messages.length > 0) return
+    const timer = window.setTimeout(() => setEmptyVisible(true), ui.messages.emptyStateAfterMs)
+    return () => window.clearTimeout(timer)
+  }, [controller.messages.length, ui.messages.emptyStateAfterMs])
+  const assistantCount = controller.messages.filter(
+    (message) => message.role === 'assistant',
+  ).length
+  const previousAssistantCount = useRef(assistantCount)
+  useEffect(() => {
+    if (ui.behaviour.sound && assistantCount > previousAssistantCount.current) playNotification()
+    previousAssistantCount.current = assistantCount
+  }, [assistantCount, ui.behaviour.sound])
 
-  const busy = controller.state === 'submitted' || controller.state === 'streaming'
+  const busy =
+    controller.state === 'submitted' ||
+    controller.state === 'streaming' ||
+    controller.state === 'executing-client-tool'
   const send = async () => {
     const value = input.trim()
     if (!value) return
@@ -57,7 +94,7 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
     <div
       class={`panel ${ui.position === 'bottom-left' ? 'left' : ''}`}
       role="dialog"
-      aria-modal="false"
+      aria-modal={mobile ? 'true' : 'false'}
       aria-label={ui.a11y.panelAriaLabel}
     >
       <header class="header">
@@ -88,7 +125,7 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
           if (node) setFollow(node.scrollHeight - node.scrollTop - node.clientHeight < 72)
         }}
       >
-        {ui.messages.greeting && controller.messages.length === 0 && (
+        {ui.messages.greeting && emptyVisible && controller.messages.length === 0 && (
           <Message
             role="assistant"
             text={ui.messages.greeting}
@@ -96,36 +133,24 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
             markdown={ui.behaviour.markdown}
           />
         )}
-        {controller.messages.map((message) => (
+        {controller.messages.map((message, index) => (
           <Message
             key={message.id}
             role={message.role}
             text={messageText(message)}
-            attribution={message.role === 'assistant' ? controller.config.name : undefined}
+            attribution={
+              message.role === 'assistant' &&
+              (index === controller.messages.length - 1 ||
+                controller.messages[index + 1]?.role !== 'assistant')
+                ? controller.config.name
+                : undefined
+            }
             markdown={ui.behaviour.markdown}
             controller={controller}
             message={message}
+            previousRole={controller.messages[index - 1]?.role}
           />
         ))}
-        {controller.messages
-          .flatMap((message) => message.parts)
-          .filter(isToolPart)
-          .map((part, index) => (
-            <ToolChip key={index} part={part} />
-          ))}
-        {controller.messages
-          .flatMap((message) => message.parts)
-          .filter((part) => isApprovalPart(part))
-          .map((part) => {
-            const approval = part as unknown as ApprovalPart
-            return (
-              <ApprovalCard
-                key={approval.approval.id}
-                part={approval}
-                approve={(approved) => void controller.approve(approval.approval.id, approved)}
-              />
-            )
-          })}
         {busy && ui.behaviour.showTypingIndicator && (
           <div class="message assistant">
             <div class="bubble typing" aria-label="Assistant is typing">
@@ -137,9 +162,19 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
         )}
         {controller.state === 'error' && (
           <div class="error" role="alert">
-            {ui.messages.errorMessage}
+            {controller.error?.message.includes('provider')
+              ? text('providerError', "I'm having trouble right now")
+              : ui.messages.errorMessage}
+            {controller.retryAfter ? (
+              <span class="retry-countdown"> Retry in {controller.retryAfter}s</span>
+            ) : (
+              <button type="button" onClick={() => void controller.retry()}>
+                {text('retry', 'Retry')}
+              </button>
+            )}
           </div>
         )}
+        {working && <div class="status">{text('stillWorking', 'Still working…')}</div>}
       </div>
       {!follow && (
         <button
@@ -172,6 +207,7 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
             rows={1}
             value={input}
             placeholder={ui.messages.placeholder}
+            disabled={controller.composerDisabled}
             onInput={(event) => {
               const target = event.currentTarget
               setInput(target.value)
@@ -185,9 +221,16 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
               }
             }}
           />
+          {ui.behaviour.allowFileUpload && controller.config.capabilities.fileUpload && (
+            <label class="attach" aria-label={text('attachFile', 'Attach file')}>
+              +<input type="file" hidden />
+            </label>
+          )}
           <button
             class="send"
-            aria-label={busy ? 'Stop response' : 'Send message'}
+            aria-label={
+              busy ? text('stopResponse', 'Stop response') : text('sendMessage', 'Send message')
+            }
             disabled={!busy && !input.trim()}
             onClick={() => (busy ? controller.stop() : void send())}
           >
@@ -214,6 +257,7 @@ function Message({
   markdown,
   controller,
   message,
+  previousRole,
 }: {
   role: UIMessage['role']
   text: string
@@ -221,12 +265,34 @@ function Message({
   markdown: boolean
   controller?: WidgetController
   message?: UIMessage
+  previousRole?: UIMessage['role']
 }) {
-  if (!text || role === 'system') return null
+  if (role === 'system') return null
   const citations = message === undefined ? [] : citationList(message, text)
+  const parts = message?.parts ?? []
   return (
-    <div class={`message ${role}`}>
-      <div class="bubble">{markdown ? <Markdown text={text} /> : text}</div>
+    <div class={`message ${role} ${previousRole === role ? 'same-role' : 'role-change'}`}>
+      {text && <div class="bubble">{markdown ? <Markdown text={text} /> : text}</div>}
+      {parts.map((part, index) => {
+        if (part.type === 'reasoning' && controller?.config.ui.behaviour.showReasoning)
+          return (
+            <details class="reasoning" key={index}>
+              <summary>Thinking</summary>
+              <div>{part.text}</div>
+            </details>
+          )
+        if (isApprovalPart(part)) {
+          const approval = part as unknown as ApprovalPart
+          return (
+            <ApprovalCard
+              key={approval.approval.id}
+              part={approval}
+              approve={(approved) => void controller?.approve(approval.approval.id, approved)}
+            />
+          )
+        }
+        return isToolPart(part) ? <ToolChip key={index} part={part} /> : null
+      })}
       {citations.length > 0 && (
         <CitationRow
           citations={citations}
@@ -372,9 +438,30 @@ function suggestion(
   try {
     if (action.type === 'send') void controller.send(action.text)
     else if (action.type === 'navigate' && action.path.startsWith('/')) location.assign(action.path)
+    else if (action.type === 'tool')
+      void controller.send(
+        `Use the ${action.tool} tool with input ${JSON.stringify(action.input ?? {})}`,
+        { hidden: true },
+      )
     else if (action.type === 'link') window.open(action.url, '_blank', 'noopener,noreferrer')
   } catch (error) {
     console.warn('[SiteBot] suggestion action failed', error)
+  }
+}
+function playNotification(): void {
+  try {
+    const AudioContextClass = window.AudioContext
+    if (!AudioContextClass) return
+    const context = new AudioContextClass()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    gain.gain.value = 0.03
+    oscillator.frequency.value = 660
+    oscillator.connect(gain).connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.08)
+  } catch {
+    /* sound is best effort */
   }
 }
 function trapFocus(event: KeyboardEvent, root: HTMLElement | null): void {

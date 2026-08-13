@@ -16,6 +16,8 @@ export { runClientTool, registerClientTool, unregisterClientTool } from './clien
 export type { ClientToolHandler, ClientToolOptions } from './client-tools.js'
 
 const queue: Array<(element: SiteChatElement) => void> = []
+let readyResolve!: () => void
+const ready = new Promise<void>((resolve) => (readyResolve = resolve))
 export function defineSiteBot(options: SiteBotOptions = {}): SiteChatElement | null {
   try {
     if (!('customElements' in window) || !HTMLElement.prototype.attachShadow) {
@@ -33,6 +35,7 @@ export function defineSiteBot(options: SiteBotOptions = {}): SiteChatElement | n
       const action = queue.shift()
       if (action) action(element)
     }
+    void element.ready.then(readyResolve)
     return element
   } catch (error) {
     console.warn('[SiteBot] failed to boot', error)
@@ -52,8 +55,13 @@ export const SiteBot: SiteBotApi = {
   open: () => withElement((element) => element.open()),
   close: () => withElement((element) => element.close()),
   toggle: () => withElement((element) => element.toggle()),
-  send: (text) => withElement((element) => element.send(text)),
+  destroy: () => withElement((element) => element.destroy()),
+  isOpen: () => document.querySelector<SiteChatElement>(ELEMENT_NAME)?.isOpen() ?? false,
+  send: (text, options) => withElement((element) => element.send(text, options)),
   identify: (jwt) => withElement((element) => element.identify(jwt)),
+  clearIdentity: () => withElement((element) => element.clearIdentity()),
+  setContext: (data) => withElement((element) => element.setContext(data)),
+  setSuggestions: (items) => withElement((element) => element.setSuggestions(items)),
   reset: () => withElement((element) => element.reset()),
   refreshPageContext: () => withElement((element) => element.refreshPageContext()),
   registerTool: (name, handler) => withElement((element) => element.registerTool(name, handler)),
@@ -65,6 +73,8 @@ export const SiteBot: SiteBotApi = {
       removeEventListener(`sitebot:${event}`, handler)
     }
   },
+  ready,
+  version: '1.0.0',
 }
 /**
  * The tag that loaded us. `document.currentScript` is null inside a module

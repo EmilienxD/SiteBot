@@ -6,6 +6,7 @@ const REMOVE = 'script,style,noscript,nav,footer,aside,svg,[aria-hidden="true"],
 export async function extractPageContext(
   ui: Ui,
   previousHash?: string,
+  custom?: Record<string, unknown>,
 ): Promise<PageContext | null> {
   if (matchesAny(location.pathname, ui.pageContext.excludePaths)) return null
   const root = document.querySelector(ui.extract.selector) ?? document.body
@@ -34,6 +35,7 @@ export async function extractPageContext(
     selection: window.getSelection()?.toString().trim().slice(0, 1000) || null,
     ...(hash === previousHash ? { extractHash: hash } : { extract, extractHash: hash }),
     meta,
+    custom,
   }
 }
 

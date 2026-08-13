@@ -16,3 +16,4 @@
  */
 export { createController } from './chat.js'
 export { Panel } from './panel.js'
+export { IframePanel } from './iframe-panel.js'
