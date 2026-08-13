@@ -25,7 +25,14 @@ import {
   writeMessages,
   writeValue,
 } from './storage.js'
-import type { PageContext, WidgetController, WidgetState } from './types.js'
+import type {
+  HandoffData,
+  InlineErrorData,
+  PageContext,
+  UsageData,
+  WidgetController,
+  WidgetState,
+} from './types.js'
 
 class SignalChat extends AbstractChat<UIMessage> {
   constructor(init: Omit<ChatInit<UIMessage>, 'messages'> & { state: ChatState<UIMessage> }) {
@@ -55,6 +62,10 @@ export function createController(
   )
   const errorSignal = signal<Error | undefined>(undefined)
   const retryAfterSignal = signal<number | undefined>(undefined)
+  const statusSignal = signal<string | undefined>(undefined)
+  const handoffSignal = signal<HandoffData | undefined>(undefined)
+  const inlineErrorSignal = signal<InlineErrorData | undefined>(undefined)
+  const usageSignal = signal<UsageData | undefined>(undefined)
   let lastSend: { text: string; hidden?: boolean } | undefined
   let retryTimer: number | undefined
   const registeredTools = new Map<string, ClientToolHandler>()
@@ -134,7 +145,37 @@ export function createController(
       lastAssistantMessageIsCompleteWithApprovalResponses({ messages }) ||
       lastAssistantMessageIsCompleteWithToolCalls({ messages }),
     onData(data) {
-      if (data.type === 'data-handoff') emit('handoff', data.data)
+      if (data.type === 'data-suggestions') {
+        const items = (data.data as { items?: PublicConfig['ui']['messages']['suggestions'] }).items
+        if (items) config.ui.messages.suggestions = items
+        changed()
+      }
+      if (data.type === 'data-navigate') {
+        const value = data.data as { path?: unknown; newTab?: unknown }
+        const path = typeof value.path === 'string' ? value.path : ''
+        if (config.capabilities.routes.includes(path)) {
+          if (value.newTab === true) window.open(path, '_blank', 'noopener,noreferrer')
+          else location.assign(path)
+        } else emit('error', { code: 'route_not_allowed', message: 'Navigation was blocked.' })
+      }
+      if (data.type === 'data-handoff') {
+        handoffSignal.value = data.data as HandoffData
+        openVendorHandoff(handoffSignal.value)
+        emit('handoff', data.data)
+        changed()
+      }
+      if (data.type === 'data-status') {
+        statusSignal.value = String((data.data as { text?: unknown }).text ?? '')
+        changed()
+      }
+      if (data.type === 'data-error') {
+        inlineErrorSignal.value = data.data as InlineErrorData
+        changed()
+      }
+      if (data.type === 'data-usage') {
+        usageSignal.value = data.data as UsageData
+        changed()
+      }
       if (data.type === 'data-approval-request') {
         pendingRunId = String((data.data as { runId?: unknown }).runId ?? '')
         stateSignal.value = 'awaiting-approval'
@@ -183,6 +224,7 @@ export function createController(
       emit('error', { code: normalized.code, message: normalized.message })
     },
     onFinish({ message }) {
+      statusSignal.value = undefined
       pendingRunId = pendingRunId ?? runIdFromMessage(message)
       stateSignal.value = hasPendingApproval(message) ? 'awaiting-approval' : 'idle'
       changed()
@@ -215,6 +257,18 @@ export function createController(
         errorSignal.value?.message.includes('budget') === true
       )
     },
+    get statusText() {
+      return statusSignal.value
+    },
+    get handoff() {
+      return handoffSignal.value
+    },
+    get inlineError() {
+      return inlineErrorSignal.value
+    },
+    get usage() {
+      return usageSignal.value
+    },
     open() {},
     close() {},
     toggle() {},
@@ -239,6 +293,7 @@ export function createController(
     async retry() {
       if (!lastSend || (retryAfterSignal.value ?? 0) > 0) return
       errorSignal.value = undefined
+      inlineErrorSignal.value = undefined
       stateSignal.value = 'idle'
       await this.send(lastSend.text, { hidden: lastSend.hidden })
     },
@@ -247,6 +302,10 @@ export function createController(
       messagesSignal.value = []
       identity = null
       customContext = {}
+      statusSignal.value = undefined
+      handoffSignal.value = undefined
+      inlineErrorSignal.value = undefined
+      usageSignal.value = undefined
       removeValue(sessionKey)
       removeValue(historyKey)
       sessionId = createSessionId()
@@ -266,6 +325,28 @@ export function createController(
     },
     setSuggestions(items) {
       config.ui.messages.suggestions = items
+      changed()
+    },
+    rehydratePending(pending) {
+      pendingRunId = pending.runId
+      const approval = pending.approval
+      const message: UIMessage = {
+        id: `pending-${pending.runId}`,
+        role: 'assistant',
+        parts: [
+          {
+            type: `tool-${approval.toolName}`,
+            toolCallId: approval.toolCallId,
+            toolName: approval.toolName,
+            state: 'approval-requested',
+            input: approval.input,
+            approval: { id: approval.approvalId },
+          } as never,
+          { type: 'data-approval-request', data: approval } as never,
+        ],
+      }
+      messagesSignal.value = [...messagesSignal.value, message]
+      stateSignal.value = 'awaiting-approval'
       changed()
     },
     async refreshPageContext() {
@@ -305,6 +386,22 @@ export function createController(
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+  }
+}
+
+function openVendorHandoff(data: HandoffData): void {
+  try {
+    const host = window as Window & {
+      Intercom?: (...args: unknown[]) => void
+      $crisp?: { push(value: unknown[]): void }
+      zE?: (...args: unknown[]) => void
+    }
+    if (data.target.kind === 'intercom' && host.Intercom)
+      host.Intercom('showNewMessage', data.message)
+    else if (data.target.kind === 'crisp' && host.$crisp) host.$crisp.push(['do', 'chat:open'])
+    else if (data.target.kind === 'zendesk' && host.zE) host.zE('messenger', 'open')
+  } catch {
+    /* best effort */
   }
 }
 

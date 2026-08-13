@@ -20,6 +20,7 @@ function controller(messages: WidgetController['messages']): WidgetController {
     clearIdentity() {},
     setContext() {},
     setSuggestions() {},
+    rehydratePending() {},
     refreshPageContext: async () => null,
     registerTool() {},
     unregisterTool() {},
@@ -93,5 +94,29 @@ describe('Panel fidelity', () => {
     render(<Panel controller={value} close={() => {}} />, root)
     ;(root.querySelector('.suggestion') as HTMLButtonElement).click()
     expect(value.send).toHaveBeenCalledWith(expect.stringContaining('lookup'), { hidden: true })
+  })
+
+  it('renders handoff, status, inline error and debug usage data', () => {
+    const value = controller([])
+    Object.defineProperties(value, {
+      statusText: { value: 'Searching documentation…' },
+      handoff: {
+        value: {
+          target: { kind: 'zendesk' },
+          ticketUrl: 'https://support.test/ticket/1',
+          message: 'A person will reply.',
+        },
+      },
+      inlineError: {
+        value: { code: 'provider_error', message: 'Please retry.', retryable: true },
+      },
+      usage: { value: { inputTokens: 10, outputTokens: 4, costUsd: 0.002 } },
+    })
+    const root = document.createElement('div')
+    render(<Panel controller={value} close={() => {}} />, root)
+    expect(root.querySelector('.status')?.textContent).toContain('Searching documentation')
+    expect(root.querySelector('.handoff-card')?.textContent).toContain('zendesk')
+    expect(root.querySelector('.inline-error')?.textContent).toContain('Please retry')
+    expect(root.querySelector('.usage')?.textContent).toContain('10 in / 4 out')
   })
 })

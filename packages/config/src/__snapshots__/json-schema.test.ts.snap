@@ -1516,6 +1516,8 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
                   "finish",
                   "approval",
                   "feedback",
+                  "lead",
+                  "handoff",
                   "provider_fallback",
                   "budget_exceeded",
                 ],

@@ -8,6 +8,8 @@ export const TELEMETRY_EVENTS = [
   'finish',
   'approval',
   'feedback',
+  'lead',
+  'handoff',
   'provider_fallback',
   'budget_exceeded',
 ] as const

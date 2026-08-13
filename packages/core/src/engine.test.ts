@@ -56,6 +56,76 @@ function failingModel(status: number, message = 'upstream failure'): MockLanguag
   })
 }
 
+function midStreamFailureModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
+    doStream: async () => ({
+      stream: simulateReadableStream({
+        chunks: [
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-start', id: 't1' },
+          { type: 'text-delta', id: 't1', delta: 'Partial answer' },
+          { type: 'error', error: new Error('connection dropped') },
+        ],
+        chunkDelayInMs: null,
+        initialDelayInMs: null,
+      }),
+    }),
+  })
+}
+
+function toolModel(
+  toolName: string,
+  input: Record<string, unknown>,
+  answer = 'Done.',
+): MockLanguageModelV3 {
+  let call = 0
+  return new MockLanguageModelV3({
+    doStream: async () => {
+      call += 1
+      const chunks: LanguageModelV3StreamPart[] =
+        call === 1
+          ? [
+              { type: 'stream-start', warnings: [] },
+              {
+                type: 'tool-call',
+                toolCallId: 'tc1',
+                toolName,
+                input: JSON.stringify(input),
+              },
+              {
+                type: 'finish',
+                finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+                usage: {
+                  inputTokens: { total: 5, noCache: 5, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 2, text: 0, reasoning: 0 },
+                },
+              },
+            ]
+          : [
+              { type: 'stream-start', warnings: [] },
+              { type: 'text-start', id: 't2' },
+              { type: 'text-delta', id: 't2', delta: answer },
+              { type: 'text-end', id: 't2' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: {
+                  inputTokens: { total: 5, noCache: 5, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 2, text: 2, reasoning: 0 },
+                },
+              },
+            ]
+      return {
+        stream: simulateReadableStream({
+          chunks,
+          chunkDelayInMs: null,
+          initialDelayInMs: null,
+        }),
+      }
+    },
+  })
+}
+
 const adapterFor = (model: MockLanguageModelV3): Record<string, ProviderFactory> => ({
   anthropic: async () => model,
 })
@@ -97,6 +167,137 @@ describe('createEngine().handleChat', () => {
     })
     const response = await engine.handleChat(chatRequest(), testContext())
     expect(await streamedText(response)).toBe('Your order shipped yesterday.')
+  })
+
+  it('turns a mid-stream provider failure into a retryable data-error part', async () => {
+    const engine = createEngine(testConfig(), {
+      adapters: adapterFor(midStreamFailureModel()),
+    })
+    const chunks = (await readSse(await engine.handleChat(chatRequest(), testContext())))
+      .filter((event) => event !== '[DONE]')
+      .map((event) => JSON.parse(event) as Record<string, unknown>)
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'data-error',
+        data: expect.objectContaining({ code: 'provider_error', retryable: true }),
+      }),
+    )
+  })
+
+  it('emits persistent and transient custom parts with the documented shapes', async () => {
+    const store = new MemorySessionStore()
+    const engine = createEngine(
+      testConfig({
+        telemetry: { logLevel: 'debug' },
+        ui: {
+          messages: {
+            suggestions: [{ label: 'Pricing', action: { type: 'navigate', path: '/pricing' } }],
+          },
+        },
+        knowledge: {
+          sources: [{ type: 'sitemap', url: 'https://acme.test/sitemap.xml' }],
+          embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+        },
+      }),
+      {
+        adapters: adapterFor(textModel(['ok'])),
+        sessionStore: store,
+        knowledge: {
+          store: {
+            upsert: async () => {},
+            query: async () => [],
+            deleteBySource: async () => {},
+            deleteByIds: async () => {},
+            stats: async () => ({ documents: 0, chunks: 0, lastIndexed: '', model: 'test' }),
+            close: async () => {},
+          },
+          embedder: {
+            modelId: 'test',
+            embed: async () => ({ embedding: [0.1], tokens: 1 }),
+          },
+        },
+      },
+    )
+    const response = await engine.handleChat(chatRequest(), testContext())
+    const chunks = (await readSse(response))
+      .filter((event) => event !== '[DONE]')
+      .map((event) => JSON.parse(event) as Record<string, unknown>)
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'data-suggestions',
+        data: { items: [{ label: 'Pricing', action: { type: 'navigate', path: '/pricing' } }] },
+      }),
+    )
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'data-status',
+        transient: true,
+        data: { text: 'Searching documentation…' },
+      }),
+    )
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'data-usage',
+        data: { inputTokens: 10, outputTokens: 5, costUsd: 0 },
+      }),
+    )
+    const stored = await store.get(SESSION)
+    const parts =
+      stored?.messages.flatMap((message) => message.parts as Array<{ type: string }>) ?? []
+    expect(parts.some((part) => part.type === 'data-suggestions')).toBe(true)
+    expect(parts.some((part) => part.type === 'data-usage')).toBe(true)
+    expect(parts.some((part) => part.type === 'data-status')).toBe(false)
+  })
+
+  it.each([
+    [
+      'navigate',
+      { path: '/pricing' },
+      { type: 'data-navigate', data: { path: '/pricing', newTab: false } },
+    ],
+    [
+      'handoff',
+      {},
+      {
+        type: 'data-handoff',
+        data: expect.objectContaining({ message: 'A person will reply.' }),
+      },
+    ],
+  ] as const)('emits %s builtin effects as persistent data parts', async (id, input, expected) => {
+    const store = new MemorySessionStore()
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        storage: { type: 'memory' },
+        siteContext: { routes: [{ path: '/pricing' }] },
+        tools: [
+          {
+            name: id,
+            parameters: { type: 'object', properties: {}, additionalProperties: true },
+            executor:
+              id === 'handoff'
+                ? {
+                    type: 'builtin',
+                    id,
+                    target: { kind: 'url', url: 'https://support.test', includeTranscript: false },
+                    message: 'A person will reply.',
+                  }
+                : { type: 'builtin', id },
+          },
+        ],
+      }),
+      { adapters: adapterFor(toolModel(id, input)), sessionStore: store },
+    )
+    const chunks = (await readSse(await engine.handleChat(chatRequest(), testContext())))
+      .filter((event) => event !== '[DONE]')
+      .map((event) => JSON.parse(event) as Record<string, unknown>)
+    expect(chunks).toContainEqual(expect.objectContaining(expected))
+    const stored = await store.get(SESSION)
+    expect(
+      stored?.messages.some((message) =>
+        (message.parts as Array<{ type: string }>).some((part) => part.type === expected.type),
+      ),
+    ).toBe(true)
   })
 
   it('sends the composed system prompt to the model', async () => {
@@ -269,14 +470,66 @@ describe('fallback (docs/04 §3)', () => {
 })
 
 describe('getPublicConfig / health', () => {
-  it('serves the public config with no secrets in it', () => {
+  it('serves the public config with no secrets in it', async () => {
     const engine = createEngine(testConfig(), {}, { version: '1.2.3' })
-    const publicConfig = engine.getPublicConfig()
+    const publicConfig = await engine.getPublicConfig()
     expect(publicConfig.name).toBe('Acme')
     expect(publicConfig.version).toBe('1.2.3')
     expect(JSON.stringify(publicConfig)).not.toContain('test-key')
     expect(publicConfig).not.toHaveProperty('backend')
     expect(publicConfig).not.toHaveProperty('security')
+  })
+
+  it('returns only a live pending approval for the requested session', async () => {
+    let clock = 1_000
+    const store = new MemorySessionStore({ now: () => clock })
+    const pendingMessage = {
+      id: 'a1',
+      role: 'assistant' as const,
+      parts: [
+        {
+          type: 'tool-create_ticket',
+          toolCallId: 'tc1',
+          state: 'approval-requested',
+          input: { subject: 'Shipping' },
+          approval: { id: 'ap1' },
+        },
+      ],
+    }
+    await store.set({
+      id: SESSION,
+      messages: [pendingMessage as never],
+      createdAt: clock,
+      updatedAt: clock,
+      state: {
+        pendingRun: { runId: 'r1', responseMessage: pendingMessage, expiresAt: clock + 100 },
+      },
+    })
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        storage: { type: 'memory' },
+        tools: [
+          {
+            name: 'create_ticket',
+            parameters: { type: 'object', properties: {} },
+            executor: { type: 'builtin', id: 'submit_feedback' },
+            requiresApproval: true,
+            approvalRisk: 'high',
+          },
+        ],
+      }),
+      { sessionStore: store, now: () => clock },
+    )
+    await expect(engine.getPublicConfig(SESSION)).resolves.toMatchObject({
+      pending: {
+        runId: 'r1',
+        approval: { approvalId: 'ap1', toolName: 'create_ticket', risk: 'high' },
+      },
+    })
+    await expect(engine.getPublicConfig(`${SESSION}-other`)).resolves.not.toHaveProperty('pending')
+    clock = 1_101
+    await expect(engine.getPublicConfig(SESSION)).resolves.not.toHaveProperty('pending')
   })
 
   it('reports provider and storage health with a latency', async () => {

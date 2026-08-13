@@ -323,7 +323,7 @@ export function createSiteBotHandler(
    * response then carries `pending` (Phase 5's approval probe), which is
    * per-session and must never land in a shared cache.
    */
-  function handleConfig(request: Request, cors: Record<string, string>): Response {
+  async function handleConfig(request: Request, cors: Record<string, string>): Promise<Response> {
     const url = new URL(request.url)
     const sessionId = url.searchParams.get('sessionId')
 
@@ -331,7 +331,7 @@ export function createSiteBotHandler(
     // the widget before it has a session, sometimes as a plain navigation.
     checkKey(url.searchParams.get('key') ?? request.headers.get('x-sitebot-key'))
 
-    return Response.json(engine.getPublicConfig(), {
+    return Response.json(await engine.getPublicConfig(sessionId ?? undefined), {
       headers: {
         ...cors,
         'cache-control':
@@ -435,7 +435,7 @@ export function createSiteBotHandler(
           return await handleChat(request, cors, info)
         case 'config':
           if (request.method !== 'GET') return methodNotAllowed('GET', cors)
-          return handleConfig(request, cors)
+          return await handleConfig(request, cors)
         case 'feedback':
           if (request.method !== 'POST') return methodNotAllowed('POST', cors)
           return await handleFeedback(request, cors)

@@ -113,7 +113,7 @@ export interface Engine {
   handleChat(req: ChatRequest, ctx: RequestContext): Promise<Response>
   /** Bind a verified bearer token to a session, resetting on identity switches. */
   bindSessionIdentity?(sessionId: string, token: string | null, fingerprint?: string): Promise<void>
-  getPublicConfig(): PublicConfig
+  getPublicConfig(sessionId?: string): Promise<PublicConfig>
   health(): Promise<HealthReport>
   dispose(): Promise<void>
 }

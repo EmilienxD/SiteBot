@@ -2,6 +2,7 @@ import { jsonSchema, tool, type ToolSet } from 'ai'
 import type { ResolvedConfig, ToolEntry } from '@sitebot/config'
 import { isMcpImport } from '@sitebot/config'
 import type { RequestContext } from '../types.js'
+import type { UIMessage } from 'ai'
 import type { KnowledgeDeps } from '../knowledge/types.js'
 import { retrieve } from '../knowledge/retrieve.js'
 import { randomDelimiterId, untrustedBlock } from '../prompt/untrusted.js'
@@ -10,6 +11,21 @@ import { createHttpExecutor } from './http.js'
 import type { HostResolver } from './http.js'
 import { createMcpExecutor, expandMcpImport, McpClientPool, type StdioMcpConnector } from './mcp.js'
 import { validateJsonSchema, type JsonSchemaObject } from './schema.js'
+
+export const WIDGET_EFFECT = '__sitebotWidgetEffect'
+export type WidgetEffect =
+  | { type: 'data-navigate'; data: { path: string; newTab: boolean } }
+  | {
+      type: 'data-handoff'
+      data: { target: Record<string, unknown>; ticketUrl?: string; message: string }
+    }
+
+export function widgetEffect(
+  effect: WidgetEffect,
+  result: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...result, [WIDGET_EFFECT]: effect }
+}
 
 export interface ToolRegistryOptions {
   config: ResolvedConfig
@@ -24,6 +40,11 @@ export interface ToolRegistryOptions {
   isApprovalGranted?: (toolName: string, input: unknown) => Promise<boolean>
   /** Phase 6: the reachable knowledge index. Absent → tool is not registered. */
   knowledge?: KnowledgeDeps | null
+  onEvent?: (
+    event: 'feedback' | 'lead' | 'handoff',
+    data: Record<string, unknown>,
+  ) => void | Promise<void>
+  transcript?: UIMessage[]
 }
 
 export interface ToolRegistry {
@@ -84,6 +105,14 @@ async function buildTool(
         }
       : {}),
     metadata: { sitebot: { name: entry.name, readOnly: entry.readOnly, risk: entry.approvalRisk } },
+    ...(entry.executor?.type === 'builtin'
+      ? {
+          toModelOutput: ({ output }: { output: unknown }) => ({
+            type: 'json' as const,
+            value: isWidgetEffectResult(output) ? withoutWidgetEffect(output) : output,
+          }),
+        }
+      : {}),
     ...(execute === undefined
       ? {}
       : {
@@ -93,6 +122,15 @@ async function buildTool(
           },
         }),
   } as unknown as Parameters<typeof tool>[0]) as unknown as ToolSet[string]
+}
+
+function isWidgetEffectResult(output: unknown): output is Record<string, unknown> {
+  return typeof output === 'object' && output !== null && WIDGET_EFFECT in output
+}
+
+function withoutWidgetEffect(output: Record<string, unknown>): Record<string, unknown> {
+  const { [WIDGET_EFFECT]: _effect, ...result } = output
+  return result
 }
 
 async function resolveExecutor(
@@ -252,24 +290,91 @@ function builtinExecutor(
         }
       }
       case 'submit_feedback':
+        await options.onEvent?.('feedback', {
+          ...(typeof input === 'object' && input !== null
+            ? (input as Record<string, unknown>)
+            : {}),
+          sessionId: ctx.sessionId,
+        })
         return { accepted: true, message: 'Feedback recorded.' }
-      case 'navigate':
-        return {
-          path:
-            typeof input === 'object' && input !== null
-              ? (input as Record<string, unknown>).path
-              : undefined,
+      case 'collect_lead': {
+        const lead =
+          typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
+        await options.onEvent?.('lead', { ...lead, sessionId: ctx.sessionId })
+        return { accepted: true, lead }
+      }
+      case 'navigate': {
+        const path =
+          typeof input === 'object' && input !== null
+            ? (input as Record<string, unknown>).path
+            : undefined
+        if (
+          typeof path !== 'string' ||
+          !options.config.siteContext.routes.some((route) => route.path === path)
+        )
+          return { error: 'route_not_allowed' }
+        const newTab =
+          typeof input === 'object' &&
+          input !== null &&
+          (input as Record<string, unknown>).newTab === true
+        return widgetEffect(
+          { type: 'data-navigate', data: { path, newTab } },
+          { accepted: true, path },
+        )
+      }
+      case 'handoff': {
+        const target = (config.target as Record<string, unknown> | undefined) ?? null
+        const message =
+          typeof config.message === 'string' ? config.message : 'A human will follow up shortly.'
+        const transcript = target?.includeTranscript === true ? options.transcript : undefined
+        let ticketUrl = handoffUrl(target)
+        if (target?.kind === 'webhook' && typeof target.url === 'string') {
+          const fetchImpl = options.fetchImpl ?? globalThis.fetch
+          if (!fetchImpl) return { error: 'not_configured', tool: id }
+          const response = await fetchImpl(target.url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionId: ctx.sessionId, message, input, transcript }),
+            signal: ctx.signal,
+          })
+          if (!response.ok) return { error: 'handoff_failed', status: response.status }
+          const body = (await response.json().catch(() => null)) as { ticketUrl?: unknown } | null
+          if (typeof body?.ticketUrl === 'string') ticketUrl = body.ticketUrl
         }
-      case 'handoff':
-        return {
-          accepted: true,
-          target: config.target ?? null,
-          message: config.message ?? 'A human will follow up shortly.',
-        }
+        await options.onEvent?.('handoff', {
+          target: target ?? {},
+          message,
+          transcript,
+          ticketUrl,
+          sessionId: ctx.sessionId,
+        })
+        return widgetEffect(
+          {
+            type: 'data-handoff',
+            data: {
+              target: target ?? {},
+              ...(ticketUrl === undefined ? {} : { ticketUrl }),
+              message,
+            },
+          },
+          {
+            accepted: true,
+            target,
+            message,
+          },
+        )
+      }
       default:
         return { error: 'not_configured', tool: id }
     }
   }
+}
+
+function handoffUrl(target: Record<string, unknown> | null): string | undefined {
+  if (typeof target?.url === 'string') return target.url
+  if (target?.kind === 'email' && typeof target.email === 'string')
+    return `mailto:${encodeURIComponent(target.email)}`
+  return undefined
 }
 
 function builtinDescription(name: string): string {

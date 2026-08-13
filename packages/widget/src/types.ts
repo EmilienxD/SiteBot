@@ -22,6 +22,24 @@ export interface Citation {
   score: number
 }
 
+export interface HandoffData {
+  target: Record<string, unknown>
+  ticketUrl?: string
+  message: string
+}
+
+export interface InlineErrorData {
+  code: string
+  message: string
+  retryable: boolean
+}
+
+export interface UsageData {
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
+}
+
 export interface SiteBotEvent {
   type:
     | 'ready'
@@ -64,6 +82,10 @@ export interface WidgetController {
   readonly error?: Error
   readonly retryAfter?: number
   readonly composerDisabled: boolean
+  readonly statusText?: string
+  readonly handoff?: HandoffData
+  readonly inlineError?: InlineErrorData
+  readonly usage?: UsageData
   open(): void
   close(): void
   toggle(): void
@@ -75,6 +97,7 @@ export interface WidgetController {
   clearIdentity(): void
   setContext(data: Record<string, unknown>): void
   setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void
+  rehydratePending(pending: NonNullable<PublicConfig['pending']>): void
   refreshPageContext(): Promise<PageContext | null>
   registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void
   unregisterTool(name: string): void

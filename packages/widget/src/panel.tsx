@@ -174,7 +174,26 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
             )}
           </div>
         )}
+        {controller.inlineError && (
+          <div class="error inline-error" role="alert">
+            {controller.inlineError.message}
+            {controller.inlineError.retryable && (
+              <button type="button" onClick={() => void controller.retry()}>
+                {text('retry', 'Retry')}
+              </button>
+            )}
+          </div>
+        )}
+        {controller.handoff && <HandoffCard data={controller.handoff} />}
+        {controller.statusText && <div class="status">{controller.statusText}</div>}
         {working && <div class="status">{text('stillWorking', 'Still working…')}</div>}
+        {controller.usage && (
+          <details class="usage">
+            <summary>Usage</summary>
+            {controller.usage.inputTokens} in / {controller.usage.outputTokens} out / $
+            {controller.usage.costUsd.toFixed(4)}
+          </details>
+        )}
       </div>
       {!follow && (
         <button
@@ -245,6 +264,21 @@ export function Panel({ controller, close }: { controller: WidgetController; clo
             <a href={ui.footer.linkUrl}>{ui.footer.linkText}</a>
           )}
         </div>
+      )}
+    </div>
+  )
+}
+
+function HandoffCard({ data }: { data: NonNullable<WidgetController['handoff']> }) {
+  const target = String(data.target.kind ?? 'human support')
+  return (
+    <div class="handoff-card" role="status">
+      <strong>Connected to {target}</strong>
+      <p>{data.message}</p>
+      {data.ticketUrl && (
+        <a href={data.ticketUrl} target="_blank" rel="noopener noreferrer">
+          Open handoff
+        </a>
       )}
     </div>
   )

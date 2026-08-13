@@ -137,7 +137,10 @@ export class SiteChatElement extends HTMLElement {
     if (nonce) style.nonce = nonce
     this.#mount = document.createElement('div')
     this.#root.append(style, this.#mount)
-    const config = mergeConfig(await fetchConfig(endpoint, publicKey))
+    const sessionKey = storageKey(publicKey || 'anonymous', 'sessionId')
+    const storedSessionId =
+      readValue(sessionKey, 'session') ?? readValue(sessionKey, 'local') ?? undefined
+    const config = mergeConfig(await fetchConfig(endpoint, publicKey, storedSessionId ?? undefined))
     if (options.position) config.ui.position = options.position
     if (options.theme) config.ui.theme.mode = options.theme
     this.#config = config
@@ -196,6 +199,7 @@ export class SiteChatElement extends HTMLElement {
       controller.toggle = () => this.toggle()
       controller.clickCitation = (citation) => this.citationClick(citation)
       this.#controller = controller
+      if (config.pending) controller.rehydratePending(config.pending)
       for (const action of this.#queue.splice(0)) action(controller)
       this.render()
     } catch (error) {
@@ -280,10 +284,15 @@ export class SiteChatElement extends HTMLElement {
   }
 }
 
-async function fetchConfig(endpoint: string, key: string): Promise<PublicConfig | undefined> {
+async function fetchConfig(
+  endpoint: string,
+  key: string,
+  sessionId?: string,
+): Promise<PublicConfig | undefined> {
   try {
     const url = new URL(`${endpoint.replace(/\/$/, '')}/config`, location.href)
     if (key) url.searchParams.set('key', key)
+    if (sessionId) url.searchParams.set('sessionId', sessionId)
     const response = await fetch(url, { credentials: 'same-origin' })
     return response.ok ? ((await response.json()) as PublicConfig) : undefined
   } catch {

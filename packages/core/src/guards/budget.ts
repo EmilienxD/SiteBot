@@ -46,7 +46,7 @@ export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetT
       const estimatedUsd =
         modelId === undefined
           ? 0
-          : costOf(
+          : usageCost(
               { inputTokens: estimateTokens, outputTokens: 0, totalTokens: estimateTokens },
               modelId,
               pricing,
@@ -70,7 +70,7 @@ export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetT
       await load()
       const delta = {
         tokens: usage.totalTokens,
-        usd: costOf(usage, modelId, pricing, options.logger),
+        usd: usageCost(usage, modelId, pricing, options.logger),
       }
       tracker.session = await add(sessionKey, delta, 30 * 24 * 60 * 60 * 1000)
       tracker.day = await add(dayKey, delta, day.ttlMs)
@@ -101,7 +101,7 @@ export function createBudgetTracker(options: BudgetTrackerOptions = {}): BudgetT
   return tracker
 }
 
-function costOf(
+export function usageCost(
   usage: TokenUsage,
   modelId: string,
   pricing: PricingTable,

@@ -6,6 +6,7 @@ import { MemorySessionStore } from './session/store.js'
 import { createHttpExecutor } from './tools/http.js'
 import { ApprovalError, MemoryApprovalStore } from './tools/approvals.js'
 import { lintTools } from './tools/lint.js'
+import { createToolRegistry, WIDGET_EFFECT } from './tools/registry.js'
 
 describe('http tools', () => {
   it.each(['../admin', '@evil.com', '169.254.169.254', 'localhost'])(
@@ -109,6 +110,97 @@ describe('http tools', () => {
     else await expect(execute({}, testContext())).rejects.toThrow(/private network/)
     expect(fetchImpl).toHaveBeenCalledTimes(allowed ? 1 : 0)
   })
+})
+
+describe('builtin tools', () => {
+  async function executeBuiltin(
+    id: 'navigate' | 'handoff' | 'collect_lead' | 'submit_feedback',
+    input: Record<string, unknown>,
+    overrides: Record<string, unknown> = {},
+    fetchImpl?: typeof fetch,
+  ) {
+    const events = vi.fn()
+    const config = testConfig({
+      mode: 'agent',
+      storage: { type: 'memory' },
+      siteContext: { routes: [{ path: '/pricing' }] },
+      tools: [
+        {
+          name: id,
+          parameters: { type: 'object', properties: {}, additionalProperties: true },
+          executor: { type: 'builtin', id, ...overrides },
+        },
+      ],
+    })
+    const registry = createToolRegistry({
+      config,
+      ctx: testContext(),
+      filter: () => true,
+      approvals: false,
+      onEvent: events,
+      transcript: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'help' }] }],
+      ...(fetchImpl === undefined ? {} : { fetchImpl }),
+    })
+    const tool = (await registry.build())[id] as unknown as {
+      execute: (input: unknown, options: { experimental_context: unknown }) => Promise<unknown>
+      toModelOutput?: (options: { output: unknown }) => Promise<unknown> | unknown
+    }
+    const output = await tool.execute(input, { experimental_context: testContext() })
+    return { output, events, modelOutput: await tool.toModelOutput?.({ output }) }
+  }
+
+  it('restricts navigate to declared routes and emits a browser effect', async () => {
+    const allowed = await executeBuiltin('navigate', { path: '/pricing', newTab: true })
+    expect(allowed.output).toMatchObject({
+      accepted: true,
+      [WIDGET_EFFECT]: { type: 'data-navigate', data: { path: '/pricing', newTab: true } },
+    })
+    expect(JSON.stringify(allowed.modelOutput)).not.toContain(WIDGET_EFFECT)
+    await expect(executeBuiltin('navigate', { path: '/admin' })).resolves.toMatchObject({
+      output: { error: 'route_not_allowed' },
+    })
+  })
+
+  it('emits handoff data and includes transcript only when configured', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ ticketUrl: 'https://support.test/ticket/42' }))
+    const result = await executeBuiltin(
+      'handoff',
+      {},
+      {
+        target: { kind: 'webhook', url: 'https://support.test/ticket', includeTranscript: true },
+        message: 'A person will reply.',
+      },
+      fetchImpl,
+    )
+    expect(result.output).toMatchObject({
+      [WIDGET_EFFECT]: {
+        type: 'data-handoff',
+        data: { ticketUrl: 'https://support.test/ticket/42', message: 'A person will reply.' },
+      },
+    })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://support.test/ticket',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(result.events).toHaveBeenCalledWith(
+      'handoff',
+      expect.objectContaining({ transcript: expect.any(Array) }),
+    )
+  })
+
+  it.each(['collect_lead', 'submit_feedback'] as const)(
+    '%s dispatches the structured event webhook payload',
+    async (id) => {
+      const result = await executeBuiltin(id, { email: 'visitor@example.test', rating: 'up' })
+      expect(result.output).toMatchObject({ accepted: true })
+      expect(result.events).toHaveBeenCalledWith(
+        id === 'collect_lead' ? 'lead' : 'feedback',
+        expect.objectContaining({ sessionId: expect.any(String) }),
+      )
+    },
+  )
 })
 
 describe('approval checkpoints', () => {

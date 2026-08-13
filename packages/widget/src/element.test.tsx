@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ELEMENT_NAME, SiteChatElement } from './element.js'
+import { defaultConfig } from './defaults.js'
 
 /**
  * The lazy panel chunk, docs/07-widget.md §1: "only the launcher renders until
@@ -11,7 +12,12 @@ import { ELEMENT_NAME, SiteChatElement } from './element.js'
  * property the bundle budget depends on: a static import anywhere in the
  * launcher's graph would fold this chunk back into the initial payload.
  */
-const chunk = vi.hoisted(() => ({ loaded: 0, controllers: 0, identified: [] as string[] }))
+const chunk = vi.hoisted(() => ({
+  loaded: 0,
+  controllers: 0,
+  identified: [] as string[],
+  pending: [] as unknown[],
+}))
 
 vi.mock('./panel-chunk.js', async () => {
   const { h } = await import('preact')
@@ -31,6 +37,10 @@ vi.mock('./panel-chunk.js', async () => {
         stop() {},
         reset() {},
         identify: (jwt: string) => chunk.identified.push(jwt),
+        clearIdentity() {},
+        setContext() {},
+        setSuggestions() {},
+        rehydratePending: (pending: unknown) => chunk.pending.push(pending),
         refreshPageContext: async () => null,
         registerTool() {},
         unregisterTool() {},
@@ -82,7 +92,9 @@ describe('<site-chat> lazy boot (docs/07 §1)', () => {
     // still zero, which is only meaningful in declaration order.
     chunk.controllers = 0
     chunk.identified = []
+    chunk.pending = []
     document.body.innerHTML = ''
+    sessionStorage.clear()
     // No config endpoint in jsdom: boot falls back to the packaged defaults.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     if (!customElements.get(ELEMENT_NAME)) customElements.define(ELEMENT_NAME, SiteChatElement)
@@ -132,5 +144,38 @@ describe('<site-chat> lazy boot (docs/07 §1)', () => {
     await element.load()
     expect(chunk.controllers).toBe(1)
     await vi.waitFor(() => expect(shadow(element).querySelector('.panel-stub')).not.toBeNull())
+  })
+
+  it('probes the stored session and rehydrates a pending approval on load', async () => {
+    sessionStorage.setItem('sitebot:anonymous:sessionId', 's_pending')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          ...structuredClone(defaultConfig),
+          mode: 'agent',
+          pending: {
+            runId: 'r1',
+            approval: {
+              approvalId: 'ap1',
+              toolName: 'create_ticket',
+              toolCallId: 'tc1',
+              risk: 'high',
+            },
+          },
+        }),
+      ),
+    )
+    const element = await mountElement()
+    element.open()
+    await element.load()
+    const request = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as URL
+    expect(String(request)).toContain('sessionId=s_pending')
+    expect(chunk.pending).toEqual([
+      expect.objectContaining({
+        runId: 'r1',
+        approval: expect.objectContaining({ approvalId: 'ap1' }),
+      }),
+    ])
   })
 })

@@ -33,13 +33,15 @@ import { resolveChain, resolveModel } from './providers/registry.js'
 import { createSessionStore } from './session/factory.js'
 import type { SessionStore } from './session/store.js'
 import { contextBudget, estimateTokens, truncateHistory } from './session/truncate.js'
+import defaultPricing from '../pricing.json'
+import { usageCost, type PricingTable } from './guards/budget.js'
 import { errorResponse, mapError } from './stream/errors.js'
 import { EngineError } from './stream/errors.js'
 import { awaitFirstOutput } from './stream/start.js'
 import { createEventDispatcher, noopDispatcher, type EventDispatcher } from './telemetry/events.js'
 import { createLogger } from './telemetry/logger.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
-import { createToolRegistry } from './tools/registry.js'
+import { createToolRegistry, WIDGET_EFFECT, type WidgetEffect } from './tools/registry.js'
 import type { HostResolver } from './tools/http.js'
 import { McpClientPool, type StdioMcpConnector } from './tools/mcp.js'
 import type {
@@ -197,7 +199,23 @@ export function createEngine(
       ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
       mcpPool,
       ...(knowledgeDeps === undefined ? {} : { knowledge: knowledgeDeps }),
+      onEvent: async (event, data) => {
+        dispatcher.emit(event, data, { requestId: ctx.requestId, sessionId: ctx.sessionId })
+        if (event === 'feedback') {
+          const hook = config.hooks?.onFeedback as
+            ((feedback: Record<string, unknown>) => unknown | Promise<unknown>) | undefined
+          if (hook) {
+            try {
+              await hook(data)
+            } catch (error) {
+              ctx.logger.error('onFeedback hook threw', { error })
+            }
+          }
+        }
+      },
+      transcript: originalMessages,
     }).build()
+    let finalUsage: { inputTokens: number; outputTokens: number; costUsd: number } | undefined
 
     // `search_knowledge_base` — the engine-owned side of retrieval mode `tool`
     // and `hybrid`. It exists without a `tools` config entry because the model
@@ -323,6 +341,19 @@ export function createEngine(
             ctx.logger.error('model stream error', { error, model: resolved.id })
           },
           onFinish: ({ usage, finishReason }) => {
+            finalUsage = {
+              inputTokens: usage.inputTokens ?? 0,
+              outputTokens: usage.outputTokens ?? 0,
+              costUsd: usageCost(
+                {
+                  inputTokens: usage.inputTokens ?? 0,
+                  outputTokens: usage.outputTokens ?? 0,
+                  totalTokens: usage.totalTokens ?? 0,
+                },
+                resolved.id,
+                { ...(defaultPricing as PricingTable), ...config.backend.pricing },
+              ),
+            }
             void ctx.budget.record(
               {
                 inputTokens: usage.inputTokens ?? 0,
@@ -342,6 +373,30 @@ export function createEngine(
         const uiStream = streamed.toUIMessageStream<UIMessage>({
           originalMessages,
           sendReasoning: config.ui.behaviour.showReasoning,
+          onError: (error) => mapError(error, errorOptions).message,
+        }) as ReadableStream<UIMessageChunk>
+
+        const committed = await awaitFirstOutput(uiStream, { rawError: () => rawError })
+        const annotated = annotateAgentStream(committed, {
+          runId,
+          clientTools,
+          config,
+          debug,
+          status: knowledge?.enabled ? 'Searching documentation…' : undefined,
+          usage: () => finalUsage,
+        })
+
+        const withCitations =
+          knowledge === undefined || knowledge.citations.length === 0
+            ? annotated
+            : appendCitations(annotated, {
+                items: knowledge.citations,
+                include: config.knowledge.retrieval.includeCitations,
+              })
+
+        const assembled = createUIMessageStream<UIMessage>({
+          originalMessages,
+          execute: ({ writer }) => writer.merge(withCitations),
           onError: (error) => mapError(error, errorOptions).message,
           onFinish: async ({ responseMessage }) => {
             if (responseMessage.id === '' && responseMessage.parts.length === 0) return
@@ -365,20 +420,7 @@ export function createEngine(
           },
         }) as ReadableStream<UIMessageChunk>
 
-        const stream = await awaitFirstOutput(
-          annotateAgentStream(uiStream, { runId, clientTools, config }),
-          { rawError: () => rawError },
-        )
-
-        const withCitations =
-          knowledge === undefined || knowledge.citations.length === 0
-            ? stream
-            : appendCitations(stream, {
-                items: knowledge.citations,
-                include: config.knowledge.retrieval.includeCitations,
-              })
-
-        return { stream: withCitations, modelId: resolved.id }
+        return { stream: assembled, modelId: resolved.id }
       },
     })
 
@@ -626,10 +668,42 @@ export function createEngine(
       })
     },
 
-    getPublicConfig() {
-      return toPublicConfig(config, {
+    async getPublicConfig(sessionId?: string) {
+      const publicConfig = toPublicConfig(config, {
         ...(options.version === undefined ? {} : { version: options.version }),
       })
+      if (sessionId === undefined || config.storage.type === 'none') return publicConfig
+      const session = await sessionStore.get(sessionId)
+      const pending = session?.state?.pendingRun as PendingRun | undefined
+      if (pending === undefined || now() > pending.expiresAt) return publicConfig
+      const part = (pending.responseMessage.parts as MutableToolPart[]).find(
+        (candidate) =>
+          candidate.type.startsWith('tool-') &&
+          candidate.state === 'approval-requested' &&
+          typeof candidate.approval?.id === 'string',
+      )
+      if (part === undefined || part.toolCallId === undefined || part.approval?.id === undefined)
+        return publicConfig
+      const name = toolName(part)
+      const entry = config.tools.find(
+        (candidate) => !('from' in candidate) && candidate.name === name,
+      )
+      return {
+        ...publicConfig,
+        pending: {
+          runId: pending.runId,
+          approval: {
+            approvalId: part.approval.id,
+            toolName: name,
+            toolCallId: part.toolCallId,
+            input: part.input,
+            risk: entry && !('from' in entry) ? entry.approvalRisk : 'medium',
+            ...(entry && !('from' in entry) && entry.approvalSummary
+              ? { description: entry.approvalSummary }
+              : {}),
+          },
+        },
+      }
     },
 
     async health(): Promise<HealthReport> {
@@ -924,6 +998,9 @@ function annotateAgentStream(
     runId: string
     clientTools: Set<string>
     config: ResolvedConfig
+    debug: boolean
+    status?: string
+    usage: () => { inputTokens: number; outputTokens: number; costUsd: number } | undefined
   },
 ): ReadableStream<UIMessageChunk> {
   const calls = new Map<string, { toolName: string; input: unknown }>()
@@ -931,6 +1008,37 @@ function annotateAgentStream(
   return stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
+        if (chunk.type === 'start') {
+          controller.enqueue(chunk)
+          if (options.config.ui.messages.suggestions.length > 0) {
+            controller.enqueue({
+              type: 'data-suggestions',
+              data: { items: options.config.ui.messages.suggestions },
+            } as UIMessageChunk)
+          }
+          if (options.status) {
+            controller.enqueue({
+              type: 'data-status',
+              transient: true,
+              data: { text: options.status },
+            } as UIMessageChunk)
+          }
+          return
+        }
+        if (chunk.type === 'error') {
+          controller.enqueue({
+            type: 'data-error',
+            data: { code: 'provider_error', message: chunk.errorText, retryable: true },
+          } as UIMessageChunk)
+          return
+        }
+        if (chunk.type === 'tool-output-available' && isWidgetEffectOutput(chunk.output)) {
+          controller.enqueue({
+            type: chunk.output[WIDGET_EFFECT].type,
+            data: chunk.output[WIDGET_EFFECT].data,
+          } as UIMessageChunk)
+          chunk = { ...chunk, output: withoutWidgetEffect(chunk.output) }
+        }
         if (chunk.type === 'tool-input-available') {
           calls.set(chunk.toolCallId, { toolName: chunk.toolName, input: chunk.input })
         }
@@ -958,12 +1066,42 @@ function annotateAgentStream(
             if (!options.clientTools.has(call.toolName) || approvals.has(toolCallId)) continue
             controller.enqueue({
               type: 'data-client-tool-call',
+              transient: true,
               data: { runId: options.runId, toolCallId, ...call },
             } as UIMessageChunk)
           }
         }
         controller.enqueue(chunk)
       },
+      flush(controller) {
+        const usage = options.usage()
+        if (options.debug && usage) {
+          controller.enqueue({
+            type: 'data-usage',
+            data: {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              costUsd: usage.costUsd,
+            },
+          } as UIMessageChunk)
+        }
+      },
     }),
   )
+}
+
+function isWidgetEffectOutput(
+  output: unknown,
+): output is Record<string, unknown> & { [WIDGET_EFFECT]: WidgetEffect } {
+  return (
+    typeof output === 'object' &&
+    output !== null &&
+    WIDGET_EFFECT in output &&
+    typeof (output as Record<string, unknown>)[WIDGET_EFFECT] === 'object'
+  )
+}
+
+function withoutWidgetEffect(output: Record<string, unknown>): Record<string, unknown> {
+  const { [WIDGET_EFFECT]: _effect, ...result } = output
+  return result
 }

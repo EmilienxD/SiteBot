@@ -17,7 +17,21 @@ export interface PublicConfig {
   mode: Mode
   ui: Ui
   capabilities: PublicCapabilities
+  pending?: PublicPendingRun
   version?: string
+}
+
+export interface PublicPendingRun {
+  runId: string
+  approval: {
+    approvalId: string
+    toolName: string
+    toolCallId: string
+    title?: string
+    description?: string
+    input?: unknown
+    risk: 'low' | 'medium' | 'high'
+  }
 }
 
 export interface PublicCapabilities {
