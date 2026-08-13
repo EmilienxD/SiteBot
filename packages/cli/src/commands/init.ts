@@ -310,7 +310,7 @@ function printNextSteps(
 
   if (answers.selfHostWidget) {
     ui.step(
-      'Self-hosting: copy node_modules/@sitebot/widget/dist/sitebot.js into your static directory.',
+      'Self-hosting: copy node_modules/@sitebot/widget/dist/sitebot*.js into your static directory (the panel is a sibling chunk).',
     )
   }
 

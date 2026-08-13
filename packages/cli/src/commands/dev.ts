@@ -143,6 +143,9 @@ interface DevRouteOptions {
   widget: string | null
 }
 
+/** The widget entry and its sibling chunks — nothing else is served from disk. */
+const WIDGET_ASSET = /^\/sitebot(-[a-z][\da-z-]*)?\.js$/
+
 async function devRoutes(
   request: IncomingMessage,
   response: ServerResponse,
@@ -156,9 +159,12 @@ async function devRoutes(
   }
 
   // The widget from node_modules, so the local page tests the local build
-  // rather than whatever the CDN is currently serving.
-  if (path === '/sitebot.js' && options.widget !== null) {
-    const source = await readFile(options.widget, 'utf8').catch(() => null)
+  // rather than whatever the CDN is currently serving. `/sitebot-*.js` covers
+  // the lazy panel chunk (docs/07 §1), which the entry pulls in by name from
+  // the same directory the moment the panel first opens.
+  if (WIDGET_ASSET.test(path) && options.widget !== null) {
+    const file = resolve(dirname(options.widget), path.slice(1))
+    const source = await readFile(file, 'utf8').catch(() => null)
     if (source !== null) {
       send(response, 200, 'text/javascript; charset=utf-8', source)
       return true
@@ -245,7 +251,7 @@ function playgroundPage(options: DevRouteOptions): string {
     </section>
   </main>
 
-  <script src="${src}" data-endpoint="${options.basePath}" defer></script>
+  <script type="module" src="${src}" data-endpoint="${options.basePath}"></script>
 </body>
 </html>
 `

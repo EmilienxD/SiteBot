@@ -124,7 +124,7 @@ Ordered phases with explicit acceptance criteria. Each phase is a coherent unit 
 - Playwright screenshots at 4 viewports × 2 themes match baselines, and a manual side-by-side against `example-from-ramp-website.png` is signed off.
 - Hostile-CSS fixture pages (Tailwind preflight, Bootstrap, `* { color: red !important }`) leave the widget unaffected.
 - axe-core clean in every state.
-- `size-limit`: launcher ≤ 12 KB, total ≤ 25 KB gzip.
+- `size-limit`: launcher (initial) ≤ 15 KB, panel (lazy) ≤ 66 KB, total ≤ 80 KB gzip — see [`07`](./07-widget.md) §1 for what sets those numbers.
 - The widget never throws into the host page (error-injection test).
 
 **Milestone: v0.1 — a configurable, good-looking, streaming chatbot.** Shippable on its own.
@@ -289,7 +289,7 @@ Phases 5, 6 and 7 are independently parallelisable once 4 lands, if more than on
 
 - [ ] All ten phases complete with their acceptance criteria met
 - [ ] `pnpm build && pnpm test && pnpm test:security && pnpm lint` green
-- [ ] Widget bundle ≤ 25 KB gzip, launcher ≤ 12 KB
+- [ ] Widget bundle within the `size-limit` budgets of [`07`](./07-widget.md) §1 — the initial payload is the number that matters, and the panel is lazy
 - [ ] axe-core clean across all widget states
 - [ ] All four examples run from a clean clone
 - [ ] `npx sitebot init` to working chatbot in under five minutes, verified on a fresh machine

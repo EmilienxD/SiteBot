@@ -130,13 +130,17 @@ Also exports `createServer(config)` — the standalone Hono app used by `sitebot
 
 The custom element. Preact + signals, Shadow DOM. Builds:
 
-| Output                   | Use                                                                   |
-| ------------------------ | --------------------------------------------------------------------- |
-| `dist/sitebot.js` (IIFE) | `<script>` tag, auto-boots from `data-*` attributes                   |
-| `dist/sitebot.mjs` (ESM) | bundler import                                                        |
-| `dist/sitebot.css`       | _not shipped_ — styles are inlined into the shadow root by the bundle |
+| Output                    | Use                                                                    |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `dist/sitebot.js` (ESM)   | `<script type="module">` tag and bundler import — auto-boots from `data-*` |
+| `dist/sitebot-shared.js`  | loaded eagerly with the entry: Preact and the modules both halves share  |
+| `dist/sitebot-panel.js`   | the lazy panel chunk, fetched on first open                             |
+| `dist/sitebot.css`        | _not shipped_ — styles are inlined into the shadow root by the bundle   |
 
-Budget: **≤ 25 KB gzip** for the IIFE bundle including Preact. Enforced by a CI size check.
+The bundle is an ES module rather than an IIFE because Rollup cannot code-split
+into an IIFE, and the lazy panel chunk (docs/07 §1) is the harder requirement:
+first paint has to cost a button. Budgets are enforced by a CI size check —
+see [`07-widget.md`](./07-widget.md) §1 for the numbers and what drives them.
 
 ### `@sitebot/react` — layer 3, browser
 

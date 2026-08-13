@@ -10,14 +10,20 @@ The reference visual is `docs/example-from-ramp-website.png` — the Chili Piper
 
 ```html
 <script
+  type="module"
   src="https://cdn.jsdelivr.net/npm/@sitebot/widget@1/dist/sitebot.js"
   data-endpoint="/api/chat"
   data-key="pk_live_a1b2c3"
   data-position="bottom-right"
   data-auto-open="false"
-  defer
 ></script>
 ```
+
+`type="module"` is required and replaces `defer` (modules defer by default). The
+bundle ships as an ES module so the panel can live in its own chunk — an IIFE
+cannot be code-split. Self-hosting therefore means copying `dist/sitebot*.js`,
+not just the entry: the chunks are fetched by name from the entry's own
+directory, so no configuration is needed either way.
 
 Boot sequence:
 
@@ -43,13 +49,25 @@ import { ChatWidget } from '@sitebot/react'
 
 ### Bundle budget (CI-enforced)
 
-| Chunk              | Budget           |
-| ------------------ | ---------------- |
-| Launcher (initial) | ≤ 12 KB gzip     |
-| Panel (lazy)       | ≤ 18 KB gzip     |
-| **Total**          | **≤ 25 KB gzip** |
+| Chunk                                          | Budget           |
+| ---------------------------------------------- | ---------------- |
+| Launcher (initial: `sitebot.js` + `-shared.js`) | ≤ 15 KB gzip     |
+| Panel (lazy: `sitebot-panel.js`)               | ≤ 66 KB gzip     |
+| **Total**                                      | **≤ 80 KB gzip** |
 
-Preact + `@preact/signals` ≈ 6 KB of that. Markdown rendering uses a ~3 KB subset renderer, not `marked`/`remark`.
+Preact + `@preact/signals` ≈ 6 KB of the initial payload. Markdown rendering uses a ~3 KB subset renderer, not `marked`/`remark`.
+
+The panel budget is dominated by one dependency: the `ai` package supplies the
+chat client (`AbstractChat`, `DefaultChatTransport`) and, through it, `zod` and
+the JSON-schema machinery — ~55 KB gzip on its own, tree-shaken, which is why
+the lazy split is load-bearing rather than cosmetic. The number the user feels
+is the initial one, and that is a launcher-sized 14 KB; the panel is paid for
+only by someone who opens the chat. Getting the total under ~25 KB means
+replacing `ai`'s chat client with an in-house UI-message-stream reader, which
+buys a smaller download at the cost of owning the wire protocol the server
+emits — a deliberate trade to make on its own, not a side effect of a bundle
+tweak. The budgets above are the enforced ceiling for the current dependency
+set; tighten them if that changes.
 
 ---
 

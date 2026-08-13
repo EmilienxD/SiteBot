@@ -28,7 +28,7 @@ These four were decided in the design session and everything downstream assumes 
 | --- | -------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | D1  | Configuration format | **YAML primary**, JSON/TOML parsed by the same loader, optional `chatbot.config.ts` escape hatch that merges over it | Declarative file is the documented product. TS exists only for inline JS handlers and hooks.                                                     |
 | D2  | Backend runtime      | **Node/TypeScript core + thin adapters** (Next.js, Express, Fastify, Hono, generic `fetch`)                          | Non-JS sites (Django/Rails/PHP/Laravel) run `sitebot serve` as a sidecar service. No second implementation.                                      |
-| D3  | Widget delivery      | **Custom Element + Shadow DOM + Preact**, shipped as `<script>` tag (IIFE) and ESM                                   | ~20 KB gzip target. Full CSS isolation. Direct DOM access enables page-context capture and client-side tools. Optional `isolation: iframe` mode. |
+| D3  | Widget delivery      | **Custom Element + Shadow DOM + Preact**, shipped as an ES module (`<script type="module">`, also a bundler import)   | ~14 KB gzip initial; the panel is a lazy chunk. Full CSS isolation. Direct DOM access enables page-context capture and client-side tools. Optional `isolation: iframe` mode. |
 | D4  | Knowledge layer      | **Full 4-layer pipeline in v1**; `memory` and `sqlite-vec` stores default, `pgvector`/`upstash` adapters             | `npx sitebot init` produces a genuinely knowledgeable bot with zero external infrastructure.                                                     |
 
 ### Derived decisions (not separately negotiated, but binding)
@@ -165,10 +165,10 @@ export const { POST, GET } = createNextHandler(config)
 
 ```html
 <script
+  type="module"
   src="https://cdn.jsdelivr.net/npm/@sitebot/widget/dist/sitebot.js"
   data-endpoint="/api/chat"
   data-key="pk_live_a1b2c3"
-  defer
 ></script>
 ```
 

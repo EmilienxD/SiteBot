@@ -1,20 +1,41 @@
 import { render } from 'preact'
 import type { PublicConfig } from '@sitebot/config'
-import { createController } from './chat.js'
 import { matchesAny } from './context.js'
 import { mergeConfig } from './defaults.js'
-import { Panel } from './panel.js'
 import { readValue, storageKey, writeValue } from './storage.js'
 import { styles } from './styles.js'
-import type { SiteBotOptions, WidgetController } from './types.js'
+import type { Citation, SiteBotOptions, WidgetController } from './types.js'
 
 export const ELEMENT_NAME = 'site-chat'
 export const DEFAULT_Z_INDEX = 2147483000
+
+/**
+ * Type-only view of the lazy chunk: `import type` is erased at compile time, so
+ * this does not create a static edge to `./panel-chunk.js` — the dynamic
+ * `import()` in `loadPanel` stays the only one, which is what keeps the chunk
+ * out of the initial payload.
+ */
+import type * as PanelModule from './panel-chunk.js'
+type PanelChunk = typeof PanelModule
+
+/** The options every code path downstream of boot can rely on being present. */
+type ResolvedOptions = SiteBotOptions & { endpoint: string; publicKey: string }
 
 export class SiteChatElement extends HTMLElement {
   #root?: ShadowRoot
   #mount?: HTMLDivElement
   #controller?: WidgetController
+  #chunk?: PanelChunk
+  #config?: PublicConfig
+  #resolved?: ResolvedOptions
+  #booting?: Promise<void>
+  #loading?: Promise<void>
+  /**
+   * Calls that need the chat controller but arrived before the chunk loaded.
+   * `SiteBot.identify(...)` on page load must not drag the panel in — it waits
+   * here and is applied the moment the controller exists.
+   */
+  #queue: Array<(controller: WidgetController) => void> = []
   #open = false
   #options: SiteBotOptions = {}
   #launcher?: HTMLButtonElement
@@ -28,6 +49,7 @@ export class SiteChatElement extends HTMLElement {
   open(): void {
     this.safe(() => {
       this.#open = true
+      void this.load()
       this.render()
       this.dispatch('open')
     })
@@ -47,27 +69,36 @@ export class SiteChatElement extends HTMLElement {
   send(text: string): void {
     this.safe(() => {
       this.open()
-      void this.#controller?.send(text)
+      this.withController((controller) => void controller.send(text))
     })
   }
   identify(jwt: string): void {
-    this.safe(() => this.#controller?.identify(jwt))
+    this.safe(() => this.withController((controller) => controller.identify(jwt)))
   }
   reset(): void {
     this.safe(() => {
-      this.#controller?.reset()
+      this.withController((controller) => controller.reset())
       this.dispatch('reset')
     })
   }
   refreshPageContext(): void {
-    this.safe(() => void this.#controller?.refreshPageContext())
+    this.safe(() => this.withController((controller) => void controller.refreshPageContext()))
   }
 
-  async boot(): Promise<void> {
+  /**
+   * The cheap half of boot: shadow root, styles, config, launcher. Guarded so
+   * `connectedCallback` and `configure` can both call it and only one runs.
+   */
+  boot(): Promise<void> {
+    this.#booting ??= this.mount()
+    return this.#booting
+  }
+
+  async mount(): Promise<void> {
     if (this.#root || !HTMLElement.prototype.attachShadow) return
     const endpoint = this.#options.endpoint ?? this.dataset.endpoint ?? '/api/chat'
     const publicKey = this.#options.publicKey ?? this.dataset.key ?? ''
-    const options = { ...this.#options, endpoint, publicKey }
+    const options: ResolvedOptions = { ...this.#options, endpoint, publicKey }
     this.setAttribute(
       'style',
       `position:fixed!important;inset:0!important;width:0!important;height:0!important;z-index:${DEFAULT_Z_INDEX}!important;display:block!important`,
@@ -82,6 +113,8 @@ export class SiteChatElement extends HTMLElement {
     const config = mergeConfig(await fetchConfig(endpoint, publicKey))
     if (options.position) config.ui.position = options.position
     if (options.theme) config.ui.theme.mode = options.theme
+    this.#config = config
+    this.#resolved = options
     this.dataset.theme = config.ui.theme.mode
     this.style.setProperty('--sb-panel-w', `${config.ui.panel.width}px`)
     this.style.setProperty('--sb-panel-h', `${config.ui.panel.height}px`)
@@ -89,11 +122,6 @@ export class SiteChatElement extends HTMLElement {
     this.style.setProperty('--sb-offset-y', `${config.ui.offset.y}px`)
     this.style.setProperty('z-index', `${config.ui.zIndex}`, 'important')
     applyTheme(this, config)
-    this.#controller = createController(options, config, () => this.render())
-    this.#controller.open = () => this.open()
-    this.#controller.close = () => this.close()
-    this.#controller.toggle = () => this.toggle()
-    this.#controller.clickCitation = (citation) => this.citationClick(citation)
     if (matchesAny(location.pathname, config.ui.launcher.hideOnPaths)) return
     const remembered = readValue(storageKey(publicKey || 'anonymous', 'open'), 'local') === 'true'
     this.#open = Boolean(
@@ -102,6 +130,7 @@ export class SiteChatElement extends HTMLElement {
         (config.ui.panel.rememberOpenState && remembered) ||
         config.ui.panel.openOnFirstVisit),
     )
+    if (this.#open) void this.load()
     setTimeout(() => this.render(), config.ui.launcher.showAfterMs)
     const viewport = typeof visualViewport === 'undefined' ? null : visualViewport
     viewport?.addEventListener('resize', () =>
@@ -109,14 +138,62 @@ export class SiteChatElement extends HTMLElement {
     )
   }
 
+  /**
+   * Pull in the panel chunk and build the chat controller — docs/07 §1. Every
+   * entry point that needs the chat half calls this and shares one promise, so
+   * the network request happens once no matter how the panel is opened.
+   */
+  load(): Promise<void> {
+    this.#loading ??= this.loadPanel()
+    return this.#loading
+  }
+
+  async loadPanel(): Promise<void> {
+    try {
+      await this.boot()
+      const config = this.#config
+      const options = this.#resolved
+      // No config means boot bailed out (no Shadow DOM). Clear the guard so a
+      // later call can try again rather than latching a failure forever.
+      if (!config || !options) {
+        this.#loading = undefined
+        return
+      }
+      const chunk = await import('./panel-chunk.js')
+      this.#chunk = chunk
+      const controller = chunk.createController(options, config, () => this.render())
+      controller.open = () => this.open()
+      controller.close = () => this.close()
+      controller.toggle = () => this.toggle()
+      controller.clickCitation = (citation) => this.citationClick(citation)
+      this.#controller = controller
+      for (const action of this.#queue.splice(0)) action(controller)
+      this.render()
+    } catch (error) {
+      this.#loading = undefined
+      console.warn('[SiteBot] failed to load the chat panel', error)
+      this.#options.onEvent?.({ type: 'error', detail: error })
+    }
+  }
+
+  /** Run `action` now if the controller exists, otherwise when it arrives. */
+  withController(action: (controller: WidgetController) => void): void {
+    if (this.#controller) action(this.#controller)
+    else this.#queue.push(action)
+  }
+
   render(): void {
     const mount = this.#mount
+    const config = this.#config
+    if (!mount || !config) return
+    const ui = config.ui
+    const Panel = this.#chunk?.Panel
     const controller = this.#controller
-    if (!mount || !controller) return
-    const ui = controller.config.ui
     render(
       <>
-        {this.#open && <Panel controller={controller} close={() => this.close()} />}
+        {this.#open && Panel && controller && (
+          <Panel controller={controller} close={() => this.close()} />
+        )}
         <button
           ref={(node) => {
             this.#launcher = node ?? undefined
@@ -135,23 +212,23 @@ export class SiteChatElement extends HTMLElement {
     )
     if (ui.panel.rememberOpenState)
       writeValue(
-        storageKey(controller.options.publicKey || 'anonymous', 'open'),
+        storageKey(this.#resolved?.publicKey || 'anonymous', 'open'),
         String(this.#open),
         'local',
       )
   }
   registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void {
-    this.#controller?.registerTool(name, handler)
+    this.withController((controller) => controller.registerTool(name, handler))
   }
   unregisterTool(name: string): void {
-    this.#controller?.unregisterTool(name)
+    this.withController((controller) => controller.unregisterTool(name))
   }
   dispatch(type: 'open' | 'close' | 'reset'): void {
     this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true }))
     this.#options.onEvent?.({ type })
   }
   /** docs/03 §7 — a citation chip click opens the source and notifies the host. */
-  citationClick(citation: { url: string; title: string }): void {
+  citationClick(citation: Citation): void {
     this.safe(() => {
       window.open(citation.url, '_blank', 'noopener,noreferrer')
       const detail = { url: citation.url, title: citation.title }

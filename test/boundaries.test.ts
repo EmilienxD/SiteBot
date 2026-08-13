@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ESLint } from 'eslint'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 /**
  * Executable proof of the dependency graph in docs/01-architecture.md §3.
@@ -14,10 +14,19 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-const eslint = new ESLint({
-  cwd: repoRoot,
-  overrideConfigFile: join(repoRoot, 'eslint.config.js'),
-})
+let eslint: ESLint
+
+beforeAll(async () => {
+  eslint = new ESLint({
+    cwd: repoRoot,
+    overrideConfigFile: join(repoRoot, 'eslint.config.js'),
+  })
+
+  // ESLint loads the flat config, parser, and plugins lazily. Do that work in
+  // the explicitly timed hook instead of charging it to whichever test runs
+  // first.
+  await eslint.lintText('', { filePath: join(repoRoot, 'packages/config/src/leak.ts') })
+}, 15_000)
 
 /** Lint `code` as if it lived at `filePath`, relative to the repo root. */
 async function lint(filePath: string, code: string) {

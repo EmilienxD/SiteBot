@@ -433,11 +433,13 @@ export const WIDGET_SELF_HOSTED_URL = '/sitebot.js'
  */
 export function scriptTag(answers: ScaffoldAnswers): string {
   const src = answers.selfHostWidget ? WIDGET_SELF_HOSTED_URL : WIDGET_CDN_URL
+  // `type="module"`, not `defer`: the bundle is an ES module so the panel can
+  // load as a separate chunk (docs/07 §1). Modules are deferred by default.
   return [
     '<script',
+    '  type="module"',
     `  src="${src}"`,
     `  data-endpoint="${answers.basePath}"`,
-    '  defer',
     '></script>',
   ].join('\n')
 }

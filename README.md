@@ -99,10 +99,10 @@ export const { POST, GET } = createNextHandler(config)
 
 ```html
 <script
+  type="module"
   src="/sitebot.js"
   data-endpoint="/api/chat"
   data-key="pk_live_…"
-  defer
 ></script>
 ```
 

@@ -66,9 +66,18 @@ export const SiteBot: SiteBotApi = {
     }
   },
 }
+/**
+ * The tag that loaded us. `document.currentScript` is null inside a module
+ * script, and docs/07 §1 ships the bundle as `<script type="module">` so the
+ * panel can be a separate chunk — hence the fallback lookup by data attribute.
+ */
+function bootScript(): HTMLScriptElement | null {
+  const current = document.currentScript as HTMLScriptElement | null
+  return current ?? document.querySelector<HTMLScriptElement>('script[data-endpoint]')
+}
 if (typeof window !== 'undefined') {
   window.SiteBot = SiteBot
-  const script = document.currentScript as HTMLScriptElement | null
+  const script = bootScript()
   if (script?.dataset.endpoint || window.SiteBotConfig)
     queueMicrotask(() => defineSiteBot(window.SiteBotConfig ?? {}))
 }
