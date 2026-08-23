@@ -219,7 +219,10 @@ function toolPolicyBlock(
 
   const knowledgeAvailable =
     config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
-  if (retrieval !== 'tool' && config.knowledge.retrieval.includeCitations) {
+  // Gated on `knowledgeAvailable` too: with no source configured the knowledge
+  // block can never appear, and telling the model to cite [n] results that
+  // cannot exist invites it to invent them.
+  if (retrieval !== 'tool' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {
     lines.push('- Cite sources with [n] when you use knowledge results.')
   }
   if (retrieval !== 'always' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {

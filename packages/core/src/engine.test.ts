@@ -431,6 +431,146 @@ describe('fallback (docs/04 §3)', () => {
     expect(await streamedText(response)).toBe('recovered')
   })
 
+  it('emits a provider_fallback telemetry event on a hop', async () => {
+    // docs/04 §3 rule 6: silent degradation is a bug. If the first provider is
+    // quietly failing every request, the only place that shows up is here.
+    const dispatcher = { emit: vi.fn(), drain: async () => {} }
+    const engine = createEngine(
+      testConfig({
+        backend: {
+          provider: 'anthropic',
+          model: 'claude-opus-5',
+          maxRetries: 0,
+          fallback: [{ provider: 'openai', model: 'gpt-5' }],
+        },
+      }),
+      {
+        adapters: {
+          anthropic: async () => failingModel(503),
+          openai: async () => textModel(['recovered']),
+        },
+        dispatcher,
+        logger: silentLogger,
+      },
+    )
+
+    await streamedText(await engine.handleChat(chatRequest(), testContext()))
+
+    expect(dispatcher.emit).toHaveBeenCalledWith(
+      'provider_fallback',
+      expect.objectContaining({
+        from: 'anthropic:claude-opus-5',
+        to: 'openai:gpt-5',
+        attempts: 1,
+      }),
+      expect.objectContaining({ sessionId: SESSION }),
+    )
+  })
+
+  it('retries within the same entry and succeeds without hopping', async () => {
+    // The retry-then-succeed case: a 503 on the first attempt is the common
+    // transient, and burning the fallback entry for it would send every blip
+    // to the more expensive provider.
+    let calls = 0
+    const flaky = new MockLanguageModelV3({
+      doStream: async () => {
+        calls += 1
+        if (calls === 1) throw Object.assign(new Error('upstream failure'), { statusCode: 503 })
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'stream-start', warnings: [] },
+              { type: 'text-start', id: 't1' },
+              { type: 'text-delta', id: 't1', delta: 'second attempt' },
+              { type: 'text-end', id: 't1' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: {
+                  inputTokens: { total: 5, noCache: 5, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 2, text: 2, reasoning: 0 },
+                },
+              },
+            ] satisfies LanguageModelV3StreamPart[],
+            chunkDelayInMs: null,
+            initialDelayInMs: null,
+          }),
+        }
+      },
+    })
+    const openai = vi.fn(async () => textModel(['fallback']))
+    const dispatcher = { emit: vi.fn(), drain: async () => {} }
+
+    const engine = createEngine(
+      testConfig({
+        backend: {
+          provider: 'anthropic',
+          model: 'claude-opus-5',
+          maxRetries: 2,
+          fallback: [{ provider: 'openai', model: 'gpt-5' }],
+        },
+      }),
+      { adapters: { anthropic: async () => flaky, openai }, dispatcher, logger: silentLogger },
+    )
+
+    expect(await streamedText(await engine.handleChat(chatRequest(), testContext()))).toBe(
+      'second attempt',
+    )
+    expect(calls).toBe(2)
+    expect(openai).not.toHaveBeenCalled()
+    expect(dispatcher.emit).not.toHaveBeenCalledWith(
+      'provider_fallback',
+      expect.anything(),
+      expect.anything(),
+    )
+  })
+
+  it('does not hop once the first token has been emitted', async () => {
+    // docs/04 §3 rule 5: hopping is pre-first-token only. Switching models
+    // mid-answer produces incoherent text, so the failure becomes a retryable
+    // data-error part and the partial answer stays on screen.
+    const openai = vi.fn(async () => textModel(['a completely different answer']))
+    const dispatcher = { emit: vi.fn(), drain: async () => {} }
+
+    const engine = createEngine(
+      testConfig({
+        backend: {
+          provider: 'anthropic',
+          model: 'claude-opus-5',
+          maxRetries: 3,
+          fallback: [{ provider: 'openai', model: 'gpt-5' }],
+        },
+      }),
+      {
+        adapters: { anthropic: async () => midStreamFailureModel(), openai },
+        dispatcher,
+        logger: silentLogger,
+      },
+    )
+
+    const response = await engine.handleChat(chatRequest(), testContext())
+    const chunks = (await readSse(response))
+      .filter((event) => event !== '[DONE]')
+      .map((event) => JSON.parse(event) as Record<string, unknown>)
+
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'data-error',
+        data: expect.objectContaining({ code: 'provider_error', retryable: true }),
+      }),
+    )
+    // The partial answer is kept; the second provider is never reached.
+    expect(
+      chunks.some((chunk) => chunk.type === 'text-delta' && chunk.delta === 'Partial answer'),
+    ).toBe(true)
+    expect(openai).not.toHaveBeenCalled()
+    expect(dispatcher.emit).not.toHaveBeenCalledWith(
+      'provider_fallback',
+      expect.anything(),
+      expect.anything(),
+    )
+  })
+
   it('does not hop for a non-retryable error, but still tries the fallback', async () => {
     const anthropic = vi.fn(async () => failingModel(401, 'invalid api key'))
     const engine = createEngine(

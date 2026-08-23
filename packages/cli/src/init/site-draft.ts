@@ -119,7 +119,10 @@ function extractRoutes(html: string, url: URL): { path: string; summary?: string
     const path = samePath(href, url)
     if (path === null || seen.has(path)) continue
 
-    const label = collapse(stripTags(inner))
+    // Decoded after stripping, not before: decoding first would let `&lt;b&gt;`
+    // become a tag that `stripTags` then eats. The label is written into the
+    // scaffolded config, so a raw `&amp;` there is a visible defect.
+    const label = collapse(decode(stripTags(inner)))
     if (label === '' || label.length > 60) continue
     seen.set(path, label)
     if (seen.size >= 12) break

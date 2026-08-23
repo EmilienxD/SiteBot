@@ -1,3 +1,4 @@
+import { Writable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { validateConfig } from '@sitebot/config'
 import { diagnose } from './commands/doctor.js'
@@ -100,14 +101,29 @@ describe('doctor diagnose (offline, no network)', () => {
 })
 
 describe('Prompter', () => {
-  const ui = new Ui({ color: false, write: () => {} })
+  /**
+   * Both streams are captured. Pointing `output` at the real `process.stdout`
+   * — which this test used to do — printed a fake interactive session into the
+   * middle of every `pnpm test` run, and left the prompt text unasserted.
+   */
+  function capture() {
+    const lines: string[] = []
+    const output = new Writable({
+      write(chunk, _encoding, done) {
+        lines.push(String(chunk))
+        done()
+      },
+    })
+    const ui = new Ui({ color: false, write: (text) => lines.push(text) })
+    return { lines, output, ui, text: () => lines.join('') }
+  }
 
   it('consumes scripted answers in order', async () => {
+    const io = capture()
     const prompter = new Prompter({
-      ui,
+      ui: io.ui,
       answers: ['Anthropic', '2', 'y'],
-      input: process.stdin,
-      output: process.stdout,
+      output: io.output,
     })
     expect(await prompter.text('Name', 'default')).toBe('Anthropic')
     expect(
@@ -121,12 +137,57 @@ describe('Prompter', () => {
       ),
     ).toBe('openai')
     expect(await prompter.confirm('Continue?', false)).toBe(true)
+
+    // The echoed transcript, asserted rather than leaked to the terminal.
+    expect(io.text()).toContain('Name (default): Anthropic\n')
+    expect(io.text()).toContain('Choose 1-2: 2\n')
+    expect(io.text()).toContain('Continue? (y/N): y\n')
+    // The choice list is rendered before the question.
+    expect(io.text()).toContain(' 1. Anthropic')
+    expect(io.text()).toContain(' 2. OpenAI')
+  })
+
+  it('accepts a choice by value as well as by number', async () => {
+    const io = capture()
+    const prompter = new Prompter({ ui: io.ui, answers: ['openai'], output: io.output })
+    expect(
+      await prompter.select(
+        'Provider',
+        [
+          { value: 'anthropic', label: 'Anthropic' },
+          { value: 'openai', label: 'OpenAI' },
+        ],
+        'anthropic',
+      ),
+    ).toBe('openai')
+  })
+
+  it('re-asks after an answer that is not one of the choices', async () => {
+    const io = capture()
+    const prompter = new Prompter({ ui: io.ui, answers: ['9', '1'], output: io.output })
+    expect(
+      await prompter.select(
+        'Provider',
+        [
+          { value: 'anthropic', label: 'Anthropic' },
+          { value: 'openai', label: 'OpenAI' },
+        ],
+        'openai',
+      ),
+    ).toBe('anthropic')
+    expect(io.text()).toContain('"9" is not one of the choices.')
   })
 
   it('returns defaults non-interactively instead of hanging', async () => {
-    const prompter = new Prompter({ ui, interactive: false })
+    const io = capture()
+    const prompter = new Prompter({ ui: io.ui, interactive: false, output: io.output })
     expect(await prompter.text('Name', 'Acme')).toBe('Acme')
     expect(await prompter.confirm('Continue?', true)).toBe(true)
+    expect(
+      await prompter.select('Provider', [{ value: 'anthropic', label: 'Anthropic' }], 'anthropic'),
+    ).toBe('anthropic')
+    // Nothing is printed when nobody is there to read it.
+    expect(io.text()).toBe('')
   })
 })
 
