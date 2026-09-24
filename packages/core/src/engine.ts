@@ -40,6 +40,7 @@ import { EngineError } from './stream/errors.js'
 import { awaitFirstOutput } from './stream/start.js'
 import { createEventDispatcher, noopDispatcher, type EventDispatcher } from './telemetry/events.js'
 import { createLogger } from './telemetry/logger.js'
+import { hooksOf, reportError, runHook } from './hooks.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
 import { createToolRegistry, WIDGET_EFFECT, type WidgetEffect } from './tools/registry.js'
 import type { HostResolver } from './tools/http.js'
@@ -134,6 +135,7 @@ export function createEngine(
     })
 
   const chain = resolveChain(config.backend)
+  const hooks = hooksOf(config)
   const debug = config.telemetry.logLevel === 'debug'
   const production =
     (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
@@ -201,18 +203,9 @@ export function createEngine(
       ...(knowledgeDeps === undefined ? {} : { knowledge: knowledgeDeps }),
       onEvent: async (event, data) => {
         dispatcher.emit(event, data, { requestId: ctx.requestId, sessionId: ctx.sessionId })
-        if (event === 'feedback') {
-          const hook = config.hooks?.onFeedback as
-            ((feedback: Record<string, unknown>) => unknown | Promise<unknown>) | undefined
-          if (hook) {
-            try {
-              await hook(data)
-            } catch (error) {
-              ctx.logger.error('onFeedback hook threw', { error })
-            }
-          }
-        }
+        if (event === 'feedback') await runHook(hooks, 'onFeedback', ctx, data, ctx)
       },
+      onToolCall: (call, callCtx) => runHook(hooks, 'onToolCall', callCtx, call, callCtx),
       transcript: originalMessages,
     }).build()
     let finalUsage: { inputTokens: number; outputTokens: number; costUsd: number } | undefined
@@ -303,6 +296,10 @@ export function createEngine(
         // The chunk stream only carries a redacted string; `classifyError`
         // needs the status code, so the raw error is captured here.
         let rawError: unknown
+        // Before the first token, a failure is the chain's to retry or hop, and
+        // only a request that fails outright reaches `onError` (from the
+        // catch in handleChat). After it, the error is the visitor's.
+        let outputCommitted = false
 
         const streamed = streamText({
           model: resolved.model,
@@ -340,8 +337,31 @@ export function createEngine(
           onError: ({ error }) => {
             rawError = error
             ctx.logger.error('model stream error', { error, model: resolved.id })
+            if (outputCommitted) reportError(hooks, error, ctx)
           },
-          onFinish: ({ usage, finishReason }) => {
+          onStepFinish: (step) => {
+            void runHook(
+              hooks,
+              'onStep',
+              ctx,
+              {
+                finishReason: step.finishReason,
+                text: step.text,
+                toolCalls: step.toolCalls.map((call) => ({
+                  name: call.toolName,
+                  input: call.input,
+                })),
+                usage: {
+                  inputTokens: step.usage.inputTokens ?? 0,
+                  outputTokens: step.usage.outputTokens ?? 0,
+                },
+              },
+              ctx,
+            )
+          },
+          // `totalUsage`, not `usage`: the latter is the last step only, and a
+          // multi-step agent run would be billed — and budgeted — for one step.
+          onFinish: ({ totalUsage: usage, finishReason }) => {
             finalUsage = {
               inputTokens: usage.inputTokens ?? 0,
               outputTokens: usage.outputTokens ?? 0,
@@ -368,6 +388,17 @@ export function createEngine(
               { model: resolved.id, finishReason, usage },
               { requestId: ctx.requestId, sessionId: ctx.sessionId },
             )
+            void runHook(
+              hooks,
+              'onFinish',
+              ctx,
+              {
+                model: resolved.id,
+                finishReason,
+                usage: finalUsage,
+              },
+              ctx,
+            )
           },
         })
 
@@ -378,6 +409,7 @@ export function createEngine(
         }) as ReadableStream<UIMessageChunk>
 
         const committed = await awaitFirstOutput(uiStream, { rawError: () => rawError })
+        outputCommitted = true
         const annotated = annotateAgentStream(committed, {
           runId,
           clientTools,
@@ -438,6 +470,17 @@ export function createEngine(
           span.setAttribute('sitebot.session_id', ctx.sessionId)
 
           const policy = resolvePolicy(config)
+
+          // `onMessage` rewrites the visitor's message before retrieval and
+          // history see it (docs/04 §9).
+          if (hooks.onMessage !== undefined && request.trigger !== 'resume') {
+            const index = request.messages.findLastIndex((message) => message.role === 'user')
+            const original = request.messages[index]
+            const rewritten = original && (await runHook(hooks, 'onMessage', ctx, original, ctx))
+            if (rewritten && typeof rewritten === 'object') {
+              request = { ...request, messages: request.messages.with(index, rewritten) }
+            }
+          }
 
           // ── knowledge retrieval (docs/06 §3.8) ─────────────────────────
           // Modes: `always`/`hybrid` embed the latest user message and inject
@@ -503,6 +546,8 @@ export function createEngine(
               variables: composed.missingVariables,
             })
           }
+          const rewrittenSystem = await runHook(hooks, 'onPromptComposed', ctx, composed.text, ctx)
+          const system = typeof rewrittenSystem === 'string' ? rewrittenSystem : composed.text
 
           let history: UIMessage[]
           let session = await sessionStore.get(request.sessionId)
@@ -536,12 +581,12 @@ export function createEngine(
           const truncated = truncateHistory(history, {
             budgetTokens: contextBudget({
               modelId: `${config.backend.provider}:${config.backend.model}`,
-              systemTokens: estimateTokens(composed.text),
+              systemTokens: estimateTokens(system),
               maxOutputTokens: config.backend.maxOutputTokens,
             }),
           })
           const estimatedTokens =
-            estimateTokens(composed.text) +
+            estimateTokens(system) +
             Math.ceil(JSON.stringify(truncated.messages).length / 4) +
             config.backend.maxOutputTokens
           const budgetDecision = await ctx.budget.check(
@@ -574,7 +619,7 @@ export function createEngine(
           const { stream, modelId } = await startStream(
             await convertToModelMessages(truncated.messages),
             truncated.messages,
-            composed.text,
+            system,
             ctx,
             session,
             resumeRunId,
@@ -599,6 +644,7 @@ export function createEngine(
         })
       } catch (error) {
         ctx.logger.error('chat request failed', { error })
+        reportError(hooks, error, ctx)
         dispatcher.emit(
           'error',
           { code: mapError(error, errorOptions).code },
@@ -889,7 +935,10 @@ export function createEngine(
       )
       if (part === undefined) throw new CheckpointError('Approval replay was rejected.', 403)
       const approved = approval.decision === 'approve'
-      part.approval = { ...part.approval, approved }
+      // docs/03 §5 rule 3: a deny reaches the model as a tool result
+      // (`execution-denied`) that says the visitor declined, so it can answer
+      // gracefully instead of retrying or failing.
+      part.approval = { ...part.approval, approved, ...(approved ? {} : { reason: 'user_denied' }) }
       // An approved client tool has no server executor for the model run to
       // call: it goes back to the page, which answers with `clientToolResults`.
       if (approved && isClientTool(toolName(part)) && part.toolCallId !== undefined) {

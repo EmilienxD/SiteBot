@@ -102,9 +102,12 @@ export class EngineError extends Error {
   readonly headers: Record<string, string>
 
   constructor(code: ErrorCode, options: EngineErrorOptions = {}) {
-    const spec = ERROR_TABLE[code]
+    // A plain-JS hook can pass any string; an unknown code must degrade to the
+    // closed table's catch-all, not crash the error path itself.
+    const known = Object.hasOwn(ERROR_TABLE, code)
+    const spec = known ? ERROR_TABLE[code] : ERROR_TABLE.internal_error
     super(options.message ?? spec.message, { cause: options.cause })
-    this.code = code
+    this.code = known ? code : 'internal_error'
     this.status = spec.status
     this.retryable = spec.retryable
     this.detail = options.detail
@@ -125,8 +128,15 @@ function isAbort(error: unknown): boolean {
   return name === 'AbortError' || name === 'TimeoutError'
 }
 
+/**
+ * Only our own `CheckpointError` passes its message through. Matching on the
+ * status alone would let any third-party error with `status: 403` — an SDK
+ * client's "your key cannot access this model" — reach the browser verbatim.
+ * By name rather than `instanceof`, so this file needs no import from agent/.
+ */
 function checkpointStatus(error: unknown): 403 | 410 | undefined {
   if (typeof error !== 'object' || error === null) return undefined
+  if ((error as { name?: unknown }).name !== 'CheckpointError') return undefined
   const status = (error as { status?: unknown }).status
   return status === 403 || status === 410 ? status : undefined
 }

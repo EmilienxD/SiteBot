@@ -213,7 +213,7 @@ Rules:
 
 1. A checkpoint is bound to `(sessionId, runId)`. Presenting a `runId` from another session is a 403.
 2. Checkpoints expire after `agent.stopWhen.seconds × 10` or 15 minutes, whichever is greater. Expired resume → `410 run_expired`, widget renders "This request timed out".
-3. A `deny` decision resumes the loop with a tool result of `{ error: "user_denied" }`, letting the model respond gracefully rather than dying.
+3. A `deny` decision resumes the loop straight away, and the model receives the call's tool result as `execution-denied` with reason `user_denied`. That lets it respond gracefully rather than dying. A denied client tool never reaches the page.
 4. **An approved client tool takes two round trips.** The server has no executor for it, so the approval resume does not call the model. It moves the tool part to `input-available`, keeps the checkpoint, and answers with only `data-client-tool-call` for the released calls. The widget runs them, then resumes again with `clientToolResults`, and that resume continues the loop. A denied client tool resumes the model directly, as in rule 3.
 5. Because state lives in the session store, **the user can reload the page and still resume** — the widget rehydrates pending approvals from `GET /api/chat/config`'s session probe. This is why `storage.type: none` forbids agent mode.
 

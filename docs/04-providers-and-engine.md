@@ -314,6 +314,13 @@ Available only from `chatbot.config.ts`. All are `async`, all receive `RequestCo
 | `onError`          | `(err, ctx) => void`                | Error reporting                              |
 | `onFeedback`       | `(feedback, ctx) => void`           | Route thumbs to your own store               |
 
+Details that matter when writing one:
+
+- **`onRequest`** runs in the server adapter after the body has been parsed and validated, so it sees headers and the `RequestContext`, not a readable body.
+- **`onToolCall`** sees every *server-side* tool call (http, mcp, module, builtin), after any approval. Client tools run in the browser and never reach it.
+- **`onError`** fires once per failed request, or once for an error after output has started. A pre-stream failure that the fallback chain recovers from is not an error, so it isn't reported.
+- **`onFinish`** reports usage summed over every step of the run, the same figures budgets are charged.
+
 ---
 
 ## 10. Testing the engine

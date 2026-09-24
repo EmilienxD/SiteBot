@@ -232,6 +232,7 @@ for (const [name, factory] of Object.entries(TRANSPORTS)) {
       // docs/03 §11: nothing between us and the browser may buffer or
       // transform the stream.
       expect(reply.headers.get('cache-control')).toContain('no-cache')
+      expect(reply.headers.get('cache-control')).toContain('no-transform')
       expect(reply.headers.get('x-accel-buffering')).toBe('no')
       expect(reply.headers.get('x-vercel-ai-ui-message-stream')).toBe('v1')
       expect(reply.text.trimEnd().endsWith('data: [DONE]')).toBe(true)

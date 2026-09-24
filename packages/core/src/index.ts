@@ -32,6 +32,12 @@ export type { Policy } from './agent/policy.js'
 
 export * from './guards/index.js'
 
+// ── hooks ───────────────────────────────────────────────────────────────────
+// `onRequest` runs in @sitebot/server, the only layer that holds the Request.
+
+export { hooksOf, reportError, runHook } from './hooks.js'
+export type { FinishInfo, SiteBotHooks, StepInfo, ToolCallInfo } from './hooks.js'
+
 // ── providers ───────────────────────────────────────────────────────────────
 
 export { ADAPTERS } from './providers/adapters.js'

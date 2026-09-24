@@ -123,4 +123,88 @@ describe('resume of an approved client tool', () => {
     expect(JSON.stringify(mock.doStreamCalls[1]?.prompt)).toContain('"filled":1')
     expect(finished.some((event) => event.type === 'text-delta')).toBe(true)
   })
+
+  it("the client's abort reaches the model call (docs/03 §11)", async () => {
+    // The Stop button aborts the fetch; the server's request signal must
+    // cancel the provider stream rather than let it run on, and bill, unseen.
+    const controller = new AbortController()
+    let seen: AbortSignal | undefined
+    const mock = new MockLanguageModelV3({
+      doStream: async (options) => {
+        seen = options.abortSignal
+        return {
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            start(stream) {
+              stream.enqueue({ type: 'stream-start', warnings: [] })
+              stream.enqueue({ type: 'text-start', id: 't1' })
+              stream.enqueue({ type: 'text-delta', id: 't1', delta: 'Working on it' })
+              // …and never finishes on its own.
+            },
+          }),
+        }
+      },
+    })
+    const engine = createEngine(testConfig(), { adapters: { anthropic: async () => mock } })
+    const response = await engine.handleChat(
+      { sessionId: SESSION, messages: [userMessage('Tell me everything')] },
+      testContext({ signal: controller.signal }),
+    )
+    const reader = response.body!.getReader()
+    await reader.read()
+    expect(seen).toBeDefined()
+    expect(seen!.aborted).toBe(false)
+    controller.abort()
+    // The request signal alone — before anything cancels the body stream.
+    expect(seen!.aborted).toBe(true)
+    await reader.cancel().catch(() => {})
+  })
+
+  it('a deny resumes the model at once, with a result that says the visitor declined', async () => {
+    // docs/03 §5 rule 3: the model answers gracefully rather than the run dying.
+    const mock = model()
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        tools: [
+          {
+            name: 'fill_wholesale_form',
+            description: 'Fill the wholesale inquiry form on the page.',
+            parameters: { type: 'object', properties: {}, additionalProperties: true },
+            executor: { type: 'client', id: 'fill_form' },
+            requiresApproval: true,
+          },
+        ],
+      }),
+      { adapters: { anthropic: async () => mock } },
+    )
+    const first = await events(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('Fill the wholesale form')] },
+        testContext(),
+      ),
+    )
+    const request = first.find((event) => event.type === 'data-approval-request')!.data!
+
+    const denied = await events(
+      await engine.handleChat(
+        {
+          sessionId: SESSION,
+          messages: [],
+          trigger: 'resume',
+          resume: {
+            runId: String(request.runId),
+            approvals: [{ approvalId: String(request.approvalId), decision: 'deny' }],
+          },
+        },
+        testContext(),
+      ),
+    )
+    // No client call for a denied tool, and the model runs straight away.
+    expect(denied.some((event) => event.type === 'data-client-tool-call')).toBe(false)
+    expect(mock.doStreamCalls).toHaveLength(2)
+    const prompt = JSON.stringify(mock.doStreamCalls[1]?.prompt)
+    expect(prompt).toContain('execution-denied')
+    expect(prompt).toContain('user_denied')
+    expect(denied.some((event) => event.type === 'text-delta')).toBe(true)
+  })
 })

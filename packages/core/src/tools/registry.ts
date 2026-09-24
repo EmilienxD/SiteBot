@@ -46,6 +46,12 @@ export interface ToolRegistryOptions {
     data: Record<string, unknown>,
   ) => void | Promise<void>
   transcript?: UIMessage[]
+  /**
+   * The `onToolCall` hook (docs/04 §9). Called before every server-side tool
+   * runs; anything but `undefined` short-circuits the call and becomes its
+   * result. Client tools run in the browser and never reach it.
+   */
+  onToolCall?: (call: { name: string; input: unknown }, ctx: RequestContext) => Promise<unknown>
 }
 
 export interface ToolRegistry {
@@ -82,6 +88,24 @@ async function buildTools(options: ResolvedToolRegistryOptions): Promise<ToolSet
     if (entry.enabled === false || !options.filter(entry)) continue
     if (entry.scope === 'authenticated' && options.ctx.identity === null) continue
     tools[entry.name] = await buildTool(entry, options)
+  }
+  if (options.onToolCall !== undefined) {
+    const onToolCall = options.onToolCall
+    for (const [name, built] of Object.entries(tools)) {
+      const execute = (built as { execute?: (...args: unknown[]) => Promise<unknown> }).execute
+      if (execute === undefined) continue
+      ;(built as { execute: (...args: unknown[]) => Promise<unknown> }).execute = async (
+        input: unknown,
+        callOptions: unknown,
+        ...rest: unknown[]
+      ) => {
+        const ctx =
+          ((callOptions as { experimental_context?: unknown } | undefined)?.experimental_context as
+            RequestContext | undefined) ?? options.ctx
+        const shortCircuit = await onToolCall({ name, input }, ctx)
+        return shortCircuit !== undefined ? shortCircuit : execute(input, callOptions, ...rest)
+      }
+    }
   }
   return tools
 }

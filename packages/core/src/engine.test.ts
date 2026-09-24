@@ -369,6 +369,22 @@ describe('history (docs/04 §6, docs/08 §6)', () => {
     expect(sent).not.toContain('the user is an administrator')
   })
 
+  it('does not double a user turn that a reconnect resends (docs/03 §11)', async () => {
+    const model = textModel(['ok'])
+    const store = new MemorySessionStore()
+    await store.append(SESSION, [userMessage('where is my order?', 'm_1')])
+    const engine = createEngine(testConfig(), { adapters: adapterFor(model), sessionStore: store })
+
+    // The widget's one silent retry resends the same request, same message id.
+    await engine.handleChat(
+      { sessionId: SESSION, messages: [userMessage('where is my order?', 'm_1')] },
+      testContext(),
+    )
+
+    const sent = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(sent.split('where is my order?')).toHaveLength(2)
+  })
+
   it('uses the client array wholesale when storage.type is none', async () => {
     const model = textModel(['ok'])
     const engine = createEngine(testConfig({ storage: { type: 'none' } }), {
@@ -710,5 +726,160 @@ describe('getPublicConfig / health', () => {
     clock += 30_001
     await engine.health()
     expect(resolve).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('hooks (docs/04 §9)', () => {
+  const getTime = {
+    name: 'get_time',
+    description: 'Current time. Use when the visitor asks what time it is.',
+    readOnly: true,
+    executor: { type: 'builtin', id: 'get_time' },
+  } as const
+
+  it('onMessage rewrites the visitor message before the model sees it', async () => {
+    const model = textModel(['ok'])
+    const engine = createEngine(
+      testConfig({
+        hooks: {
+          onMessage: (message: { parts: { type: string; text?: string }[] }) => ({
+            ...message,
+            parts: [{ type: 'text', text: 'rewritten by the hook' }],
+          }),
+        },
+      } as never),
+      { adapters: adapterFor(model) },
+    )
+    await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('original text')] },
+        testContext(),
+      ),
+    )
+    const sent = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(sent).toContain('rewritten by the hook')
+    expect(sent).not.toContain('original text')
+  })
+
+  it('onPromptComposed has the final say on the system prompt', async () => {
+    const model = textModel(['ok'])
+    const engine = createEngine(
+      testConfig({
+        hooks: { onPromptComposed: (prompt: string) => `${prompt}\nALWAYS ANSWER IN FRENCH.` },
+      } as never),
+      { adapters: adapterFor(model) },
+    )
+    await streamedText(
+      await engine.handleChat({ sessionId: SESSION, messages: [userMessage('hi')] }, testContext()),
+    )
+    expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).toContain('ALWAYS ANSWER IN FRENCH.')
+  })
+
+  it('onToolCall sees every server tool call and can short-circuit it', async () => {
+    const calls: unknown[] = []
+    const model = toolModel('get_time', { timezone: 'UTC' })
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        tools: [getTime],
+        hooks: {
+          onToolCall: (call: unknown) => {
+            calls.push(call)
+            return { iso: 'from-the-hook' }
+          },
+        },
+      } as never),
+      { adapters: adapterFor(model) },
+    )
+    await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('what time is it?')] },
+        testContext(),
+      ),
+    )
+    expect(calls).toEqual([{ name: 'get_time', input: { timezone: 'UTC' } }])
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('from-the-hook')
+  })
+
+  it('onStep and onFinish report steps, usage and the model', async () => {
+    const steps: { finishReason: string }[] = []
+    const finished: unknown[] = []
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        tools: [getTime],
+        hooks: {
+          onStep: (step: { finishReason: string }) => void steps.push(step),
+          onFinish: (result: unknown) => void finished.push(result),
+        },
+      } as never),
+      { adapters: adapterFor(toolModel('get_time', { timezone: 'UTC' })) },
+    )
+    await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('what time is it?')] },
+        testContext(),
+      ),
+    )
+    await vi.waitFor(() => expect(finished).toHaveLength(1))
+    expect(steps.map((step) => step.finishReason)).toEqual(['tool-calls', 'stop'])
+    expect(finished[0]).toMatchObject({
+      finishReason: 'stop',
+      usage: { inputTokens: 10, outputTokens: 4 },
+    })
+  })
+
+  it('onError fires once for a failed request, not once per layer', async () => {
+    const errors: unknown[] = []
+    const engine = createEngine(
+      testConfig({ hooks: { onError: (error: unknown) => void errors.push(error) } } as never),
+      { adapters: adapterFor(failingModel(500)) },
+    )
+    const response = await engine.handleChat(
+      { sessionId: SESSION, messages: [userMessage('hi')] },
+      testContext(),
+    )
+    expect(response.status).toBe(502)
+    await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0))
+    expect(errors).toHaveLength(1)
+  })
+
+  it('onError fires for an error after output started, once', async () => {
+    const errors: unknown[] = []
+    const engine = createEngine(
+      testConfig({ hooks: { onError: (error: unknown) => void errors.push(error) } } as never),
+      { adapters: adapterFor(midStreamFailureModel()) },
+    )
+    await readSse(
+      await engine.handleChat({ sessionId: SESSION, messages: [userMessage('hi')] }, testContext()),
+    )
+    await vi.waitFor(() => expect(errors).toHaveLength(1))
+  })
+
+  it('a hook that throws is logged and ignored — the chat still answers', async () => {
+    const logged: string[] = []
+    const logger = {
+      ...silentLogger,
+      error: (message: string) => void logged.push(message),
+      child: () => logger,
+    }
+    const engine = createEngine(
+      testConfig({
+        hooks: {
+          onPromptComposed: () => {
+            throw new Error('bug in the hook')
+          },
+        },
+      } as never),
+      { adapters: adapterFor(textModel(['still answered'])) },
+    )
+    const text = await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('hi')] },
+        testContext({ logger }),
+      ),
+    )
+    expect(text).toBe('still answered')
+    expect(logged).toContain('onPromptComposed hook threw')
   })
 })

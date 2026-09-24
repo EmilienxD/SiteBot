@@ -52,6 +52,21 @@ describe('extractPageContext', () => {
     expect(context?.extract).not.toContain('card')
   })
 
+  it("leaves the widget's own element out of the extract (docs/03 §10 step 3)", async () => {
+    document.body.innerHTML =
+      '<main><p>Page text.</p><site-chat><span>Chat transcript text</span></site-chat></main>'
+    const extract = (await extractPageContext(defaultConfig.ui))?.extract ?? ''
+    expect(extract).toContain('Page text.')
+    expect(extract).not.toContain('Chat transcript text')
+  })
+
+  it('truncates at 4000 characters on a sentence boundary, and says so (docs/03 §10)', async () => {
+    document.body.innerHTML = `<main><p>${'A short sentence here. '.repeat(400)}</p></main>`
+    const extract = (await extractPageContext(defaultConfig.ui))?.extract ?? ''
+    expect(extract.length).toBeLessThanOrEqual(4000)
+    expect(extract.endsWith('here.…[truncated]')).toBe(true)
+  })
+
   it('uses extractHash without resending unchanged text', async () => {
     const first = await extractPageContext(defaultConfig.ui)
     const second = await extractPageContext(defaultConfig.ui, first?.extractHash)

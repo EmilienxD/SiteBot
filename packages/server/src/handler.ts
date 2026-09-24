@@ -12,6 +12,7 @@ import {
   createLogger,
   EngineError,
   errorResponse,
+  hooksOf,
   mapError,
   MemoryRateLimitStore,
   noopDispatcher,
@@ -302,12 +303,23 @@ export function createSiteBotHandler(
       budget,
     }
 
+    // docs/04 §9: `onRequest` sees the request (headers; the body is already
+    // parsed) before the engine does. A Response answers early; a throw
+    // rejects, mapped like any other error.
+    const onRequest = hooksOf(config).onRequest
+    if (onRequest !== undefined) {
+      const early = await onRequest(request, ctx)
+      if (early instanceof Response) return withHeaders(early, cors)
+    }
+
     const response = await engine.handleChat(safeRequest, ctx)
     return withHeaders(response, {
       ...cors,
       'x-sitebot-request-id': requestId,
-      // docs/03 §11: defeat nginx and Cloudflare buffering of the SSE body.
+      // docs/03 §11: defeat nginx and Cloudflare buffering of the SSE body,
+      // and any proxy that would compress or rewrite it.
       'x-accel-buffering': 'no',
+      'cache-control': 'no-cache, no-transform',
     })
   }
 
