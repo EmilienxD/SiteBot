@@ -86,8 +86,20 @@ function block(tokens: Record<string, string>): string {
 
 const dark = `${block(darkTokens)};color-scheme:dark`
 
+/**
+ * Inherited text properties, pinned. Page selectors cannot reach into the
+ * shadow tree, but anything they set *on the host* inherits through it, and
+ * for normal declarations the page beats `:host`. For `!important` ones the
+ * shadow tree wins — so these are the only `!important`s in the widget.
+ */
+const inherited =
+  'font:var(--sb-size-body)/var(--sb-leading) var(--sb-font)!important;color:var(--sb-text)!important;' +
+  'letter-spacing:normal!important;word-spacing:normal!important;text-transform:none!important;' +
+  'text-indent:0!important;text-align:start!important;text-shadow:none!important;' +
+  'white-space:normal!important;hyphens:manual!important;cursor:auto!important'
+
 export const styles =
-  `:host{all:initial;${block(lightTokens)};font:var(--sb-size-body)/var(--sb-leading) var(--sb-font);color:var(--sb-text);color-scheme:light}` +
+  `:host{all:initial;${block(lightTokens)};${inherited};color-scheme:light}` +
   `:host([data-theme=dark]){${dark}}` +
   `@media(prefers-color-scheme:dark){:host(:not([data-theme=light])){${dark}}}` +
   '*{box-sizing:border-box}button,textarea,input{font:inherit;color:inherit}' +

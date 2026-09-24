@@ -146,6 +146,19 @@ function fromIssue(issue: z.core.$ZodIssue, input: unknown, prefix: PropertyKey[
     case 'unrecognized_keys':
       return issue.keys.map((key) => {
         const candidates = keysAtPath(RuntimeConfigSchema, path)
+        // Candidates span every variant of a union, so a key can be both
+        // "unknown" here and valid for a sibling `type` — say that instead of
+        // suggesting the key the user already wrote.
+        if (candidates.includes(key)) {
+          const variant = (value as { type?: unknown } | undefined)?.type
+          const where = typeof variant === 'string' ? ` when type is "${variant}"` : ' here'
+          return {
+            path: formatted === '' ? key : `${formatted}.${key}`,
+            message: `Key "${key}" does not apply${where}.`,
+            fix: `Remove it — "${key}" belongs to a different type.`,
+            rule: 'schema/unknown-key',
+          }
+        }
         const suggestion = didYouMean(key, candidates)
         return {
           path: formatted === '' ? key : `${formatted}.${key}`,

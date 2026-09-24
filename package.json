@@ -10,11 +10,13 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc -p e2e",
     "test": "vitest run --project=!live --project=!security-*",
     "test:security": "vitest run --project=security-*",
     "test:watch": "vitest --project=!live --project=!security-*",
     "test:live": "vitest run --project=live",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "e2e:update-snapshots": "playwright test -c e2e/playwright.config.ts --update-snapshots",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -26,8 +28,10 @@
     "release": "turbo run build && changeset publish"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@changesets/cli": "^2.27.11",
     "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^9.39.5",

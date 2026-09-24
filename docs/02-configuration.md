@@ -58,6 +58,7 @@ export default defineConfig({
 | Kind                                                   | Rule                                                                                              |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | Scalars, objects                                       | Deep merge; the TS file wins on conflict.                                                         |
+| An object whose `type` differs (`storage`, `executor`) | TS object **replaces** it — keys of one variant are unknown keys in another.                      |
 | Arrays of primitives (`allowedOrigins`, `suggestions`) | TS file **replaces** the array.                                                                   |
 | `tools[]`                                              | Merged **by `name`**. Same name → TS definition replaces the YAML one. Different name → appended. |
 | `knowledge.sources[]`                                  | Concatenated (both apply).                                                                        |

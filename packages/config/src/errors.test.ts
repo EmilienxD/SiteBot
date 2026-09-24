@@ -87,6 +87,15 @@ describe('unknown keys are errors with a suggestion (docs/02 §14)', () => {
     expect(error?.suggestion).toBe('maxPages')
   })
 
+  it('names the variant when a key belongs to a different `type`', () => {
+    const errors = errorsFor({ ...minimalConfig(), storage: { type: 'memory', path: './s.db' } })
+    const error = errors.find((e) => e.rule === 'schema/unknown-key')
+
+    expect(error?.path).toBe('storage.path')
+    expect(error?.message).toBe('Key "path" does not apply when type is "memory".')
+    expect(error?.suggestion).toBeUndefined()
+  })
+
   it('says so plainly when nothing is close', () => {
     const errors = errorsFor({ ...minimalConfig(), wibble: true })
     const error = errors.find((e) => e.rule === 'schema/unknown-key')

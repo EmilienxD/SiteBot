@@ -8,6 +8,7 @@
  * | `tools[]`             | Merged by `name`; same name replaces, new appends.  |
  * | `knowledge.sources[]` | Concatenated — both apply.                          |
  * | `hooks`               | Code only, so it can only ever come from the top.   |
+ * | Object whose `type` changes | Replaced wholesale — it is a different variant. |
  *
  * Arrays that are neither `tools` nor `knowledge.sources` are replaced rather
  * than concatenated. Concatenating `backend.fallback` or `ui.messages.suggestions`
@@ -40,6 +41,9 @@ function merge(base: unknown, override: unknown, path: string): unknown {
   }
 
   if (isPlainObject(base) && isPlainObject(override)) {
+    // `storage: { type: memory }` over `{ type: sqlite, path }` must not keep
+    // `path`: keys of one union variant are unknown keys in another.
+    if ('type' in override && override['type'] !== base['type']) return override
     const out: Record<string, unknown> = { ...base }
     for (const [key, value] of Object.entries(override)) {
       out[key] = merge(base[key], value, path === '' ? key : `${path}.${key}`)

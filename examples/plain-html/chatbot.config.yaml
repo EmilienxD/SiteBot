@@ -70,7 +70,7 @@ tools:
   - name: navigate
     description: |
       Take the visitor to another page of the site, e.g. /shop or /brewing.
-      Use only when they ask to go somewhere, not to answer a question.
+      Use when they ask to go somewhere — not to answer a question.
     readOnly: true
     parameters:
       type: object
@@ -82,7 +82,8 @@ tools:
   - name: highlight_section
     description: |
       Scroll the visitor's current page to an element and outline it.
-      Use a CSS selector for an element on the page, e.g. "#pour-over" or "#huila".
+      Use when pointing at something on the current page; pass a CSS selector
+      such as "#pour-over" or "#huila".
     readOnly: true
     parameters:
       type: object
@@ -94,6 +95,7 @@ tools:
   - name: fill_wholesale_form
     description: |
       Prefill the wholesale inquiry form on /wholesale with details the visitor gave.
+      Use when a visitor on /wholesale wants to send an inquiry.
       Never submits — the visitor reviews and sends it themselves.
     # Writes into the page, so the visitor approves it first (docs/05 §5 rule 7).
     readOnly: false

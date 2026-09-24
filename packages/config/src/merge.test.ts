@@ -25,6 +25,17 @@ describe('scalars and objects deep-merge, the overriding file wins', () => {
     expect(merged).toEqual({ name: 'Acme', mode: 'agent' })
   })
 
+  it('replaces an object whose `type` changes instead of mixing two variants', () => {
+    const base = { storage: { type: 'sqlite', path: './sessions.db', ttlSeconds: 60 } }
+    expect(mergeConfigs(base, { storage: { type: 'memory' } })).toEqual({
+      storage: { type: 'memory' },
+    })
+    // Same variant: still a deep merge.
+    expect(mergeConfigs(base, { storage: { type: 'sqlite', ttlSeconds: 5 } })).toEqual({
+      storage: { type: 'sqlite', path: './sessions.db', ttlSeconds: 5 },
+    })
+  })
+
   it('does not mutate either input', () => {
     const base = { ui: { theme: { primary: '#000' } } }
     const override = { ui: { theme: { primary: '#fff' } } }

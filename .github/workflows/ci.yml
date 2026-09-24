@@ -50,3 +50,37 @@ jobs:
 
       - name: Bundle size
         run: pnpm size
+
+  e2e:
+    # The Playwright image pins browsers *and fonts*, so the committed
+    # `-linux` visual baselines match byte-for-byte what CI renders.
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.63.0-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # Browser tests against the plain-html example with a scripted offline
+      # model — rendering, streaming, client tools, approval, mobile, iframe,
+      # axe-core on every state, and visual snapshots.
+      - name: Browser tests
+        run: pnpm e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

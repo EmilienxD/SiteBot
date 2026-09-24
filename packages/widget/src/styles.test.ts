@@ -99,3 +99,21 @@ describe('stylesheet', () => {
     expect(css).toMatch(/\.composer:focus-within\{box-shadow:0 0 0 2px var\(--sb-primary\)/)
   })
 })
+
+describe('host-page isolation (docs/07 §11)', () => {
+  it('pins every inherited text property on :host with !important', () => {
+    // Normal declarations on the host lose to the page's; important ones win.
+    const host = /:host\{([^}]*)\}/.exec(styles)?.[1] ?? ''
+    for (const property of [
+      'font',
+      'color',
+      'letter-spacing',
+      'word-spacing',
+      'text-transform',
+      'text-indent',
+      'text-align',
+      'white-space',
+    ])
+      expect(host, property).toMatch(new RegExp(`(^|;)${property}:[^;]*!important`))
+  })
+})
