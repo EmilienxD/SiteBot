@@ -58,6 +58,74 @@ describe('http tools', () => {
     ).toThrow(/Model-controlled parameters/)
   })
 
+  it.each([['10.0.0.5'], ['127.0.0.1'], ['169.254.169.254'], ['::1']])(
+    'refuses an allowed hostname that resolves to a private address (%s): DNS rebinding',
+    async (address) => {
+      // docs/08 §5 rule 5: the check runs on the resolved address, not the name.
+      const fetchImpl = vi.fn<typeof fetch>()
+      const execute = createHttpExecutor(
+        {
+          method: 'GET',
+          url: 'https://api.example.test/orders/{orderId}',
+          headers: {},
+          query: {},
+          maxResponseBytes: 100,
+          errorMap: {},
+          allowPrivateNetwork: false,
+          maxRedirects: 0,
+        },
+        fetchImpl,
+        async () => [address],
+      )
+      await expect(execute({ orderId: 'A1' }, testContext())).rejects.toThrow()
+      expect(fetchImpl).not.toHaveBeenCalled()
+    },
+  )
+
+  describe('redirects and content types (docs/08 §5 rules 6–7)', () => {
+    const base = {
+      method: 'GET',
+      url: 'https://api.example.test/orders/{orderId}',
+      headers: {},
+      query: {},
+      maxResponseBytes: 10_000,
+      errorMap: {},
+      allowPrivateNetwork: false,
+    }
+    const publicHost = async () => ['203.0.113.10']
+    const redirectTo = (location: string) =>
+      new Response(null, { status: 302, headers: { location } })
+
+    it('does not follow a redirect by default', async () => {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(redirectTo('/elsewhere'))
+      const execute = createHttpExecutor({ ...base, maxRedirects: 0 }, fetchImpl, publicHost)
+      await expect(execute({ orderId: 'A1' }, testContext())).resolves.toEqual({
+        error: 'redirect_limit_reached',
+      })
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it.each(['http://169.254.169.254/latest/meta-data', 'https://evil.example/steal'])(
+      're-checks every hop, so a redirect to %s is refused',
+      async (location) => {
+        const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(redirectTo(location))
+        const execute = createHttpExecutor({ ...base, maxRedirects: 3 }, fetchImpl, publicHost)
+        await expect(execute({ orderId: 'A1' }, testContext())).rejects.toThrow()
+        expect(fetchImpl).toHaveBeenCalledTimes(1)
+      },
+    )
+
+    it('refuses binary content types', async () => {
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('PNG…', { headers: { 'content-type': 'image/png' } }))
+      const execute = createHttpExecutor({ ...base, maxRedirects: 0 }, fetchImpl, publicHost)
+      await expect(execute({ orderId: 'A1' }, testContext())).resolves.toEqual({
+        error: 'unsupported_content_type',
+      })
+    })
+  })
+
   it('percent-encodes path parameters and trusted context is not model-controlled', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {

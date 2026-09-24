@@ -12,6 +12,11 @@ export interface RawDocument {
   sourceType: string
   headings: { level: number; text: string; offset: number }[]
   lang?: string
+  /** HTTP validators, recorded in the manifest for the next conditional GET. */
+  etag?: string
+  lastModified?: string
+  /** A 304: the body was not sent, and the previous chunks still stand. */
+  notModified?: boolean
 }
 
 /**
@@ -426,7 +431,7 @@ export async function loadSitemap(
         const previous = options.previous?.get(url)
         const page = await fetchPage(url, { ...options, validators: previous ?? {} })
         if (page.notModified && previous !== undefined) {
-          documents.push(placeholder(url, previous.contentHash))
+          documents.push(placeholder(url, previous))
           continue
         }
         if (page.status >= 400) continue
@@ -445,6 +450,8 @@ export async function loadSitemap(
           updatedAt: new Date().toISOString(),
           sourceType: 'sitemap',
           headings: extracted.headings,
+          ...(page.etag === undefined ? {} : { etag: page.etag }),
+          ...(page.lastModified === undefined ? {} : { lastModified: page.lastModified }),
         })
         options.onProgress?.(`fetched ${url}`)
         if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
@@ -454,15 +461,21 @@ export async function loadSitemap(
   return documents
 }
 
-function placeholder(url: string, contentHash: string): RawDocument {
+function placeholder(
+  url: string,
+  previous: { contentHash: string; etag?: string; lastModified?: string },
+): RawDocument {
   return {
     url: normalizeUrl(url),
     title: '',
     text: '',
-    contentHash,
+    contentHash: previous.contentHash,
     updatedAt: '',
     sourceType: 'sitemap',
     headings: [],
+    notModified: true,
+    ...(previous.etag === undefined ? {} : { etag: previous.etag }),
+    ...(previous.lastModified === undefined ? {} : { lastModified: previous.lastModified }),
   }
 }
 

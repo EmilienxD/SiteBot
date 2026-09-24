@@ -72,6 +72,10 @@ interface PlannedDocument {
   document: DocumentInput
   chunks: RawChunk[]
   status: 'added' | 'unchanged' | 'changed'
+  /** A 304 carries no body to chunk; its chunks are the manifest's. */
+  keptChunkHashes?: string[]
+  etag?: string
+  lastModified?: string
 }
 
 interface PlannedSource {
@@ -109,7 +113,19 @@ export async function runIngest(
   for (const source of sources) {
     const id = idOf(source)
     const existing = manifest?.sources[id]
-    const documents = await loadSource(source, config, options)
+    // docs/06 §3.6 step 3: the manifest's validators make re-fetches
+    // conditional, so an unchanged page costs a 304, not a download.
+    const previous = new Map(
+      Object.values(existing?.documents ?? {}).map((doc) => [
+        doc.url,
+        {
+          contentHash: doc.contentHash,
+          ...(doc.etag === undefined ? {} : { etag: doc.etag }),
+          ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
+        },
+      ]),
+    )
+    const documents = await loadSource(source, config, options, previous)
     progress(`${source.type.padEnd(8)} ${labelOf(source)}: ${documents.length} documents`)
 
     const remaining = new Set(Object.keys(existing?.documents ?? {}))
@@ -137,7 +153,14 @@ export async function runIngest(
             : 'changed'
       const chunks = chunkDocument(document, config.knowledge.chunk)
       for (const chunk of chunks) chunk.id = chunkId(id, raw.url, chunk.ordinal)
-      plannedDocuments.push({ document, chunks, status })
+      plannedDocuments.push({
+        document,
+        chunks: raw.notModified ? [] : chunks,
+        status,
+        ...(raw.notModified && before ? { keptChunkHashes: before.chunkHashes } : {}),
+        ...(raw.etag === undefined ? {} : { etag: raw.etag }),
+        ...(raw.lastModified === undefined ? {} : { lastModified: raw.lastModified }),
+      })
     }
 
     const removedChunkIds: string[] = []
@@ -253,7 +276,9 @@ export async function runIngest(
         documents[doc.document.url] = {
           url: doc.document.url,
           contentHash: doc.document.contentHash,
-          chunkHashes: doc.chunks.map((chunk) => chunk.id),
+          chunkHashes: doc.keptChunkHashes ?? doc.chunks.map((chunk) => chunk.id),
+          ...(doc.etag === undefined ? {} : { etag: doc.etag }),
+          ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
         }
       }
       next.sources[idOf(plan.source)] = {
@@ -349,6 +374,7 @@ async function loadSource(
   source: KnowledgeSource,
   config: ResolvedConfig,
   options: IngestOptions,
+  previous: Map<string, { contentHash: string; etag?: string; lastModified?: string }>,
 ): Promise<RawDocument[]> {
   const http: HttpFetchOptions = {
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
@@ -356,7 +382,7 @@ async function loadSource(
   }
   switch (source.type) {
     case 'sitemap':
-      return loadSitemap(source, config, { ...http, onProgress: options.onProgress })
+      return loadSitemap(source, config, { ...http, previous, onProgress: options.onProgress })
     case 'crawl':
       return loadCrawl(source, config, { ...http, onProgress: options.onProgress })
     case 'files':

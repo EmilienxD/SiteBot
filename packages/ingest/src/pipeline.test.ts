@@ -97,7 +97,64 @@ describe('runIngest()', () => {
     expect(second.sources[0]!.unchanged).toBe(1)
   })
 
-  it('a changed document re-embeds only its own chunks', async () => {
+  it('re-fetches a sitemap page conditionally, and a 304 keeps its chunks (docs/06 §3.6)', async () => {
+    const page = `<html><head><title>Returns</title></head><body><main><h1>Returns</h1><p>${'Returns are free for thirty days after delivery. '.repeat(20)}</p></main></body></html>`
+    let downloads = 0
+    const seenValidators: (string | null)[] = []
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('sitemap.xml'))
+        return new Response('<urlset><url><loc>https://acme.test/returns</loc></url></urlset>', {
+          headers: { 'content-type': 'application/xml' },
+        })
+      const ifNoneMatch = new Headers(init?.headers).get('if-none-match')
+      seenValidators.push(ifNoneMatch)
+      if (ifNoneMatch === '"v1"') return new Response(null, { status: 304 })
+      downloads += 1
+      return new Response(page, { headers: { 'content-type': 'text/html', etag: '"v1"' } })
+    }) as typeof fetch
+    const result = validateConfig(
+      {
+        version: 1,
+        name: 'Acme',
+        backend: { provider: 'anthropic', model: 'claude-opus-5', apiKey: 'test' },
+        prompt: { system: 'You are a test assistant.' },
+        knowledge: {
+          sources: [{ type: 'sitemap', id: 'site', url: 'https://acme.test/sitemap.xml' }],
+          embedding: { provider: 'ollama', model: 'text-embedding-3-small' },
+          store: { type: 'memory' },
+          chunk: { minTokens: 0 },
+        },
+      },
+      { env: {} },
+    )
+    if (!result.ok) throw new Error(JSON.stringify(result.errors))
+    const embedder = countingEmbedder()
+    const store = new MemoryVectorStore()
+    const options = { store, embedder, manifestDir: dir, fetchImpl }
+
+    await runIngest(result.value, options)
+    const firstChunks = (await readManifest({ dir }))!.sources.site!.documents[
+      'https://acme.test/returns'
+    ]!.chunkHashes
+    expect(firstChunks.length).toBeGreaterThan(0)
+    embedder.calls.length = 0
+
+    await runIngest(result.value, options)
+    expect(seenValidators).toEqual([null, '"v1"'])
+    expect(downloads).toBe(1)
+    expect(embedder.calls).toHaveLength(0)
+    const kept = (await readManifest({ dir }))!.sources.site!.documents[
+      'https://acme.test/returns'
+    ]!
+    expect(kept.chunkHashes).toEqual(firstChunks)
+    expect(kept.etag).toBe('"v1"')
+  })
+
+  // Document-level: a changed document is re-embedded whole. Re-embedding only
+  // its changed chunks (docs/06 §3.6 step 4) is not implemented yet; see
+  // docs/rule-audit.md.
+  it('a changed document is re-embedded', async () => {
     const embedder = countingEmbedder()
     const store = new MemoryVectorStore()
     const first = configFor('Version one of the policy text.')

@@ -106,6 +106,26 @@ describe('browser API (docs/03 §9)', () => {
     )
   })
 
+  it('a citation click opens the source safely and fires citation-click (docs/06 §3.9)', async () => {
+    stubServer(serverConfig())
+    const element = await mount()
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const heard: unknown[] = []
+    window.addEventListener('sitebot:citation-click', (event) =>
+      heard.push((event as CustomEvent).detail),
+    )
+    element.citationClick({
+      id: 'c1',
+      title: 'Returns',
+      url: 'https://acme.test/returns',
+      snippet: '',
+      score: 0.9,
+    })
+    expect(open).toHaveBeenCalledWith('https://acme.test/returns', '_blank', 'noopener,noreferrer')
+    expect(heard).toEqual([{ url: 'https://acme.test/returns', title: 'Returns' }])
+    open.mockRestore()
+  })
+
   it('destroy() removes the element and never throws', async () => {
     stubServer(serverConfig())
     const element = await mount()

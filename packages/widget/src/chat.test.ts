@@ -85,6 +85,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('identity (docs/07 §9)', () => {
+  it('keeps the identify() token in memory, never in local or session storage', async () => {
+    fetchMock.mockResolvedValueOnce(sse(answer('Hello!')))
+    const controller = setup()
+    controller.identify('jwt-secret-token')
+    await controller.send('Hi there')
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({ auth: 'jwt-secret-token' })
+    const stored = [localStorage, sessionStorage]
+      .flatMap((storage) =>
+        Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index)!)),
+      )
+      .join('\n')
+    expect(stored).not.toContain('jwt-secret-token')
+  })
+})
+
 describe('send → stream → idle', () => {
   it('posts the documented request and renders the streamed answer', async () => {
     fetchMock.mockResolvedValueOnce(sse(answer('Hello!')))
