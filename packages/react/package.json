@@ -2,6 +2,15 @@
   "name": "@sitebot/react",
   "version": "0.0.0",
   "description": "Optional <ChatWidget /> wrapper around the SiteBot custom element for React sites. Layer 3, browser.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/react#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/react"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -44,6 +53,7 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   }
 }

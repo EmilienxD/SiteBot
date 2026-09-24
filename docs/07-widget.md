@@ -11,7 +11,7 @@ The reference visual is `docs/example-from-ramp-website.png` — the Chili Piper
 ```html
 <script
   type="module"
-  src="https://cdn.jsdelivr.net/npm/@sitebot/widget@1/dist/sitebot.js"
+  src="https://cdn.jsdelivr.net/npm/@sitebot/widget@0.1/dist/sitebot.js"
   data-endpoint="/api/chat"
   data-key="pk_live_a1b2c3"
   data-position="bottom-right"

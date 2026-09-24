@@ -2,6 +2,15 @@
   "name": "@sitebot/config",
   "version": "0.0.0",
   "description": "Schema, loader and types for the SiteBot configuration file. Layer 1 — importable from the browser.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/config#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/config"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -53,6 +62,10 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

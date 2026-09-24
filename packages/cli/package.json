@@ -2,6 +2,15 @@
   "name": "@sitebot/cli",
   "version": "0.0.0",
   "description": "The sitebot CLI: init, validate, ingest, dev, serve, doctor. Layer 4.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "files": [
     "dist"
@@ -35,6 +44,10 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

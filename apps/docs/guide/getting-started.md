@@ -1,7 +1,7 @@
 # Getting started
 
-From an existing site to a working, site-aware assistant in about five minutes. You need Node.js 22.18
-or later and an API key for one model provider.
+From an existing site to a working, site-aware assistant in about five minutes. You need Node.js 22.5 or
+later (22.18 or later to write the config in TypeScript) and an API key for one model provider.
 
 ## 1. Scaffold
 
@@ -47,10 +47,13 @@ template. For a same-origin route it looks like this:
 ```html
 <script
   type="module"
-  src="https://cdn.jsdelivr.net/npm/@sitebot/widget@1/dist/sitebot.js"
+  src="https://cdn.jsdelivr.net/npm/@sitebot/widget@0.1/dist/sitebot.js"
   data-endpoint="/api/chat"
 ></script>
 ```
+
+The `@0.1` range picks up patch releases of the version you installed. While SiteBot is 0.x, a minor
+release may change behaviour, so the range is pinned to the minor; from 1.0 it becomes `@1`.
 
 In React you can use the component instead:
 

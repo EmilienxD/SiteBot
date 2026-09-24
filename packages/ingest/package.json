@@ -2,6 +2,15 @@
   "name": "@sitebot/ingest",
   "version": "0.0.0",
   "description": "Crawler, extractor, chunker, embedder and store writer for the SiteBot knowledge index. Layer 3; Node only, except the edge-safe ./query entry.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/ingest#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/ingest"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -81,6 +90,10 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

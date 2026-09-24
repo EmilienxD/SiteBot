@@ -1,0 +1,77 @@
+name: Release
+
+# On every push to main: run the full gate, then let changesets either open or
+# update the "Version Packages" PR (when changesets are pending) or, once that
+# PR is merged, publish to npm with provenance and attach the widget's SRI
+# hashes to its GitHub release.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # the version PR, tags and GitHub releases
+  pull-requests: write # the version PR
+  id-token: write # npm provenance (OIDC)
+
+env:
+  CI: true
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same gate as CI. Nothing is published from a red build.
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:security
+      - run: pnpm size
+      - name: Package checks (publint, are-the-types-wrong)
+        run: pnpm check:packages
+
+      - name: Version PR or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm version-packages
+          # Already built above, from the same commit.
+          publish: pnpm changeset publish
+          title: 'chore: release packages'
+          commit: 'chore: release packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+
+      - name: Attach SRI hashes to the widget release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          version=$(echo "$PUBLISHED" | jq -r '.[] | select(.name == "@sitebot/widget") | .version')
+          if [ -z "$version" ]; then exit 0; fi
+          tag="@sitebot/widget@$version"
+          gh release view "$tag" --json body --jq .body > notes.md
+          node scripts/sri-release-notes.mjs >> notes.md
+          gh release edit "$tag" --notes-file notes.md

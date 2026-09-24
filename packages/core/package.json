@@ -2,6 +2,15 @@
   "name": "@sitebot/core",
   "version": "0.0.0",
   "description": "The SiteBot engine: providers, prompt composition, tools, agent loop, guards, streaming. Layer 2.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/core#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -108,6 +117,10 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }

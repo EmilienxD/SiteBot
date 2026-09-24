@@ -51,6 +51,9 @@ jobs:
       - name: Bundle size
         run: pnpm size
 
+      - name: Package checks (publint, are-the-types-wrong)
+        run: pnpm check:packages
+
   e2e:
     # The Playwright image pins browsers *and fonts*, so the committed
     # `-linux` visual baselines match byte-for-byte what CI renders.

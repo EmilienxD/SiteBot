@@ -8,6 +8,7 @@
  * for `init` to demonstrate the good pattern rather than describe it.
  */
 
+import { createRequire } from 'node:module'
 import {
   PROVIDER_ENV_VARS,
   PROVIDER_PACKAGES,
@@ -425,7 +426,26 @@ export const OPTIONS = dispatch
 
 // ── the script tag ──────────────────────────────────────────────────────────
 
-export const WIDGET_CDN_URL = 'https://cdn.jsdelivr.net/npm/@sitebot/widget@1/dist/sitebot.js'
+/**
+ * The CDN URL for the widget that shipped with this CLI.
+ *
+ * The widget and the CLI are released in lockstep (one changesets `fixed`
+ * group), so the CLI's own version names a widget that exists. The range
+ * follows semver's own compatibility line: `@1` from 1.0 on, but `@0.3` on
+ * 0.x, where a minor bump may break — and a hard-coded `@1` would 404 on every
+ * 0.x release.
+ */
+export function widgetCdnUrl(version: string): string {
+  const [major = '0', minor = '0'] = version.split('.')
+  const range = major === '0' ? `0.${minor}` : major
+  return `https://cdn.jsdelivr.net/npm/@sitebot/widget@${range}/dist/sitebot.js`
+}
+
+const CLI_VERSION = (
+  createRequire(import.meta.url)('@sitebot/cli/package.json') as { version: string }
+).version
+
+export const WIDGET_CDN_URL = widgetCdnUrl(CLI_VERSION)
 export const WIDGET_SELF_HOSTED_URL = '/sitebot.js'
 
 /**

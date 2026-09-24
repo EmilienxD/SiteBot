@@ -2,6 +2,15 @@
   "name": "@sitebot/widget",
   "version": "0.0.0",
   "description": "The <site-chat> custom element: launcher + overlay panel, Preact in a closed shadow root. Layer 3, browser.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/widget#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/widget"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": [
     "./dist/sitebot.js"
@@ -14,7 +23,11 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/sitebot.js"
     },
-    "./sitebot.js": "./dist/sitebot.js",
+    "./sitebot.js": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/sitebot.js"
+    },
+    "./sri.json": "./dist/sri.json",
     "./package.json": "./package.json"
   },
   "browser": "./dist/sitebot.js",
@@ -23,7 +36,7 @@
   "unpkg": "./dist/sitebot.js",
   "jsdelivr": "./dist/sitebot.js",
   "scripts": {
-    "build": "vite build && tsc -p tsconfig.build.json",
+    "build": "vite build && tsc -p tsconfig.build.json && node scripts/sri.mjs",
     "typecheck": "tsc --noEmit",
     "size": "size-limit",
     "clean": "rimraf dist"
@@ -67,6 +80,7 @@
     }
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   }
 }

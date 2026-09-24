@@ -2,6 +2,15 @@
   "name": "@sitebot/server",
   "version": "0.0.0",
   "description": "Thin framework adapters that mount the SiteBot engine on Next.js, Express, Fastify, Hono, Node or any fetch runtime. Layer 3.",
+  "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilienxD/SiteBot.git",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilienxD/SiteBot/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -113,6 +122,10 @@
     "typescript": "^5.9.3"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=22.5"
   }
 }
