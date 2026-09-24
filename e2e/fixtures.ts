@@ -42,6 +42,18 @@ export class Widget {
     await this.launcher.click()
     await expect(this.panel).toBeVisible()
   }
+  /**
+   * Open the panel whether or not it is restoring itself. After a reload or
+   * navigation the widget reopens asynchronously, so "not visible yet, click
+   * the launcher" races the restore; `SiteBot.open()` is idempotent.
+   */
+  async ensureOpen(): Promise<void> {
+    await this.page.waitForFunction(() => 'SiteBot' in window)
+    await this.page.evaluate(() =>
+      (window as unknown as { SiteBot: { open(): void } }).SiteBot.open(),
+    )
+    await expect(this.panel).toBeVisible()
+  }
   async send(text: string): Promise<void> {
     await this.input.fill(text)
     await this.input.press('Enter')
