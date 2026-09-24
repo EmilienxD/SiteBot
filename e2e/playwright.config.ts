@@ -1,9 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Browser tests for the widget against the plain-html example, served by the
- * real CLI with a scripted offline model (fixtures/scripted-model.mjs). No
- * provider is called and no key is needed. Requires `pnpm build` first — the
+ * Browser tests for the widget against the plain-html example (and the
+ * cross-origin express-sidecar example), served by the real CLI with a
+ * scripted offline model (fixtures/scripted-model.mjs). No provider is
+ * called and no key is needed. Requires `pnpm build` first — the
  * server runs from `packages/cli/dist` and serves `packages/widget/dist`.
  */
 const PORT = 4317
@@ -26,12 +27,32 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    // From the example dir, so the widget resolves from its node_modules.
-    cwd: '../examples/plain-html',
-    command: `node ../../packages/cli/dist/cli.js serve --config ../../e2e/chatbot.config.mjs --static public --port ${PORT} --host 127.0.0.1`,
-    url: `http://localhost:${PORT}/api/chat/health`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
-  },
+  webServer: [
+    {
+      // From the example dir, so the widget resolves from its node_modules.
+      cwd: '../examples/plain-html',
+      command: `node ../../packages/cli/dist/cli.js serve --config ../../e2e/chatbot.config.mjs --static public --port ${PORT} --host 127.0.0.1`,
+      url: `http://localhost:${PORT}/api/chat/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    // examples/express-sidecar, on the ports its pages hard-code: the chat
+    // server on 8787 and the site (the no-Python fallback) on 8000.
+    {
+      cwd: '../examples/express-sidecar',
+      command: 'node server.mjs',
+      env: { SITEBOT_CONFIG: '../../test/smoke/express-sidecar.config.mjs', PORT: '8787' },
+      url: 'http://localhost:8787/api/chat/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      cwd: '../examples/express-sidecar',
+      command: 'node site/serve-static.mjs',
+      env: { PORT: '8000' },
+      url: 'http://localhost:8000/',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+  ],
 })

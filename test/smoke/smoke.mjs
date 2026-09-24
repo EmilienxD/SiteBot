@@ -15,6 +15,7 @@ const { values } = parseArgs({
     endpoint: { type: 'string' },
     origin: { type: 'string' },
     key: { type: 'string' },
+    asset: { type: 'string' },
     tool: { type: 'string' },
     expect: { type: 'string' },
     timeout: { type: 'string', default: '90' },
@@ -55,6 +56,18 @@ if (values.origin)
     if (allowed !== values.origin)
       throw new Error(`status ${response.status}, access-control-allow-origin: ${allowed}`)
     return `${response.status}, allows ${allowed}`
+  })
+
+if (values.asset)
+  await step('widget bundle', async () => {
+    // A cross-origin module script is fetched in CORS mode: without the
+    // header the browser downloads the bundle and refuses to run it.
+    const response = await fetch(values.asset, { headers })
+    if (!response.ok) throw new Error(`status ${response.status}`)
+    const allowed = response.headers.get('access-control-allow-origin')
+    if (values.origin && allowed !== values.origin)
+      throw new Error(`access-control-allow-origin: ${allowed}`)
+    return `${response.status}, ${response.headers.get('content-type')}`
   })
 
 await step('GET /config', async () => {

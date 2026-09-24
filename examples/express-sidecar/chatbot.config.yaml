@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=../../packages/config/schema/chatbot.schema.json
+#
+# A sidecar: this server answers chat for a site it does not serve. See
+# README.md for the cross-origin pieces — allowedOrigins, publicKey, CORS.
+
+version: 1
+name: Fernhill Dental
+mode: chat
+
+backend:
+  provider: ${env.SITEBOT_PROVIDER:-anthropic}
+  model: ${env.SITEBOT_MODEL:-claude-sonnet-5}
+  maxOutputTokens: 600
+  temperature: 0.3
+
+prompt:
+  system: |
+    You are the assistant on Fernhill Dental's website, a family dental
+    practice in Bristol. Answer questions about treatments, prices, opening
+    hours and registering as a patient. Never give a diagnosis: for pain or
+    swelling, tell the visitor to call the practice. Keep answers short.
+  includePageContext: true
+  guardrails:
+    refuseOffTopic: true
+    offTopicMessage: I can only help with questions about Fernhill Dental.
+
+siteContext:
+  company: Fernhill Dental
+  description: A family dental practice in Bristol, open to new NHS and private patients.
+  primaryUrl: ${env.SITE_ORIGIN:-http://localhost:8000}
+  facts:
+    - Open Monday to Friday 08:00–18:00 and Saturday 09:00–13:00.
+    - Emergency appointments are held back every morning — call 0117 000 0000 from 08:00.
+    - A private check-up is £55; a hygienist visit is £70.
+    - New patients register online or at reception; bring photo ID.
+  routes:
+    - path: /
+      summary: Treatments, prices and opening hours.
+    - path: /register/
+      summary: How to register as a new patient.
+
+storage:
+  type: sqlite
+  path: ./.sitebot/sessions.db
+
+security:
+  # The site's origin, exactly as the browser sends it — scheme, host and port.
+  # Anything else is refused, including the CORS preflight.
+  allowedOrigins:
+    - ${env.SITE_ORIGIN:-http://localhost:8000}
+  # Not a secret: it identifies this deployment to the widget, which sends it
+  # as `data-key`. Rotate it to cut off copies of the snippet on other sites.
+  publicKey: pk_fernhill_demo
+  rateLimit:
+    perSession: 20/5m
+    perIp: 60/1h
+
+ui:
+  theme:
+    primary: '#1d4ed8'
+  messages:
+    greeting: Hello! Ask me about treatments, prices or registering with us.
+    suggestions:
+      - label: Opening hours
+        action: { type: send, text: When are you open? }
+      - label: How do I register?
+        action: { type: send, text: How do I register as a new patient? }

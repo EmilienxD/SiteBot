@@ -1,0 +1,24 @@
+{
+  "name": "@sitebot/example-express-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A chat server beside a site that isn't JavaScript: Express serves the API, Django serves the pages.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "site": "python site/app.py runserver 8000",
+    "site:static": "node site/serve-static.mjs",
+    "doctor": "sitebot doctor"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.104",
+    "@sitebot/config": "workspace:*",
+    "@sitebot/server": "workspace:*",
+    "@sitebot/widget": "workspace:*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@sitebot/cli": "workspace:*"
+  }
+}

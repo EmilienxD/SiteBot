@@ -97,6 +97,28 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  examples/express-sidecar:
+    dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^3.0.104
+        version: 3.0.104(zod@4.4.3)
+      '@sitebot/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@sitebot/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@sitebot/widget':
+        specifier: workspace:*
+        version: link:../../packages/widget
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+    devDependencies:
+      '@sitebot/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+
   examples/mcp-server:
     dependencies:
       '@modelcontextprotocol/sdk':

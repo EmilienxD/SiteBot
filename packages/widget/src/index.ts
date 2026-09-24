@@ -88,9 +88,32 @@ function bootScript(): HTMLScriptElement | null {
   const current = document.currentScript as HTMLScriptElement | null
   return current ?? document.querySelector<HTMLScriptElement>('script[data-endpoint]')
 }
+/**
+ * docs/07 §2 step 1: the tag's own `data-*` attributes configure the widget.
+ * A sidecar embed depends on it — `data-endpoint` is an absolute URL on
+ * another origin, and without it the widget would call `/api/chat` on the
+ * page's own. `window.SiteBotConfig` wins where both say something.
+ */
+export function scriptOptions(script: HTMLScriptElement | null): SiteBotOptions {
+  if (script === null) return {}
+  const data = script.dataset
+  const options: SiteBotOptions = {}
+  if (data.endpoint) options.endpoint = data.endpoint
+  if (data.key) options.publicKey = data.key
+  if (data.position === 'bottom-right' || data.position === 'bottom-left')
+    options.position = data.position
+  if (data.theme === 'auto' || data.theme === 'light' || data.theme === 'dark')
+    options.theme = data.theme
+  if (data.autoOpen === 'true' || data.autoOpen === 'false')
+    options.autoOpen = data.autoOpen === 'true'
+  // A parsed `nonce` attribute is hidden from getAttribute; the property keeps it.
+  const nonce = script.nonce || data.nonce
+  if (nonce) options.nonce = nonce
+  return options
+}
 if (typeof window !== 'undefined') {
   window.SiteBot = SiteBot
   const script = bootScript()
   if (script?.dataset.endpoint || window.SiteBotConfig)
-    queueMicrotask(() => defineSiteBot(window.SiteBotConfig ?? {}))
+    queueMicrotask(() => defineSiteBot({ ...scriptOptions(script), ...window.SiteBotConfig }))
 }

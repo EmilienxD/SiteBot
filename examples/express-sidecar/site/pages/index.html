@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fernhill Dental — Bristol</title>
+    <meta name="description" content="A family dental practice in Bristol." />
+    <style>
+      body {
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        font:
+          17px/1.6 Georgia,
+          serif;
+        color: #1e293b;
+      }
+      nav a {
+        margin-right: 1rem;
+      }
+      table {
+        border-collapse: collapse;
+      }
+      td {
+        padding: 0.25rem 1rem 0.25rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav><a href="/">Home</a><a href="/register/">Register</a></nav>
+    <main>
+      <h1>Fernhill Dental</h1>
+      <p>A family practice in Bristol, taking new NHS and private patients.</p>
+      <h2 id="prices">Private prices</h2>
+      <table>
+        <tr>
+          <td>Check-up</td>
+          <td>£55</td>
+        </tr>
+        <tr>
+          <td>Hygienist</td>
+          <td>£70</td>
+        </tr>
+        <tr>
+          <td>White filling</td>
+          <td>from £120</td>
+        </tr>
+        <tr>
+          <td>Crown</td>
+          <td>from £540</td>
+        </tr>
+      </table>
+      <h2 id="hours">Opening hours</h2>
+      <p>Monday to Friday 08:00–18:00, Saturday 09:00–13:00.</p>
+    </main>
+    <!--
+      The whole integration. The script and the API both come from the chat
+      sidecar on another origin; data-key is the public key from its config.
+    -->
+    <script
+      type="module"
+      src="http://localhost:8787/widget/sitebot.js"
+      data-endpoint="http://localhost:8787/api/chat"
+      data-key="pk_fernhill_demo"
+    ></script>
+  </body>
+</html>
