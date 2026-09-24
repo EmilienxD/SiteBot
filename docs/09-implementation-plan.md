@@ -238,6 +238,8 @@ Much of this landed with its feature. This phase closes the gaps and proves the 
 
 **Acceptance:** on a fresh Next.js app, `npx sitebot init && npx sitebot dev` yields a working, site-aware chatbot with one API key and no manual file editing. Timed and recorded.
 
+**Recorded (2026-09-25):** a fresh `node:22` container, a `create-next-app --yes` app (not timed), and the seven packages installed from `pnpm pack` tarballs to stand in for npm. `npm i` took 6 s, `sitebot init -y --provider anthropic` 1 s, and `next dev` took 3 s to a healthy `/api/chat/health` (model resolved, `/config` served, `doctor` green). That's 10 s of tooling; the rest of the five minutes is choosing a provider and pasting a key. One deviation from "no manual file editing": `init` writes the config, the route and `.env.example`, but only *prints* the script tag for `app/layout.tsx` rather than editing it, because it never modifies an existing file. That's one paste, and the getting-started guide says so. The homepage-fetch step (`--site-url`) wasn't exercised, since the container had no site to fetch.
+
 ---
 
 ## Phase 10 — Examples, docs, release
@@ -290,13 +292,13 @@ Phases 5, 6 and 7 are independently parallelisable once 4 lands, if more than on
 ## Definition of done for v1.0
 
 - [ ] All ten phases complete with their acceptance criteria met
-- [ ] `pnpm build && pnpm test && pnpm test:security && pnpm lint` green
-- [ ] Widget bundle within the `size-limit` budgets of [`07`](./07-widget.md) §1 — the initial payload is the number that matters, and the panel is lazy
-- [ ] axe-core clean across all widget states
-- [ ] All four examples run from a clean clone
-- [ ] `npx sitebot init` to working chatbot in under five minutes, verified on a fresh machine
-- [ ] Config reference docs generated from the Zod schema
-- [ ] Deployment security checklist published and enforced by `doctor --production`
+- [x] `pnpm build && pnpm test && pnpm test:security && pnpm lint` green
+- [x] Widget bundle within the `size-limit` budgets of [`07`](./07-widget.md) §1 — the initial payload is the number that matters, and the panel is lazy
+- [x] axe-core clean across all widget states (`e2e/a11y.spec.ts`: 6 states × 2 themes, plus the mobile sheet)
+- [x] All four examples run from a clean clone (CI: `doctor` on each, smoke runs, a Worker dry-run bundle; `cloudflare-worker` retrieval also needs an Upstash index)
+- [x] `npx sitebot init` to working chatbot in under five minutes, verified on a fresh machine (Phase 9, recorded above)
+- [x] Config reference docs generated from the Zod schema (`apps/docs`, checked in the build and the tests)
+- [x] Deployment security checklist published and enforced by `doctor --production`
 - [ ] Every normative rule in docs 02–08 has at least one corresponding test
 
 ---
