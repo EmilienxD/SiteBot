@@ -254,6 +254,8 @@ Much of this landed with its feature. This phase closes the gaps and proves the 
 
 **Acceptance:** every example runs from a clean clone with only an API key set. Docs config reference is generated, so it cannot drift from the schema.
 
+**Status:** the four examples are done, each with a README and `.env.example`. CI runs `doctor` on each, smoke-tests the Next.js and Express servers against a scripted offline model, and dry-run bundles the Worker, failing on any `node:*` import. The browser suite (`e2e/`) covers plain-html and the cross-origin sidecar. `cloudflare-worker` chats with only an OpenAI key; its Upstash retrieval additionally needs an Upstash index. Still open: `apps/docs`, the recipes, and the release pipeline.
+
 ---
 
 ## Dependency graph between phases

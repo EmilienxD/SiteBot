@@ -84,3 +84,67 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  examples:
+    # Each example from a clean checkout: `doctor` against its real config
+    # (dummy keys, --offline), then a smoke run against the scripted offline
+    # model (e2e/fixtures/scripted-model.mjs). No provider is called.
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: sk-ant-ci-dummy-key
+      OPENAI_API_KEY: sk-ci-dummy-key
+      UPSTASH_VECTOR_REST_URL: https://ci.upstash.io
+      UPSTASH_VECTOR_REST_TOKEN: ci-dummy-token
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the packages and examples/nextjs.
+      - run: pnpm build
+
+      - name: Doctor
+        run: |
+          for example in plain-html nextjs express-sidecar cloudflare-worker; do
+            echo "::group::$example"
+            (cd examples/$example && node ../../packages/cli/dist/cli.js doctor --offline)
+            echo "::endgroup::"
+          done
+
+      - name: Smoke — nextjs
+        working-directory: examples/nextjs
+        env:
+          SITEBOT_CONFIG: ../../test/smoke/nextjs.config.mjs
+          SITE_URL: http://localhost:3100
+        run: |
+          npx next start --port 3100 > next.log 2>&1 &
+          node ../../test/smoke/smoke.mjs --endpoint http://localhost:3100/api/chat \
+            --tool 'find_service_slots {"date":"2026-09-28"}' --expect '"slots"' \
+            || (cat next.log; exit 1)
+
+      - name: Smoke — express-sidecar
+        working-directory: examples/express-sidecar
+        env:
+          SITEBOT_CONFIG: ../../test/smoke/express-sidecar.config.mjs
+        run: |
+          node server.mjs > sidecar.log 2>&1 &
+          node ../../test/smoke/smoke.mjs --endpoint http://localhost:8787/api/chat \
+            --origin http://localhost:8000 --key pk_fernhill_demo \
+            --asset http://localhost:8787/widget/sitebot.js \
+            || (cat sidecar.log; exit 1)
+
+      - name: Edge build — cloudflare-worker
+        working-directory: examples/cloudflare-worker
+        run: |
+          pnpm build:check
+          # Static node:* imports would fail on Workers without nodejs_compat.
+          if grep -nE 'from ?"node:|import ?"node:' dist/worker.js; then
+            echo "::error::node:* import in the Worker bundle"; exit 1
+          fi

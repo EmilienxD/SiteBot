@@ -5,8 +5,9 @@ A drop-in, fully configurable AI assistant for any website. One config file, one
 > **Status: Phases 0–9 complete; Phase 10 (examples, docs site, release) in progress. Not yet published to npm.**
 > Config, engine (chat and agent mode, approvals, client tools, MCP), knowledge ingest and retrieval,
 > server adapters, the widget, the React wrapper and the CLI are implemented and tested:
-> ~775 unit/integration tests plus 44 security tests, all green. The one runnable example is
-> [`examples/plain-html`](./examples/plain-html). The full specification lives in [`docs/`](./docs).
+> ~795 unit/integration tests, 44 security tests and 41 browser tests (Playwright, axe-core, visual
+> baselines), all green. Five runnable examples are listed under [Try it](#try-it). The full
+> specification lives in [`docs/`](./docs).
 
 ---
 
@@ -175,10 +176,22 @@ SITEBOT_PROVIDER=ollama SITEBOT_MODEL=qwen2.5:14b pnpm dev
 
 Open http://localhost:3000. See [`examples/plain-html/README.md`](./examples/plain-html/README.md).
 
+| Example                                             | Setup it shows                                                                          | Needs                           |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------- |
+| [`plain-html`](./examples/plain-html)               | A static site with one script tag; client tools and approvals                           | Anthropic key, or Ollama        |
+| [`nextjs`](./examples/nextjs)                       | Widget and API in one Next.js app; an HTTP server tool; knowledge from the site's pages | OpenAI key                      |
+| [`express-sidecar`](./examples/express-sidecar)     | A separate chat server beside a Django site; allowed origins, public key, CORS          | Anthropic key (Python optional) |
+| [`cloudflare-worker`](./examples/cloudflare-worker) | The edge: Workers, KV sessions, Upstash Vector, no Node.js in the bundle                | OpenAI key (Upstash optional)   |
+| [`mcp-server`](./examples/mcp-server)               | A small MCP server to import tools from, over stdio or HTTP                             | nothing                         |
+
+Each one runs from a clean clone after `pnpm install && pnpm build`. CI runs `sitebot doctor` on
+each and a smoke test against a scripted offline model, so none of them needs a key in CI.
+
 ---
 
 ## Next step
 
 [Phase 10 — examples, docs, release](./docs/09-implementation-plan.md#phase-10--examples-docs-release):
-the Next.js, Express-sidecar and Cloudflare Worker examples, the docs site with a config reference
-generated from the Zod schema, recipes, and the release pipeline (changesets, provenance, SRI hashes).
+the examples are done. What remains is the docs site (a config reference generated from the Zod
+schema, deployment guides and recipes), the release pipeline (changesets, npm provenance, SRI
+hashes), and the rule-to-test audit.
