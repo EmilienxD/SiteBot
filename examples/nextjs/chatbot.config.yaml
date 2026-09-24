@@ -1,0 +1,112 @@
+# yaml-language-server: $schema=../../packages/config/schema/chatbot.schema.json
+#
+# One OpenAI key covers both the chat model and the embeddings used for the
+# knowledge index. See README.md.
+
+version: 1
+name: Lumen Bikes
+mode: agent
+
+backend:
+  provider: openai
+  model: ${env.SITEBOT_MODEL:-gpt-5-mini}
+  apiKey: ${env.OPENAI_API_KEY}
+  maxOutputTokens: 800
+
+prompt:
+  system: |
+    You are the assistant on Lumen Bikes' website, a small e-bike shop in
+    Utrecht. Help visitors pick a bike, understand servicing, and book a
+    service slot. Keep answers to two or three sentences, and cite the page
+    you took an answer from.
+  includePageContext: true
+  guardrails:
+    refuseOffTopic: true
+    offTopicMessage: I can only help with Lumen Bikes — our bikes, servicing and bookings.
+
+siteContext:
+  company: Lumen Bikes
+  description: E-bikes sold, fitted and serviced in Utrecht.
+  primaryUrl: ${env.SITE_URL:-http://localhost:3000}
+  routes:
+    - path: /bikes
+      summary: The three models, their range, weight and price.
+    - path: /service
+      summary: What a service includes, what it costs, and how to book one.
+
+storage:
+  type: sqlite
+  path: ./.sitebot/sessions.db
+
+agent:
+  maxSteps: 4
+  approvalPolicy: always
+
+# `pnpm ingest` crawls this site's own sitemap (app/sitemap.ts) while `pnpm dev`
+# is running, and answers cite the pages they came from.
+knowledge:
+  sources:
+    - type: sitemap
+      url: ${env.SITE_URL:-http://localhost:3000}/sitemap.xml
+      # Never index signed-in pages, even if a sitemap lists them.
+      exclude: ['/admin/**', '/account/**', '/internal/**']
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+  # A JSON file: fine for a site this size, and no native dependency.
+  store:
+    type: memory
+    path: ./.sitebot/index.json
+
+tools:
+  # A server tool: the engine calls this HTTP endpoint, the browser never
+  # does. Here it is a mock route in the same app (app/api/mock/service-slots);
+  # in a real shop it would be the booking system's API.
+  - name: find_service_slots
+    description: |
+      Look up free workshop slots for a bike service on a given day.
+      Use when a visitor asks when they can bring their bike in.
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        date:
+          type: string
+          description: The day to check, as YYYY-MM-DD.
+      required: [date]
+    executor:
+      type: http
+      method: GET
+      url: ${env.SITE_URL:-http://localhost:3000}/api/mock/service-slots
+      query: { date: '{date}' }
+      # The mock lives on localhost; a real API would not need this.
+      allowPrivateNetwork: true
+
+  - name: navigate
+    description: |
+      Take the visitor to another page of the site, e.g. /bikes.
+      Use when they ask to go somewhere.
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        path: { type: string, description: 'A site path such as /service.' }
+      required: [path]
+    executor: { type: builtin, id: navigate }
+
+ui:
+  theme:
+    primary: '#0f766e'
+  messages:
+    greeting: Hi! Looking for an e-bike, or booking a service?
+    placeholder: Ask about bikes or servicing…
+    suggestions:
+      - label: Which bike for commuting?
+        action:
+          { type: send, text: Which of your bikes is best for a 15 km commute? }
+      - label: Book a service
+        action:
+          {
+            type: send,
+            text: When can I bring my bike in for a service this week?,
+          }

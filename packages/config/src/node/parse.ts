@@ -85,7 +85,11 @@ async function importCodeConfig(path: string): Promise<unknown> {
 
   let module: Record<string, unknown>
   try {
-    module = (await import(url.href)) as Record<string, unknown>
+    // Opaque to bundlers: a Next.js route bundles this loader, and a bundler
+    // that rewrote the import could not resolve a path known only at runtime.
+    module = (await import(
+      /* @vite-ignore */ /* webpackIgnore: true */ /* turbopackIgnore: true */ url.href
+    )) as Record<string, unknown>
   } catch (cause) {
     throw asImportError(path, cause)
   }

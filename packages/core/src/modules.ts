@@ -65,7 +65,7 @@ export async function loadModuleExport(
   let module: Record<string, unknown>
   try {
     module = (await import(
-      /* @vite-ignore */ /* webpackIgnore: true */ `${url}${options.fresh ? `?t=${Date.now()}` : ''}`
+      /* @vite-ignore */ /* webpackIgnore: true */ /* turbopackIgnore: true */ `${url}${options.fresh ? `?t=${Date.now()}` : ''}`
     )) as Record<string, unknown>
   } catch (error) {
     throw new EngineError('not_ready', {

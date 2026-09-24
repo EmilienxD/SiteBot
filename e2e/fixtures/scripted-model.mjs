@@ -2,6 +2,7 @@
 // and scripted by keywords in the visitor's last message. It speaks the
 // LanguageModelV3 stream protocol directly, so it needs no SDK import.
 //
+//   "call <tool> {json}" → that tool call, verbatim (used by the example smoke tests)
 //   "highlight #id"   → highlight_section tool call
 //   "fill"            → fill_wholesale_form (approval-gated client tool)
 //   "fill bad"        → same, with a volume that is not an option
@@ -38,7 +39,11 @@ function script(prompt, call) {
   const last = prompt.at(-1)
   if (last?.role === 'tool') return reply(describeToolResult(last.content))
 
-  const text = lastUserText(prompt).toLowerCase()
+  const raw = lastUserText(prompt)
+  const direct = /^call (\w+)\s*(\{.*\})?$/s.exec(raw.trim())
+  if (direct) return toolCall(direct[1], JSON.parse(direct[2] ?? '{}'), call)
+
+  const text = raw.toLowerCase()
   if (text.includes('highlight')) {
     const selector = /#[\w-]+/.exec(text)?.[0] ?? '#subscriptions'
     return toolCall('highlight_section', { selector }, call)

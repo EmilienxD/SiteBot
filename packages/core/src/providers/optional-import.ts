@@ -17,7 +17,9 @@ type Loaded = Record<string, any>
 
 /** `import()` behind a variable, so nothing resolves it statically. */
 export async function dynamicImport(specifier: string): Promise<Loaded> {
-  return (await import(/* @vite-ignore */ /* webpackIgnore: true */ specifier)) as Loaded
+  return (await import(
+    /* @vite-ignore */ /* webpackIgnore: true */ /* turbopackIgnore: true */ specifier
+  )) as Loaded
 }
 
 /**

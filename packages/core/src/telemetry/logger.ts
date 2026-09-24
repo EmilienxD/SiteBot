@@ -102,7 +102,17 @@ export function redact(
 
   if (Array.isArray(value)) return value.map((item) => redact(item, options, seen))
   if (value instanceof Error) {
-    return { name: value.name, message: redactString(value.message) }
+    // The cause chain is where the operator's answer is: a tool's "could not
+    // complete" wraps "fetch failed", which wraps ECONNREFUSED.
+    const { code, detail } = value as { code?: unknown; detail?: unknown }
+    return {
+      name: value.name,
+      message: redactString(value.message),
+      ...(typeof code === 'string' ? { code } : {}),
+      // Withheld from clients in production; logs are the operator's copy.
+      ...(typeof detail === 'string' ? { detail: redactString(detail) } : {}),
+      ...(value.cause === undefined ? {} : { cause: redact(value.cause, options, seen) }),
+    }
   }
 
   const out: Record<string, unknown> = {}

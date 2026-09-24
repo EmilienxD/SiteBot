@@ -23,6 +23,23 @@ export function createSafeFetch(): SafeFetch {
       lookup(hostname, options, callback) {
         void resolveHost(hostname)
           .then((addresses) => {
+            // Happy-eyeballs (`autoSelectFamily`, on by default since Node 20)
+            // asks for every address; answering with one string makes net
+            // read `undefined` and fail every request "Invalid IP address".
+            if ((options as { all?: boolean }).all === true) {
+              if (addresses.length === 0) throw new Error(`No address found for ${hostname}.`)
+              const all: { address: string; family: number }[] = addresses.map((address) => ({
+                address,
+                family: address.includes(':') ? 6 : 4,
+              }))
+              ;(
+                callback as unknown as (
+                  error: null,
+                  all: { address: string; family: number }[],
+                ) => void
+              )(null, all)
+              return
+            }
             const family = options.family === 6 ? 6 : 4
             const address =
               addresses.find((candidate) =>

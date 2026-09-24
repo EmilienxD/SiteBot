@@ -1,0 +1,33 @@
+{
+  "name": "@sitebot/example-nextjs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A Next.js App Router site that hosts both the chat API and the widget.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "ingest": "sitebot ingest",
+    "doctor": "sitebot doctor",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf .next"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.0",
+    "@sitebot/config": "workspace:*",
+    "@sitebot/react": "workspace:*",
+    "@sitebot/server": "workspace:*",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@sitebot/cli": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "rimraf": "^6.1.3",
+    "typescript": "^5.9.3"
+  }
+}

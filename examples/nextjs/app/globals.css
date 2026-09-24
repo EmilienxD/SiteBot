@@ -1,0 +1,43 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: #1f2933;
+  background: #fbfaf7;
+  font:
+    17px/1.6 ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+
+header,
+main,
+footer {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+nav {
+  display: flex;
+  gap: 1.25rem;
+  align-items: baseline;
+}
+
+nav a {
+  color: #0f766e;
+  text-decoration: none;
+}
+
+nav .brand {
+  margin-right: auto;
+  color: inherit;
+  font-weight: 700;
+}
+
+footer {
+  color: #616e7c;
+  font-size: 0.9rem;
+}
