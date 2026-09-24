@@ -41,6 +41,7 @@ import { awaitFirstOutput } from './stream/start.js'
 import { createEventDispatcher, noopDispatcher, type EventDispatcher } from './telemetry/events.js'
 import { createLogger } from './telemetry/logger.js'
 import { hooksOf, reportError, runHook } from './hooks.js'
+import { validateJsonSchema, type JsonSchemaObject } from './tools/schema.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
 import { createToolRegistry, WIDGET_EFFECT, type WidgetEffect } from './tools/registry.js'
 import type { HostResolver } from './tools/http.js'
@@ -960,7 +961,7 @@ export function createEngine(
       )
       if (part === undefined) throw new CheckpointError('Client tool replay was rejected.', 403)
       part.state = 'output-available'
-      part.output = result.output
+      part.output = checkClientToolResult(toolName(part), result.output)
     }
 
     if ((resume.approvals?.length ?? 0) + (resume.clientToolResults?.length ?? 0) === 0) {
@@ -1013,7 +1014,27 @@ export function createEngine(
       (entry) => !('from' in entry) && entry.name === name && entry.executor?.type === 'client',
     )
   }
+
+  /**
+   * docs/05 §5 rule 5, enforced where it counts. A client tool's result comes
+   * from the browser, and the widget's own 16 KB cap binds only an honest
+   * widget: the server caps it again and checks it against the tool's
+   * `outputSchema`, so a tampered page can neither flood the context nor hand
+   * the model a result shaped unlike anything the tool returns.
+   */
+  function checkClientToolResult(name: string, output: unknown): unknown {
+    if ((JSON.stringify(output) ?? '').length > CLIENT_RESULT_MAX_CHARS)
+      return { error: 'result_too_large' }
+    const entry = config.tools.find((tool) => !('from' in tool) && tool.name === name)
+    const schema = entry && !('from' in entry) ? entry.outputSchema : undefined
+    if (schema === undefined) return output
+    const checked = validateJsonSchema(schema as JsonSchemaObject, output)
+    return checked.ok ? output : { error: 'invalid_output', issues: checked.issues }
+  }
 }
+
+/** Same bound as the widget's (docs/05 §5 rule 5). */
+const CLIENT_RESULT_MAX_CHARS = 16_384
 
 // ── citations ───────────────────────────────────────────────────────────────
 

@@ -44,6 +44,7 @@ The model. docs/02-configuration.md §4.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `backend` | `object` |  | The model. docs/02-configuration.md §4. |
 | `backend.provider` <Badge type="warning" text="required" /> | `"anthropic" \| "openai" \| "google" \| "azure" \| "bedrock" \| "vertex" \| "mistral" \| "groq" \| "openai-compatible" \| "ollama" \| "custom"` |  | Model provider. |
 | `backend.model` <Badge type="warning" text="required" /> | `string` |  | Model ID, passed to the provider verbatim. Never validated against a list, so new models work without upgrading this package. _non-empty._ |
 | `backend.apiKey` | `string` |  | API key. Use ${env.VAR}; defaults to the provider's conventional environment variable. |
@@ -77,6 +78,7 @@ docs/02-configuration.md §5.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `prompt` | `object` |  | docs/02-configuration.md §5. |
 | `prompt.system` | `string` |  | The system prompt. &#123;&#123;variables}} are substituted; ${env.*} is deliberately NOT (docs/02 §2). _non-empty._ |
 | `prompt.systemFile` | `string` |  | Path to a file holding the system prompt, relative to the config file. Read at load time. _non-empty._ |
 | `prompt.includePageContext` | `boolean` | `true` |  |
@@ -92,6 +94,7 @@ docs/02-configuration.md §6.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `siteContext` | `object` | `{}` | docs/02-configuration.md §6. |
 | `siteContext.company` | `string` |  |  |
 | `siteContext.description` | `string` |  |  |
 | `siteContext.primaryUrl` | `string` |  |  |
@@ -111,6 +114,7 @@ docs/02-configuration.md §7.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `agent` | `object` | `{}` | docs/02-configuration.md §7. |
 | `agent.maxSteps` | `integer` | `8` | Hard ceiling on loop iterations. _≥ 1, ≤ 32._ |
 | `agent.approvalRequired` | `string[]` | `[]` | Tool names that need explicit user approval. Unioned with per-tool requiresApproval. |
 | `agent.approvalPolicy` | `"always" \| "once-per-session" \| "never"` | `"always"` |  |
@@ -127,6 +131,7 @@ docs/02-configuration.md §9, docs/06-knowledge.md.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `knowledge` | `object` | `{}` | docs/02-configuration.md §9, docs/06-knowledge.md. |
 | `knowledge.sources` | `object[]` | `[]` | Empty means the whole knowledge subsystem stays inert. |
 | `knowledge.extract.selector` | `string` | `"main, article, [role=\"main\"]"` | _non-empty._ |
 | `knowledge.extract.strip` | `string[]` | `["nav","footer","aside",".cookie-banner"]` |  |
@@ -329,6 +334,7 @@ Fully public — everything here is served by GET /api/chat/config. Never put a 
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `ui` | `object` | `{}` | Fully public — everything here is served by GET /api/chat/config. Never put a secret in this block. |
 | `ui.position` | `"bottom-right" \| "bottom-left"` | `"bottom-right"` |  |
 | `ui.offset.x` | `integer` | `24` | _≥ -9007199254740991._ |
 | `ui.offset.y` | `integer` | `24` | _≥ -9007199254740991._ |
@@ -428,6 +434,7 @@ docs/02-configuration.md §12, docs/08-security.md.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `security` | `object` | `{}` | docs/02-configuration.md §12, docs/08-security.md. |
 | `security.publicKey` | `string` |  | Identifies this deployment to the widget. Not a secret — it grants nothing on its own. |
 | `security.allowedOrigins` | `string[]` | `[]` | Empty means same-origin only. A cross-origin sidecar must opt in explicitly. |
 | `security.rateLimit.perSession` | `string` | `"30/5m"` | _matches `^[1-9][0-9]*\/[1-9][0-9]*[smhd]$`._ |
@@ -438,6 +445,7 @@ docs/02-configuration.md §12, docs/08-security.md.
 | `security.budget.maxTokensPerDay` | `integer` |  | _> 0._ |
 | `security.budget.maxUsdPerDay` | `number` |  | _> 0._ |
 | `security.budget.onExceeded` | `"message" \| "error" \| "degrade"` | `"message"` |  |
+| `security.budget.degradeTo` | `object` |  | Cheaper model to switch to when onExceeded is `degrade`. |
 | `security.budget.degradeTo.provider` <Badge type="warning" text="required" /> | `"anthropic" \| "openai" \| "google" \| "azure" \| "bedrock" \| "vertex" \| "mistral" \| "groq" \| "openai-compatible" \| "ollama" \| "custom"` |  | Model provider. |
 | `security.budget.degradeTo.model` <Badge type="warning" text="required" /> | `string` |  | Model ID, passed to the provider verbatim. Never validated against a list, so new models work without upgrading this package. _non-empty._ |
 | `security.budget.degradeTo.apiKey` | `string` |  | API key. Use ${env.VAR}; defaults to the provider's conventional environment variable. |
@@ -473,6 +481,7 @@ docs/02-configuration.md §13.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
+| `telemetry` | `object` | `{}` | docs/02-configuration.md §13. |
 | `telemetry.enabled` | `boolean` | `true` |  |
 | `telemetry.otel.enabled` | `boolean` | `false` |  |
 | `telemetry.otel.serviceName` | `string` | `"sitebot"` | _non-empty._ |
@@ -530,9 +539,14 @@ One of 2 shapes, chosen by `transport`.
 | --- | --- | --- | --- |
 | `tools[].name` <Badge type="warning" text="required" /> | `string` |  | Unique tool name the model will call. _matches `^[a-z][a-z0-9_]{0,63}$`._ |
 | `tools[].description` | `string` |  | What the model reads to decide whether to call this. Required except for builtin executors. |
+| `tools[].parameters` | `object` | `{}` | JSON Schema (draft-07 subset) for the tool arguments. |
 | `tools[].parameters.type` | `"object"` | `"object"` |  |
 | `tools[].parameters.properties` | `Record<string, object>` | `{}` |  |
 | `tools[].parameters.required` | `string[]` | `[]` |  |
+| `tools[].outputSchema` | `object` |  | For client tools: the result the page must return. The server checks every result against it before the model sees it — the browser is not trusted to. |
+| `tools[].outputSchema.type` | `"object"` | `"object"` |  |
+| `tools[].outputSchema.properties` | `Record<string, object>` | `{}` |  |
+| `tools[].outputSchema.required` | `string[]` | `[]` |  |
 | `tools[].readOnly` | `boolean` | `false` | Declares no side effects. Must be true in chat mode. |
 | `tools[].scope` | `"public" \| "authenticated"` | `"public"` |  |
 | `tools[].requiresApproval` | `boolean` | `false` |  |

@@ -327,6 +327,53 @@ describe('rule 10 — ui may not contain ${env.*}', () => {
   })
 })
 
+describe('http tool templating (docs/05 §2 rules 2–3)', () => {
+  const httpTool = (executor: Record<string, unknown>) => ({
+    ...minimalConfig(),
+    tools: [
+      {
+        name: 'lookup',
+        description: 'Look something up. Use when asked.',
+        readOnly: true,
+        executor: { type: 'http', url: 'https://api.acme.com/v1/{id}', ...executor },
+      },
+    ],
+  })
+
+  it('accepts parameters in the path and query, and trusted context in headers', () => {
+    const result = validateConfig(
+      httpTool({
+        url: 'https://api.acme.com/v1/orders/{id}',
+        query: { q: '{term}' },
+        headers: { authorization: 'Bearer ${env.TOKEN}', 'x-user': '{{identity.sub}}' },
+      }),
+      { env: { TOKEN: 'secret' } },
+    )
+    expect(result.ok ? [] : result.errors).toEqual([])
+  })
+
+  it.each(['https://{host}/v1/x', '{scheme}://api.acme.com/v1/x', 'https://api.{env}.acme.com/x'])(
+    'rejects a parameter in the scheme or host: %s',
+    (url) => {
+      expect(errorForRule(httpTool({ url }), 'tools/param-in-host').path).toBe(
+        'tools[0].executor.url',
+      )
+    },
+  )
+
+  it('rejects a parameter in a header value, even beside trusted context', () => {
+    const error = errorForRule(
+      httpTool({ headers: { authorization: 'Bearer {token} {{identity.sub}}' } }),
+      'tools/param-in-header',
+    )
+    expect(error.path).toBe('tools[0].executor.headers.authorization')
+  })
+
+  it('rejects a parameter in a header name', () => {
+    errorForRule(httpTool({ headers: { 'x-{name}': 'static' } }), 'tools/param-in-header')
+  })
+})
+
 describe('additional normative rules', () => {
   it('rejects duplicate tool names (docs/05 §1)', () => {
     const error = errorForRule(

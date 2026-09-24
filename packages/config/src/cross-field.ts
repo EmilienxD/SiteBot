@@ -49,6 +49,7 @@ export function checkCrossFields(
   ruleToolNamesAreUnique(config, errors)
   ruleStdioNotAvailableOnEdge(config, context, errors)
   ruleNoWildcardOrigin(config, errors)
+  ruleHttpParamsStayInThePath(config, errors)
 
   warnMcpImportWithoutAllow(config, errors, warnings)
   warnUnapprovedWritableTools(config, warnings)
@@ -355,6 +356,52 @@ function ruleNoWildcardOrigin(config: SiteBotConfig, errors: ConfigError[]): voi
       fix: 'Replace it with the origins you actually serve. An empty list already means same-origin only, which is the safe default.',
       rule: 'security/wildcard-origin',
     })
+  })
+}
+
+/**
+ * A model-controlled `{param}` in `text`, ignoring server-verified
+ * `{{identity.*}}`-style placeholders. Exported for the runtime guard in core,
+ * which applies the same rule to configs that never went through validation.
+ */
+export function modelParameterIn(text: string): string | undefined {
+  return /{([^{}]+)}/.exec(text.replace(/{{[^}]*}}/g, ''))?.[0]
+}
+
+/**
+ * docs/05 §2 rules 2–3: a model-controlled `{param}` may appear in the URL
+ * path, the query and the body — never in the scheme or host, where it would
+ * choose the server, nor in a header name or value, where it could inject.
+ */
+function ruleHttpParamsStayInThePath(config: SiteBotConfig, errors: ConfigError[]): void {
+  config.tools.forEach((entry, index) => {
+    if (isMcpImport(entry) || entry.executor?.type !== 'http') return
+    const { url, headers } = entry.executor
+    // Everything before the path: `scheme://host:port`.
+    const origin = /^[^/]*\/\/[^/]*/.exec(url)?.[0] ?? url.split('/')[0] ?? ''
+    const inOrigin = modelParameterIn(origin)
+    if (inOrigin !== undefined)
+      errors.push({
+        path: `tools[${index}].executor.url`,
+        message: `Tool "${entry.name}" puts the model-controlled ${inOrigin} in the URL's scheme or host.`,
+        value: url,
+        expected: 'a fixed scheme and host; parameters only in the path, query or body',
+        fix: 'Write the host literally. To reach several hosts, define one tool per host, or use allowHosts with a fixed host.',
+        rule: 'tools/param-in-host',
+      })
+    for (const [name, value] of Object.entries(headers)) {
+      const inHeader = modelParameterIn(name) ?? modelParameterIn(value)
+      if (inHeader === undefined) continue
+      errors.push({
+        path: `tools[${index}].executor.headers.${name}`,
+        message: `Tool "${entry.name}" puts the model-controlled ${inHeader} in a header.`,
+        value,
+        expected:
+          'static text, ${env.*}, or server-verified {{identity.*}} / {{session.*}} / {{page.*}}',
+        fix: 'Move the value into the query or body, where it is encoded; a header set by the model can inject.',
+        rule: 'tools/param-in-header',
+      })
+    }
   })
 }
 

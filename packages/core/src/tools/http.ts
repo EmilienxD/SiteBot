@@ -1,3 +1,4 @@
+import { modelParameterIn } from '@sitebot/config'
 import type { RequestContext } from '../types.js'
 import { EngineError } from '../stream/errors.js'
 import type { JsonSchemaObject } from './schema.js'
@@ -111,14 +112,19 @@ export function createHttpExecutor(
   }
 }
 
+/**
+ * docs/05 §2 rules 2–3, again at build time: config validation already
+ * rejects these (`tools/param-in-host`, `tools/param-in-header`), but an
+ * engine can be handed a config that never went through it.
+ */
 function validateTemplate(config: HttpExecutorConfig): void {
-  const authority = config.url.match(/^[a-z]+:\/\/([^/]+)/i)?.[1] ?? ''
-  if (/[{][^}]+[}]/.test(authority))
+  const origin = /^[^/]*\/\/[^/]*/.exec(config.url)?.[0] ?? config.url.split('/')[0] ?? ''
+  if (modelParameterIn(origin) !== undefined)
     throw new EngineError('not_ready', {
-      message: 'Model-controlled parameters may not appear in an HTTP host.',
+      message: 'Model-controlled parameters may not appear in an HTTP scheme or host.',
     })
-  for (const value of Object.values(config.headers))
-    if (/[{][^}]+[}]/.test(value) && !/{{(?:identity|session|page)\.[^}]+}}/.test(value))
+  for (const [name, value] of Object.entries(config.headers))
+    if (modelParameterIn(name) !== undefined || modelParameterIn(value) !== undefined)
       throw new EngineError('not_ready', {
         message: 'Model-controlled parameters are forbidden in HTTP headers.',
       })

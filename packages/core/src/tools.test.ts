@@ -31,6 +31,33 @@ describe('http tools', () => {
     },
   )
 
+  it.each([
+    [
+      'a header value beside trusted context',
+      'https://api.example.test/x',
+      { a: 'Bearer {t} {{identity.sub}}' },
+    ],
+    ['a header name', 'https://api.example.test/x', { 'x-{name}': 'v' }],
+    ['the scheme', '{scheme}://api.example.test/x', {}],
+    ['the host', 'https://{host}/x', {}],
+  ])('refuses to build a tool with a model parameter in %s', (_where, url, headers) => {
+    expect(() =>
+      createHttpExecutor(
+        {
+          method: 'GET',
+          url,
+          headers,
+          query: {},
+          maxResponseBytes: 100,
+          errorMap: {},
+          allowPrivateNetwork: false,
+          maxRedirects: 0,
+        },
+        vi.fn<typeof fetch>(),
+      ),
+    ).toThrow(/Model-controlled parameters/)
+  })
+
   it('percent-encodes path parameters and trusted context is not model-controlled', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {

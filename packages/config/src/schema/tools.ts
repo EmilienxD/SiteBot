@@ -174,6 +174,9 @@ const ToolShape = {
       'What the model reads to decide whether to call this. Required except for builtin executors.',
     ),
   parameters: JsonSchemaObjectSchema.prefault({}),
+  outputSchema: JsonSchemaObjectSchema.optional().describe(
+    'For client tools: the result the page must return. The server checks every result against it before the model sees it — the browser is not trusted to.',
+  ),
   readOnly: z
     .boolean()
     .default(false)

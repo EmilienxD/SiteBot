@@ -883,3 +883,72 @@ describe('hooks (docs/04 §9)', () => {
     expect(logged).toContain('onPromptComposed hook threw')
   })
 })
+
+describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () => {
+  it('re-validates model arguments on the server and returns invalid_input', async () => {
+    const model = toolModel('get_time', { zone: 42 })
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        tools: [
+          {
+            name: 'get_time',
+            description: 'Current time. Use when the visitor asks what time it is.',
+            readOnly: true,
+            parameters: {
+              type: 'object',
+              properties: { timezone: { type: 'string' } },
+              required: ['timezone'],
+            },
+            executor: { type: 'builtin', id: 'get_time' },
+          },
+        ],
+      }),
+      { adapters: adapterFor(model) },
+    )
+    await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('what time is it?')] },
+        testContext(),
+      ),
+    )
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('invalid_input')
+  })
+
+  it('turns an executor failure into tool_failed, and the answer still streams', async () => {
+    const model = toolModel('order_status', { id: 'A1' }, 'Sorry, I could not check that.')
+    const engine = createEngine(
+      testConfig({
+        mode: 'agent',
+        tools: [
+          {
+            name: 'order_status',
+            description: 'Order status. Use when the visitor asks about an order.',
+            readOnly: true,
+            parameters: { type: 'object', properties: { id: { type: 'string' } } },
+            executor: { type: 'http', url: 'https://api.acme.test/orders/{id}' },
+            errorMessage: 'The order system is unavailable.',
+          },
+        ],
+      }),
+      {
+        adapters: adapterFor(model),
+        fetchImpl: async () => {
+          throw new TypeError('fetch failed')
+        },
+        resolveHost: async () => ['203.0.113.10'],
+      },
+    )
+    const text = await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('where is order A1?')] },
+        testContext(),
+      ),
+    )
+    expect(text).toBe('Sorry, I could not check that.')
+    const prompt = JSON.stringify(model.doStreamCalls[1]?.prompt)
+    expect(prompt).toContain('tool_failed')
+    expect(prompt).toContain('The order system is unavailable.')
+    expect(prompt).not.toContain('fetch failed')
+  })
+})

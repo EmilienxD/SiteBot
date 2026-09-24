@@ -88,6 +88,8 @@ function collectRows(rows, sections, path, node, parentRequired) {
     return
   }
   if (node.type === 'object' && node.properties) {
+    // The object's own description would otherwise be lost to its children.
+    if (node.description) rows.push(row(path, node, parentRequired))
     const required = new Set(node.required ?? [])
     for (const [key, child] of Object.entries(node.properties))
       collectRows(rows, sections, `${path}.${key}`, child, required.has(key))
