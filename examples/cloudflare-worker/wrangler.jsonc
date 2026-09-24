@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sitebot-example",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  // No nodejs_compat: nothing in the bundle needs Node, and keeping the flag
+  // off is what proves it.
+  //
+  // public/ holds the demo page and a copy of the widget bundle
+  // (scripts/copy-widget.mjs). Anything that is not a file there — /api/chat
+  // and its sub-routes — falls through to the Worker.
+  "assets": { "directory": "./public" },
+  "kv_namespaces": [
+    // `wrangler dev` simulates KV locally, so this id only matters on deploy:
+    // create one with `npx wrangler kv namespace create SESSIONS`.
+    { "binding": "SESSIONS", "id": "00000000000000000000000000000000" },
+  ],
+}

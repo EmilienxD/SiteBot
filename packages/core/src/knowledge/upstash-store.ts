@@ -52,7 +52,9 @@ export async function createUpstashVectorStore(
     } catch (cause) {
       throw new Error(
         'knowledge.store "upstash" requires the optional dependency @upstash/vector.\n' +
-          '  Install it:  pnpm add @upstash/vector',
+          '  Install it:  pnpm add @upstash/vector\n' +
+          '  On Workers, import { Index } from "@upstash/vector" yourself and pass\n' +
+          '  `client: new Index({ url, token })` — a bundle cannot load it by name.',
         { cause },
       )
     }

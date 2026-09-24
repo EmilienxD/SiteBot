@@ -42,6 +42,15 @@ export default defineConfig({
         },
       },
       {
+        // Examples that carry their own tests resolve packages from their own
+        // node_modules, as a user's project would.
+        test: {
+          name: 'examples',
+          include: ['examples/*/test/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
         // Repo-level tests: the dependency graph of docs/01 §3, enforced.
         test: {
           name: 'boundaries',

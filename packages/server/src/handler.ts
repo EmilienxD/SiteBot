@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from '@sitebot/config'
+import type { Knowledge, ResolvedConfig } from '@sitebot/config'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import {
   checkContentLength,
@@ -25,6 +25,7 @@ import {
   type RateLimitStore,
   type RequestContext,
   type TokenVerifier,
+  type VectorStore,
 } from '@sitebot/core'
 import { corsHeaders, preflightResponse, withHeaders } from './http/cors.js'
 import {
@@ -80,6 +81,16 @@ export interface SiteBotHandlerOptions {
   /** JWT verification. Phase 8 ships the implementation. */
   verifier?: TokenVerifier
   logger?: Logger
+  /**
+   * Builds a `knowledge.store` that needs a Node runtime (sqlite, pgvector, a
+   * persisted memory file, custom). The Node adapters supply it through
+   * `withNodeRuntime`; this file never imports `@sitebot/core/node`, so a
+   * Workers bundle of the fetch adapter contains no `node:*` module.
+   */
+  vectorStoreFactory?: (
+    store: Knowledge['store'],
+    options: { model: string; baseDir: string | null },
+  ) => Promise<VectorStore>
 }
 
 /**
@@ -162,17 +173,28 @@ export function createSiteBotHandler(
   function ensureKnowledge(): Promise<void> {
     knowledgeReady ??= (async () => {
       if (options.engine !== undefined) return // external engine, external deps
+      // A caller that built its own store and embedder (a Workers host, which
+      // must import its provider SDK statically) keeps them.
+      if (options.deps?.knowledge !== undefined) return
       if (config.knowledge.sources.length === 0 || config.knowledge.embedding === undefined) return
       try {
         // `memory` and `upstash` need only `fetch`, so a Workers host (docs/00
         // T3) builds them here without ever importing the Node entry.
         const storeConfig = config.knowledge.store
         const model = config.knowledge.embedding.model
-        const store = isEdgeVectorStore(storeConfig)
-          ? await createVectorStore(storeConfig, { model })
-          : await (
-              await import('@sitebot/core/node')
-            ).createNodeVectorStore(storeConfig, { model, baseDir: config.$meta.baseDir ?? null })
+        let store: VectorStore
+        if (isEdgeVectorStore(storeConfig)) store = await createVectorStore(storeConfig, { model })
+        else if (options.vectorStoreFactory !== undefined)
+          store = await options.vectorStoreFactory(storeConfig, {
+            model,
+            baseDir: config.$meta.baseDir ?? null,
+          })
+        else
+          throw new EngineError('not_ready', {
+            message: `knowledge.store "${storeConfig.type}" needs a Node runtime.`,
+            detail:
+              'use a Node adapter (next, express, fastify, node); on the edge use upstash, or memory without a path',
+          })
         const { createQueryEmbedder } = await import('@sitebot/ingest/query')
         const embedder = await createQueryEmbedder(config.knowledge.embedding)
         engineDeps.knowledge = { store, embedder }

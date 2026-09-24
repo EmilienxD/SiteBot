@@ -68,6 +68,8 @@ export default tseslint.config(
       '**/coverage/**',
       '**/.turbo/**',
       '**/.next/**',
+      '**/.wrangler/**',
+      'examples/cloudflare-worker/public/widget/**',
       '**/node_modules/**',
       '**/*.d.ts',
       'docs/**',

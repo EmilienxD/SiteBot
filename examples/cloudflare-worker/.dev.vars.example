@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `wrangler dev`. In production, set each one with
+# `npx wrangler secret put NAME`.
+OPENAI_API_KEY=sk-...
+
+# From the Upstash console: a Vector index with 1536 dimensions
+# (text-embedding-3-small) and cosine similarity; copy its REST URL and token.
+UPSTASH_VECTOR_REST_URL=https://your-index.upstash.io
+UPSTASH_VECTOR_REST_TOKEN=...
