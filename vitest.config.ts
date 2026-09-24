@@ -51,6 +51,11 @@ export default defineConfig({
         },
       },
       {
+        // Recipes validate, troubleshooting covers every doctor check, and the
+        // generated config reference matches the schema.
+        test: { name: 'docs', include: ['apps/docs/test/**/*.test.ts'], environment: 'node' },
+      },
+      {
         // Repo-level tests: the dependency graph of docs/01 §3, enforced.
         test: {
           name: 'boundaries',

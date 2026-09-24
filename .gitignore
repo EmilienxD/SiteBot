@@ -31,3 +31,6 @@ Thumbs.db
 .idea/
 
 .claude/settings.local.json
+# VitePress
+apps/docs/.vitepress/cache/
+apps/docs/.vitepress/dist/

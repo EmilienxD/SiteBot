@@ -64,6 +64,13 @@ describe('serveStatic', () => {
     expect((await get('/sitebot-panel.js')).headers['content-type']).toContain('javascript')
   })
 
+  it('serves the widget with CORS, so a sidecar host page can run it; site pages without', async () => {
+    // A cross-origin <script type="module"> is fetched in CORS mode.
+    expect((await get('/sitebot.js')).headers['access-control-allow-origin']).toBe('*')
+    expect((await get('/sitebot-panel.js')).headers['access-control-allow-origin']).toBe('*')
+    expect((await get('/')).headers['access-control-allow-origin']).toBeUndefined()
+  })
+
   it.each(['/../secret.env', '/%2e%2e/secret.env', '/docs/../../secret.env', '/..%5csecret.env'])(
     'refuses to escape the site root: %s',
     async (url) => {

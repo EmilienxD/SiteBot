@@ -69,6 +69,7 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/.next/**',
       '**/.wrangler/**',
+      'apps/docs/.vitepress/cache/**',
       'examples/cloudflare-worker/public/widget/**',
       '**/node_modules/**',
       '**/*.d.ts',

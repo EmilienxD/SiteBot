@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["**/*.md", ".vitepress/config.mts", "scripts/**", "../../docs/**"],
+      "outputs": [".vitepress/dist/**"]
+    }
+  }
+}

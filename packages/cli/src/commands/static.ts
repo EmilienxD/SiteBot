@@ -70,7 +70,12 @@ export async function serveStatic(
 
   if (WIDGET_ASSET.test(path) && options.widget !== null) {
     const file = resolve(dirname(options.widget), path.slice(1))
-    if (await sendFile(request, response, file, options.cacheControl)) return true
+    // A sidecar's host page loads this as a cross-origin module script, which
+    // the browser fetches in CORS mode and refuses to run without the header.
+    // The bundle is public code, as on any CDN; the API's own origin
+    // allowlist is what guards the endpoint.
+    const cors = { 'access-control-allow-origin': '*' }
+    if (await sendFile(request, response, file, options.cacheControl, cors)) return true
   }
 
   if (options.dir === undefined) return false
@@ -96,6 +101,7 @@ async function sendFile(
   response: ServerResponse,
   file: string,
   cacheControl: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<boolean> {
   const body = await readFile(file).catch(() => null)
   if (body === null) return false
@@ -104,6 +110,7 @@ async function sendFile(
     'content-length': body.byteLength,
     'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
+    ...extraHeaders,
   })
   response.end(request.method === 'HEAD' ? undefined : body)
   return true
