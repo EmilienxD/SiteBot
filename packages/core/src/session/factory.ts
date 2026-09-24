@@ -29,8 +29,6 @@ export function createSessionStore(storage: Storage): SessionStore {
         detail:
           `storage.type: ${storage.type} cannot be constructed from the edge-safe entry — ` +
           'build it with createNodeSessionStore() from @sitebot/core/node and pass it as deps.sessionStore',
-        // `redis`, `postgres` and `custom` land with Phases 8 and 5; `sqlite`
-        // is available today through the Node entry named above.
       })
   }
 }

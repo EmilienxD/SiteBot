@@ -18,5 +18,8 @@ export default defineConfig({
   clean: true,
   treeshake: true,
   target: 'es2022',
+  // tsup strips `node:` by default, which breaks the built-ins that exist
+  // only under the prefix — `node:sqlite` has no bare `sqlite` alias.
+  removeNodeProtocol: false,
   external: ['express', 'fastify', 'hono', 'next'],
 })

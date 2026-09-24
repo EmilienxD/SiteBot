@@ -57,20 +57,31 @@ export function checkCrossFields(
   return { errors, warnings }
 }
 
+/**
+ * docs/05 §7 rule 5: any non-`readOnly` tool the model can reach without an
+ * approval card gets a warning. Approval is opt-in per tool
+ * (`requiresApproval`, `agent.approvalRequired`), so a writable tool that is
+ * simply never listed is exactly as ungated as one under `approvalPolicy:
+ * never` — and far easier to miss.
+ */
 function warnUnapprovedWritableTools(config: SiteBotConfig, warnings: ConfigWarning[]): void {
-  if (config.mode !== 'agent' || config.agent.approvalPolicy !== 'never') return
+  if (config.mode !== 'agent') return
+  const never = config.agent.approvalPolicy === 'never'
   config.tools.forEach((entry, index) => {
-    if (
-      isMcpImport(entry) ||
-      entry.readOnly ||
+    if (entry.readOnly || entry.enabled === false) return
+    const gated =
       entry.requiresApproval ||
-      config.agent.approvalRequired.includes(entry.name)
-    )
-      return
+      (!isMcpImport(entry) && config.agent.approvalRequired.includes(entry.name))
+    if (gated && !never) return
+    const name = isMcpImport(entry) ? `MCP import "${entry.id}"` : `Writable tool "${entry.name}"`
     warnings.push({
       path: `tools[${index}]`,
-      message: `Writable tool "${entry.name}" is reachable without approval because agent.approvalPolicy is "never".`,
-      fix: 'Set approvalPolicy to `always` or `once-per-session`, or mark the tool readOnly if it has no side effects.',
+      message: never
+        ? `${name} is reachable without approval because agent.approvalPolicy is "never".`
+        : `${name} runs without an approval card: it is not readOnly and not approval-gated.`,
+      fix: never
+        ? 'Set approvalPolicy to `always` or `once-per-session`, or mark the tool readOnly if it has no side effects.'
+        : 'Add `requiresApproval: true` (or list it in agent.approvalRequired), or mark it readOnly if it has no side effects.',
       rule: 'tools/unapproved-writable',
     })
   })

@@ -7,6 +7,7 @@ import type { KnowledgeDeps } from '../knowledge/types.js'
 import { retrieve } from '../knowledge/retrieve.js'
 import { randomDelimiterId, untrustedBlock } from '../prompt/untrusted.js'
 import { EngineError } from '../stream/errors.js'
+import { loadModuleExport } from '../modules.js'
 import { createHttpExecutor } from './http.js'
 import type { HostResolver } from './http.js'
 import { createMcpExecutor, expandMcpImport, McpClientPool, type StdioMcpConnector } from './mcp.js'
@@ -218,11 +219,11 @@ async function moduleExecutor(
   exportName: string,
   baseDir: string | null | undefined,
 ): Promise<(input: unknown, ctx: RequestContext) => Promise<unknown>> {
-  const resolved = new URL(path, `file://${baseDir ?? process.cwd()}/`).href
-  const module = (await import(
-    `${resolved}${isDevelopment() ? `?t=${Date.now()}` : ''}`
-  )) as Record<string, unknown>
-  const handler = module[exportName]
+  const handler = await loadModuleExport(path, exportName, {
+    baseDir,
+    fresh: isDevelopment(),
+    kind: 'Module tool',
+  })
   if (typeof handler !== 'function')
     throw new EngineError('not_ready', {
       message: `Module tool export "${exportName}" is not a function.`,

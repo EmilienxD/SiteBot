@@ -46,9 +46,15 @@ const GOLDEN_SET: readonly { query: string; expect: string }[] = [
 
   // /docs
   { query: 'what token do I send to authenticate a request', expect: 'docs#authentication' },
-  { query: 'how do I create a shipment from an accepted quote', expect: 'docs#creating-a-shipment' },
+  {
+    query: 'how do I create a shipment from an accepted quote',
+    expect: 'docs#creating-a-shipment',
+  },
   { query: 'which webhook events do you deliver', expect: 'docs#webhooks' },
-  { query: 'how do I verify the signature header on a delivery', expect: 'docs#verifying-a-webhook' },
+  {
+    query: 'how do I verify the signature header on a delivery',
+    expect: 'docs#verifying-a-webhook',
+  },
   { query: 'what happens if I exceed the requests per minute limit', expect: 'docs#rate-limits' },
   { query: 'what does a 422 response mean', expect: 'docs#errors' },
 
@@ -56,16 +62,25 @@ const GOLDEN_SET: readonly { query: string; expect: string }[] = [
   { query: 'how much does the Growth plan cost per month', expect: 'pricing#plans' },
   { query: 'is entry filing charged separately from the platform fee', expect: 'pricing#intro' },
   { query: 'is duty and VAT included or passed through', expect: 'pricing#not-included' },
-  { query: 'what are the payment terms and is annual prepayment cheaper', expect: 'pricing#billing' },
+  {
+    query: 'what are the payment terms and is annual prepayment cheaper',
+    expect: 'pricing#billing',
+  },
   {
     query: 'is a consolidated LCL booking with four suppliers counted as four shipments',
     expect: 'pricing#what-counts',
   },
-  { query: 'can I upgrade my plan mid month and is the fee prorated', expect: 'pricing#changing-plans' },
+  {
+    query: 'can I upgrade my plan mid month and is the fee prorated',
+    expect: 'pricing#changing-plans',
+  },
 
   // /support
   { query: 'what are your support hours', expect: 'support#intro' },
-  { query: 'which email address should I write to for something not time critical', expect: 'support#how-to-reach-us' },
+  {
+    query: 'which email address should I write to for something not time critical',
+    expect: 'support#how-to-reach-us',
+  },
   { query: 'my shipment is stuck, how do I escalate it', expect: 'support#escalating' },
   { query: 'why was my customs entry held', expect: 'support#why-held' },
   { query: 'who pays demurrage charges', expect: 'support#demurrage' },

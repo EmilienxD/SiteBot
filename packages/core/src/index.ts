@@ -52,6 +52,7 @@ export type {
 export { BACKEND_ENTRY_DEFAULTS, resolveChain, resolveModel } from './providers/registry.js'
 export type { ResolvedModel } from './providers/registry.js'
 export {
+  importOptional,
   importProviderPackage,
   installHint,
   isModuleNotFound,
@@ -95,6 +96,9 @@ export type { ContextBudgetInput, TruncateOptions, TruncateResult } from './sess
 // ── knowledge ───────────────────────────────────────────────────────────────
 
 export { MemoryVectorStore } from './knowledge/memory-store.js'
+export { createVectorStore, isEdgeVectorStore } from './knowledge/create-store.js'
+export { createUpstashVectorStore } from './knowledge/upstash-store.js'
+export type { UpstashVectorStoreOptions } from './knowledge/upstash-store.js'
 export { cosineSimilarity, matchesFilter } from './knowledge/store.js'
 export type {
   Chunk,

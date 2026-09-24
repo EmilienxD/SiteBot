@@ -1,7 +1,7 @@
 import { MemoryVectorStore } from './memory-store.js'
 import { createSqliteVectorStore } from '../node/vector-sqlite.js'
 import { createPgVectorStore } from '../node/vector-pgvector.js'
-import { createUpstashVectorStore } from '../node/vector-upstash.js'
+import { createUpstashVectorStore } from './upstash-store.js'
 import { runVectorStoreConformance } from '../../test/vector-store-conformance.js'
 
 /**

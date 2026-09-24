@@ -33,17 +33,45 @@ export const PROVIDER_PACKAGES: Record<ProviderId, string | null> = {
   mistral: '@ai-sdk/mistral',
   groq: '@ai-sdk/groq',
   'openai-compatible': '@ai-sdk/openai-compatible',
-  ollama: 'ollama-ai-provider',
+  // Ollama serves an OpenAI-compatible API at /v1; the dedicated
+  // `ollama-ai-provider` package targets an older model spec than ai@6.
+  ollama: '@ai-sdk/openai-compatible',
   custom: null,
+}
+
+/**
+ * The release line of each provider package that pairs with `ai@6` — npm's
+ * `ai-v6` dist-tag. The majors differ per package (openai-compatible is on 2,
+ * bedrock and vertex on 4), and `latest` has moved on to `ai@7`, whose
+ * providers implement a model spec this build rejects. So every install hint,
+ * scaffold and peer range pins these rather than taking whatever is newest.
+ */
+export const PROVIDER_PACKAGE_RANGES: Readonly<Record<string, string>> = {
+  '@ai-sdk/amazon-bedrock': '^4',
+  '@ai-sdk/anthropic': '^3',
+  '@ai-sdk/azure': '^3',
+  '@ai-sdk/cohere': '^3',
+  '@ai-sdk/google': '^3',
+  '@ai-sdk/google-vertex': '^4',
+  '@ai-sdk/groq': '^3',
+  '@ai-sdk/mistral': '^3',
+  '@ai-sdk/openai': '^3',
+  '@ai-sdk/openai-compatible': '^2',
+}
+
+/** `@ai-sdk/anthropic` → `@ai-sdk/anthropic@^3`, for `pnpm add`. */
+export function providerInstallSpec(specifier: string): string {
+  const range = PROVIDER_PACKAGE_RANGES[specifier]
+  return range === undefined ? specifier : `${specifier}@${range}`
 }
 
 export const PROVIDER_ENV_VARS: Record<ProviderId, string | null> = {
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
   google: 'GOOGLE_GENERATIVE_AI_API_KEY',
-  azure: 'AZURE_API_KEY',
-  bedrock: null, // AWS credential chain
-  vertex: null, // GCP application default credentials
+  azure: 'AZURE_API_KEY', // plus AZURE_RESOURCE_NAME, or set backend.baseUrl
+  bedrock: null, // AWS credential chain; AWS_REGION
+  vertex: null, // GCP application default credentials; GOOGLE_VERTEX_PROJECT/LOCATION
   mistral: 'MISTRAL_API_KEY',
   groq: 'GROQ_API_KEY',
   'openai-compatible': null,

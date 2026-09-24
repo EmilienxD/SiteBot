@@ -49,6 +49,8 @@ vi.mock('./panel-chunk.js', async () => {
       }
     },
     Panel: () => h('div', { class: 'panel-stub' }, 'panel'),
+    PanelBoundary: ({ children }: { children: unknown }) => children,
+    panelStyles: '.panel-stub{}',
     IframePanel: () => h('iframe', { class: 'panel-frame-stub' }),
   }
 })

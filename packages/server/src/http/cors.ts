@@ -50,7 +50,9 @@ export function corsHeaders(input: CorsInput): Record<string, string> {
   if (allowOrigin === null) return { vary: 'Origin' }
   return {
     'access-control-allow-origin': allowOrigin,
-    'access-control-expose-headers': 'x-sitebot-request-id',
+    // Retry-After drives the widget's 429 countdown (docs/07 §10); a
+    // cross-origin script cannot read it unless it is exposed.
+    'access-control-expose-headers': 'x-sitebot-request-id, retry-after',
     vary: 'Origin',
   }
 }

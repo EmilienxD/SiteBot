@@ -214,7 +214,8 @@ Rules:
 1. A checkpoint is bound to `(sessionId, runId)`. Presenting a `runId` from another session is a 403.
 2. Checkpoints expire after `agent.stopWhen.seconds × 10` or 15 minutes, whichever is greater. Expired resume → `410 run_expired`, widget renders "This request timed out".
 3. A `deny` decision resumes the loop with a tool result of `{ error: "user_denied" }`, letting the model respond gracefully rather than dying.
-4. Because state lives in the session store, **the user can reload the page and still resume** — the widget rehydrates pending approvals from `GET /api/chat/config`'s session probe. This is why `storage.type: none` forbids agent mode.
+4. **An approved client tool takes two round trips.** The server has no executor for it, so the approval resume does not call the model. It moves the tool part to `input-available`, keeps the checkpoint, and answers with only `data-client-tool-call` for the released calls. The widget runs them, then resumes again with `clientToolResults`, and that resume continues the loop. A denied client tool resumes the model directly, as in rule 3.
+5. Because state lives in the session store, **the user can reload the page and still resume** — the widget rehydrates pending approvals from `GET /api/chat/config`'s session probe. This is why `storage.type: none` forbids agent mode.
 
 ---
 
@@ -364,8 +365,9 @@ Performed by the widget, on open and on `refreshPageContext()`. Deterministic al
 2. Select the content root: first match of `ui.extract.selector` (default `main, article, [role="main"]`), else `document.body`.
 3. Clone it, remove `script`, `style`, `noscript`, `nav`, `footer`, `aside`, `svg`, `[aria-hidden="true"]`, and any `ui.extract.strip` selectors, plus the widget's own host element.
 4. Convert to text preserving heading hierarchy (`# `, `## `) and list markers; collapse whitespace.
-5. Truncate to 4000 characters at a sentence boundary, appending `…[truncated]`.
-6. Capture `window.getSelection().toString()` if non-empty and ≤ 1000 chars.
+5. Outline up to 5 forms that have a usable selector (a simple `id`, or `name`), one line each: `[Form #wholesale-form: email (email), volume (select: 5-20 "5–20 kg" | 50+ "Over 50 kg")]`. Field names, types and select/radio options only — never current values, and never hidden, password or file inputs. The outline is capped at 1200 characters and appended after the text, which gets the rest of the budget, so `fill_form` sees valid options instead of guessing.
+6. Truncate the text to 4000 characters, less the outline's length, at a sentence boundary, appending `…[truncated]`.
+7. Capture `window.getSelection().toString()` if non-empty and ≤ 1000 chars.
 
 Cost control: the extract is hashed; if the hash is unchanged from the previous request in the same session, the widget sends `extractHash` instead of `extract` and the server reuses the stored copy.
 
@@ -376,5 +378,5 @@ Cost control: the extract is hashed; if the hash is unchanged from the previous 
 - **SSE, not WebSockets.** Works through every proxy and CDN, no connection state to manage, native `EventSource` semantics, and it is what the AI SDK emits. WebSockets buy nothing here — the interaction is strictly request/response-with-streaming.
 - **POST + `fetch` streaming**, not `EventSource` — `EventSource` cannot POST a body.
 - **Abort:** the widget's Stop button aborts the `fetch`; the server sees `signal` fire and cancels the model call and any in-flight tool calls.
-- **Reconnect:** on network drop mid-stream the widget retries once with `trigger: "resume"` and the last `runId`. If the server has no checkpoint (the run completed), it returns the finished assistant message from the session store.
+- **Reconnect:** on a network drop mid-stream the widget silently retries once with `trigger: "regenerate"`, dropping the partial assistant message first. The server dedupes the user turn by message id, so the retry cannot double it. A second failure shows an error bubble with a manual Retry. `trigger: "resume"` is reserved for suspended runs (§5) and is never used for reconnection: it needs an approval or client-tool result, and a dropped stream has neither.
 - **Compression:** `Content-Encoding` must not be applied to the SSE response by intermediaries; the server sets `X-Accel-Buffering: no` and `Cache-Control: no-transform` to defeat nginx/Cloudflare buffering.

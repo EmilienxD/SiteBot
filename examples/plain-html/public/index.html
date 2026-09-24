@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harbor &amp; Pine Coffee Roasters</title>
+    <meta
+      name="description"
+      content="Small-batch coffee roasted weekly in Portland, Maine. Beans, subscriptions and wholesale."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site">
+      <a class="brand" href="/">Harbor &amp; Pine</a>
+      <nav>
+        <a href="/shop">Shop</a>
+        <a href="/brewing">Brewing</a>
+        <a href="/wholesale">Wholesale</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Coffee roasted on Tuesday, in your cup by Friday.</h1>
+      <p class="lede">
+        We are a six-person roastery on Commercial Street in Portland, Maine. Every bag is roasted
+        to order in 12 kg batches and ships within 48 hours of roasting.
+      </p>
+
+      <h2 id="visit">Visit the roastery</h2>
+      <p>
+        The café at 214 Commercial Street is open Monday to Friday 7:00–16:00 and weekends
+        8:00–15:00. Public cuppings run every Saturday at 10:00 and are free — no booking needed.
+      </p>
+
+      <h2 id="shipping">Shipping</h2>
+      <p>
+        Orders placed before noon Eastern ship the same day. Shipping is free on orders over $45 in
+        the continental US; otherwise it is a flat $6. We do not ship outside the US yet.
+      </p>
+
+      <h2 id="subscriptions">Subscriptions</h2>
+      <p>
+        A subscription sends a fresh bag every 1, 2 or 4 weeks and takes 10% off every order. You
+        can pause, skip or cancel from your account at any time, with no minimum commitment.
+      </p>
+    </main>
+
+    <footer class="site">
+      © Harbor &amp; Pine Coffee Roasters · 214 Commercial St, Portland, ME ·
+      <a href="mailto:hello@harborandpine.example">hello@harborandpine.example</a>
+    </footer>
+
+    <!--
+      The whole integration: one script tag. `sitebot dev --static public`
+      serves /sitebot.js from the installed @sitebot/widget; in production,
+      point src at the CDN build (see README.md).
+    -->
+    <script type="module" src="/sitebot.js" data-endpoint="/api/chat"></script>
+  </body>
+</html>

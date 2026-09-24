@@ -1,10 +1,11 @@
 import type { Knowledge } from '@sitebot/config'
 import { EngineError } from '../stream/errors.js'
+import { createVectorStore } from '../knowledge/create-store.js'
+import { loadModuleExport, parseModuleSpec } from '../modules.js'
 import { MemoryVectorStore } from '../knowledge/memory-store.js'
 import type { Chunk, VectorStore } from '../knowledge/store.js'
 import { createPgVectorStore } from './vector-pgvector.js'
 import { createSqliteVectorStore } from './vector-sqlite.js'
-import { createUpstashVectorStore } from './vector-upstash.js'
 
 /**
  * `knowledge.store` → a `VectorStore` — the Node-side counterpart of
@@ -19,12 +20,10 @@ export async function createNodeVectorStore(
   options: { model?: string; baseDir?: string | null } = {},
 ): Promise<VectorStore> {
   switch (store.type) {
+    case 'upstash':
+      return createVectorStore(store, options)
     case 'memory': {
-      if (store.path === undefined) {
-        return new MemoryVectorStore({
-          ...(options.model === undefined ? {} : { model: options.model }),
-        })
-      }
+      if (store.path === undefined) return createVectorStore(store, options)
       const { readFile, writeFile, rename, mkdir } = await import('node:fs/promises')
       const { dirname, resolve } = await import('node:path')
       const file = resolve(options.baseDir ?? process.cwd(), store.path)
@@ -48,28 +47,32 @@ export async function createNodeVectorStore(
       })
       return memory
     }
-    case 'sqlite':
+    case 'sqlite': {
+      const { isAbsolute, resolve } = await import('node:path')
       return createSqliteVectorStore({
-        path: store.path,
+        // Relative to the config file, like every other path in it.
+        path:
+          store.path === ':memory:' || isAbsolute(store.path)
+            ? store.path
+            : resolve(options.baseDir ?? process.cwd(), store.path),
         ...(options.model === undefined ? {} : { model: options.model }),
       })
+    }
     case 'pgvector':
       return createPgVectorStore({
         url: store.url,
         table: store.table,
         ...(options.model === undefined ? {} : { model: options.model }),
       })
-    case 'upstash':
-      return createUpstashVectorStore({
-        url: store.url,
-        token: store.token,
-        ...(options.model === undefined ? {} : { model: options.model }),
-      })
     case 'custom': {
-      const resolved = new URL(store.module, `file://${options.baseDir ?? process.cwd()}/`).href
-      const module = (await import(/* @vite-ignore */ resolved)) as Record<string, unknown>
-      for (const exportName of ['createVectorStore', 'default']) {
-        const candidate = module[exportName]
+      // A module path, optionally `#exportName`; without one, the conventional
+      // `createVectorStore` export is tried before `default`.
+      const { path, exportName } = parseModuleSpec(store.module, '')
+      for (const name of exportName ? [exportName] : ['createVectorStore', 'default']) {
+        const candidate = await loadModuleExport(path, name, {
+          baseDir: options.baseDir,
+          kind: 'Vector store',
+        }).catch(() => undefined)
         if (typeof candidate !== 'function') continue
         const built = (await (candidate as (o: unknown) => Promise<VectorStore>)(store)) as
           VectorStore | undefined

@@ -1,6 +1,7 @@
 import { embedMany, type EmbeddingModel } from 'ai'
 import type { Knowledge } from '@sitebot/config'
-import { isModuleNotFound, readEnv } from '@sitebot/core'
+import { providerInstallSpec } from '@sitebot/config'
+import { importOptional, isModuleNotFound, readEnv } from '@sitebot/core'
 
 /** The embedding block from the resolved config, non-optional. */
 export type EmbeddingConfigLike = NonNullable<Knowledge['embedding']>
@@ -9,7 +10,7 @@ export type EmbeddingConfigLike = NonNullable<Knowledge['embedding']>
 function hint(provider: string, specifier: string): Error {
   return new Error(
     `Embedding provider "${provider}" requires an optional dependency.\n` +
-      `  Install it:  pnpm add ${specifier}`,
+      `  Install it:  pnpm add ${providerInstallSpec(specifier)}`,
   )
 }
 
@@ -64,7 +65,9 @@ async function loadPackage(provider: EmbeddingConfig['provider']): Promise<Loade
   const specifier = PACKAGES[provider]
   if (specifier === null) return null
   try {
-    return (await import(/* @vite-ignore */ specifier)) as Loaded
+    // Resolved from the project too, not only from this package — see
+    // importOptional in @sitebot/core.
+    return await importOptional(specifier)
   } catch (error) {
     if (isModuleNotFound(error, specifier)) throw hint(provider, specifier)
     throw error

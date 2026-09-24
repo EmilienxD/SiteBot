@@ -7,6 +7,12 @@ export interface ClientToolOptions {
   config: PublicConfig
   pageContext: () => Promise<PageContext | null>
   registered: Map<string, ClientToolHandler>
+  /**
+   * Performs a same-tab navigation. The controller defers it until the run
+   * has finished — navigating at once would unload the page before the tool
+   * result reached the server. Defaults to `location.assign`.
+   */
+  navigate?: (path: string) => void
 }
 
 export async function runClientTool(
@@ -16,9 +22,10 @@ export async function runClientTool(
 ): Promise<unknown> {
   if (!options.config.capabilities.clientTools.includes(name))
     throw new Error(`Client tool "${name}" is not allowed by the server.`)
-  const result = options.registered.has(name)
-    ? await options.registered.get(name)?.(input)
-    : await builtinClientTool(name, input, options)
+  // The allowlist is by tool name; the implementation is by executor id.
+  const id = options.config.capabilities.clientToolIds?.[name] ?? name
+  const registered = options.registered.get(name) ?? options.registered.get(id)
+  const result = registered ? await registered(input) : await builtinClientTool(id, input, options)
   return capResult(result)
 }
 
@@ -43,27 +50,15 @@ async function builtinClientTool(
     case 'navigate': {
       const path = typeof value.path === 'string' ? value.path : ''
       if (!isAllowedPath(path, options.config)) throw new Error('Navigation target is not allowed.')
-      history.pushState({}, '', path)
+      // A real navigation, not `history.pushState`: on a multi-page site a
+      // pushed URL changes the address bar and nothing else. SPAs register
+      // their router instead — `SiteBot.registerTool('navigate', router.push)`
+      // — and a registered handler always wins over this builtin.
+      ;(options.navigate ?? ((target: string) => location.assign(target)))(path)
       return { navigated: true, path }
     }
-    case 'fill_form': {
-      const form = query(value.selector)
-      if (!(form instanceof HTMLFormElement)) return { filled: false, reason: 'form_not_found' }
-      const fields = asRecord(value.fields)
-      for (const [name, fieldValue] of Object.entries(fields)) {
-        const control = form.elements.namedItem(name)
-        if (
-          control instanceof HTMLInputElement ||
-          control instanceof HTMLTextAreaElement ||
-          control instanceof HTMLSelectElement
-        ) {
-          control.value = String(fieldValue ?? '')
-          control.dispatchEvent(new Event('input', { bubbles: true }))
-          control.dispatchEvent(new Event('change', { bubbles: true }))
-        }
-      }
-      return { filled: true }
-    }
+    case 'fill_form':
+      return fillForm(value)
     case 'read_element': {
       const selector = typeof value.selector === 'string' ? value.selector : ''
       const element = query(selector)
@@ -94,6 +89,141 @@ async function builtinClientTool(
     default:
       throw new Error(`No client tool handler registered for "${name}".`)
   }
+}
+
+interface FieldRejection {
+  field: string
+  reason: 'invalid_option' | 'invalid_value' | 'read_only' | 'unsupported'
+  options?: { value: string; label: string }[]
+}
+
+/**
+ * Sets each named field, then reads it back: a `<select>` given a value that
+ * is none of its options silently ends up with nothing chosen, and the model
+ * must not tell the visitor a form is filled when it isn't. Never submits.
+ */
+function fillForm(value: Record<string, unknown>): unknown {
+  const form = query(value.selector)
+  if (!(form instanceof HTMLFormElement)) return { filled: false, reason: 'form_not_found' }
+  const filledFields: string[] = []
+  const rejected: FieldRejection[] = []
+  const missing: string[] = []
+  for (const [name, fieldValue] of Object.entries(asRecord(value.fields))) {
+    const control = form.elements.namedItem(name)
+    const requested = fieldValue === null || fieldValue === undefined ? '' : String(fieldValue)
+    const outcome = control === null ? 'missing' : setControl(control, requested, fieldValue)
+    if (outcome === 'missing') missing.push(name)
+    else if (outcome === true) filledFields.push(name)
+    else rejected.push({ field: name, ...outcome })
+  }
+  return {
+    filled: filledFields.length > 0 && rejected.length === 0 && missing.length === 0,
+    filledFields,
+    rejected,
+    missing,
+  }
+}
+
+function setControl(
+  control: Element | RadioNodeList,
+  requested: string,
+  raw: unknown,
+): true | Omit<FieldRejection, 'field'> {
+  if (control instanceof RadioNodeList) {
+    const radios = [...control].filter(
+      (node): node is HTMLInputElement => node instanceof HTMLInputElement && node.type === 'radio',
+    )
+    if (radios.length === 0) return { reason: 'unsupported' }
+    const choices = radios.map((radio) => ({ value: radio.value, label: labelOf(radio) }))
+    const index = matchChoice(choices, requested)
+    const radio = index === -1 ? undefined : radios[index]
+    if (radio === undefined) return { reason: 'invalid_option', options: choices }
+    if (radio.disabled) return { reason: 'read_only' }
+    radio.checked = true
+    notify(radio)
+    return true
+  }
+  if (control instanceof HTMLSelectElement) {
+    if (control.disabled) return { reason: 'read_only' }
+    const options = [...control.options].filter((option) => !option.disabled)
+    const choices = options.map((option) => ({ value: option.value, label: optionLabel(option) }))
+    const index = matchChoice(choices, requested)
+    const option = index === -1 ? undefined : options[index]
+    if (option === undefined)
+      return {
+        reason: 'invalid_option',
+        options: choices.filter((choice) => choice.value !== '').slice(0, 50),
+      }
+    control.value = option.value
+    notify(control)
+    return control.value === option.value ? true : { reason: 'invalid_value' }
+  }
+  if (control instanceof HTMLInputElement) {
+    if (control.disabled || control.readOnly) return { reason: 'read_only' }
+    // Hidden fields carry server state (prices, ids) the visitor never sees.
+    if (control.type === 'hidden' || control.type === 'file') return { reason: 'unsupported' }
+    if (control.type === 'checkbox' || control.type === 'radio') {
+      control.checked = isTruthy(raw, control.value)
+      notify(control)
+      return true
+    }
+    control.value = requested
+    notify(control)
+    // Typed inputs (number, date, email…) sanitise a malformed value to ''.
+    return control.value === requested ? true : { reason: 'invalid_value' }
+  }
+  if (control instanceof HTMLTextAreaElement) {
+    if (control.disabled || control.readOnly) return { reason: 'read_only' }
+    control.value = requested
+    notify(control)
+    return true
+  }
+  return { reason: 'unsupported' }
+}
+
+/** Exact value, then exact label, then a loose match ("5 – 20 kg" ≈ "5-20kg"). */
+function matchChoice(choices: { value: string; label: string }[], requested: string): number {
+  const loose = normalizeChoice(requested)
+  const finders: ((choice: { value: string; label: string }) => boolean)[] = [
+    (choice) => choice.value === requested,
+    (choice) => choice.label === requested,
+    (choice) => normalizeChoice(choice.value) === loose,
+    (choice) => normalizeChoice(choice.label) === loose,
+  ]
+  for (const find of finders) {
+    const index = choices.findIndex(find)
+    if (index !== -1) return index
+  }
+  return -1
+}
+function normalizeChoice(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[‐-―−]/g, '-')
+    .replace(/\s+/g, '')
+}
+function optionLabel(option: HTMLOptionElement): string {
+  return (option.label || option.textContent || '').trim()
+}
+function labelOf(input: HTMLInputElement): string {
+  return [...(input.labels ?? [])]
+    .map((label) => label.textContent ?? '')
+    .join(' ')
+    .trim()
+}
+function isTruthy(raw: unknown, controlValue: string): boolean {
+  if (typeof raw === 'boolean') return raw
+  const text = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+  const accepted = ['true', 'yes', 'on', '1', 'checked']
+  if (controlValue !== '') accepted.push(controlValue.toLowerCase())
+  return accepted.includes(text)
+}
+function notify(control: HTMLElement): void {
+  control.dispatchEvent(new Event('input', { bubbles: true }))
+  control.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 function query(selector: unknown): Element | null {

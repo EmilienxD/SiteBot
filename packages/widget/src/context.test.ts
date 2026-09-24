@@ -24,6 +24,34 @@ describe('extractPageContext', () => {
     expect(context?.meta).toEqual({ 'og:type': 'article' })
   })
 
+  it('outlines forms with their select and radio options but never their values', async () => {
+    document.body.innerHTML = `<main><p>${'Long text. '.repeat(600)}</p>
+      <form id="wholesale-form">
+        <input name="email" type="email" value="me@example.com">
+        <input name="token" type="hidden" value="s3cret">
+        <select name="volume">
+          <option value="">Choose…</option>
+          <option value="5-20">5–20 kg</option>
+          <option value="50+">Over 50 kg</option>
+        </select>
+        <label><input type="radio" name="roast" value="light"> Light</label>
+        <label><input type="radio" name="roast" value="dark"> Dark</label>
+      </form>
+      <form class="redacted"><select name="card"><option value="x">X</option></select></form>
+    </main>`
+    const ui = structuredClone(defaultConfig.ui)
+    ui.pageContext.redactSelectors = ['.redacted']
+    const context = await extractPageContext(ui)
+    // Kept whole even though the page text overflows the extract budget.
+    expect(context?.extract).toContain(
+      '[Form #wholesale-form: email (email), volume (select: 5-20 "5–20 kg" | 50+ "Over 50 kg"), roast (radio: light "Light" | dark "Dark")]',
+    )
+    expect(context?.extract?.length).toBeLessThanOrEqual(4000)
+    expect(context?.extract).not.toContain('me@example.com')
+    expect(context?.extract).not.toContain('token')
+    expect(context?.extract).not.toContain('card')
+  })
+
   it('uses extractHash without resending unchanged text', async () => {
     const first = await extractPageContext(defaultConfig.ui)
     const second = await extractPageContext(defaultConfig.ui, first?.extractHash)

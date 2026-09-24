@@ -51,23 +51,22 @@ import { ChatWidget } from '@sitebot/react'
 
 | Chunk                                          | Budget           |
 | ---------------------------------------------- | ---------------- |
-| Launcher (initial: `sitebot.js` + `-shared.js`) | ≤ 15 KB gzip     |
-| Panel (lazy: `sitebot-panel.js`)               | ≤ 66 KB gzip     |
-| **Total**                                      | **≤ 80 KB gzip** |
+| Launcher (initial: `sitebot.js` + `-shared.js`) | ≤ 14 KB gzip     |
+| Panel (lazy: `sitebot-panel.js`)               | ≤ 24 KB gzip     |
+| **Total**                                      | **≤ 38 KB gzip** |
 
-Preact + `@preact/signals` ≈ 6 KB of the initial payload. Markdown rendering uses a ~3 KB subset renderer, not `marked`/`remark`.
+The initial payload is Preact, the custom element, the token stylesheet and the
+launcher — about 13 KB. The panel chunk carries the component tree, its
+stylesheet, the markdown renderer (a ~3 KB whitelist subset, not
+`marked`/`remark`), `@preact/signals`, and the chat client.
 
-The panel budget is dominated by one dependency: the `ai` package supplies the
-chat client (`AbstractChat`, `DefaultChatTransport`) and, through it, `zod` and
-the JSON-schema machinery — ~55 KB gzip on its own, tree-shaken, which is why
-the lazy split is load-bearing rather than cosmetic. The number the user feels
-is the initial one, and that is a launcher-sized 14 KB; the panel is paid for
-only by someone who opens the chat. Getting the total under ~25 KB means
-replacing `ai`'s chat client with an in-house UI-message-stream reader, which
-buys a smaller download at the cost of owning the wire protocol the server
-emits — a deliberate trade to make on its own, not a side effect of a bundle
-tweak. The budgets above are the enforced ceiling for the current dependency
-set; tighten them if that changes.
+The chat client is in-house (`src/ui-stream.ts`), not the `ai` package's
+`AbstractChat`: that one pulled `zod` and the JSON-schema machinery into the
+browser for ~55 KB gzip, more than the rest of the widget combined. The cost of
+the trade is owning the client side of the wire protocol, so the reader is held
+to the server's output by a conformance test that replays streams produced by
+the real AI SDK and compares the result with the SDK's own reader. `ai` stays a
+dev dependency of the widget for exactly that test.
 
 ---
 
@@ -97,7 +96,7 @@ Why closed shadow root: the host page's CSS cannot reach in, _and_ the host page
 | Host `overflow: hidden` on body when we open  | We never modify `body` styles except an opt-in scroll lock on mobile                                                                   |
 | CSP blocking inline styles                    | Bundle ships a `<style>` element, not `style=` attributes; document the `style-src 'unsafe-inline'` requirement and offer `data-nonce` |
 
-`ui.isolation: iframe` swaps the panel into a same-origin `<iframe srcdoc>` with `postMessage` bridging, for sites whose CSP forbids inline styles or whose JS is genuinely hostile. The launcher stays in the shadow root either way. Client tools still work — the bridge forwards them to the parent frame.
+`ui.isolation: iframe` swaps the panel into a same-origin `about:blank` `<iframe>`, for sites whose stylesheets are aggressive enough to leak into a shadow root (inherited properties, `all:` resets) or that need the panel to have its own document for focus, `dir` and zoom. The frame document is built with DOM calls, not `srcdoc`: `srcdoc` navigates and replaces the document inserted with the frame. There is no `postMessage` bridge. The Preact tree and the chat controller live in the parent window and render *into* the frame, so client tools run in the parent realm against the host document. The launcher stays in the shadow root either way. This mode does not help against a CSP that forbids inline styles; use `data-nonce` for that.
 
 ---
 
@@ -358,7 +357,7 @@ Non-negotiable, and cheap to get right at build time rather than retrofit.
 | Condition                                        | Behaviour                                                                                                                         |
 | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
 | `/config` fetch fails                            | Launcher renders with built-in defaults; panel shows a retry state on open                                                        |
-| Network drop mid-stream                          | One automatic `resume` retry; then an error bubble with manual Retry                                                              |
+| Network drop mid-stream                          | One silent automatic retry of the same request; then an error bubble with manual Retry                                            |
 | `429`                                            | Error bubble with the `Retry-After` countdown; composer disabled until it elapses                                                 |
 | `budget_exceeded`                                | Friendly message from config; composer disabled                                                                                   |
 | Provider down                                    | "I'm having trouble right now" + Retry; the underlying error is never shown                                                       |

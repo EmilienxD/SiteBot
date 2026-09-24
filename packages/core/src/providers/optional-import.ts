@@ -1,4 +1,4 @@
-import { PROVIDER_PACKAGES, type ProviderId } from '@sitebot/config'
+import { PROVIDER_PACKAGES, providerInstallSpec, type ProviderId } from '@sitebot/config'
 import { EngineError } from '../stream/errors.js'
 
 /**
@@ -16,7 +16,7 @@ import { EngineError } from '../stream/errors.js'
 type Loaded = Record<string, any>
 
 /** `import()` behind a variable, so nothing resolves it statically. */
-async function dynamicImport(specifier: string): Promise<Loaded> {
+export async function dynamicImport(specifier: string): Promise<Loaded> {
   return (await import(/* @vite-ignore */ /* webpackIgnore: true */ specifier)) as Loaded
 }
 
@@ -32,7 +32,9 @@ export function isModuleNotFound(error: unknown, specifier: string): boolean {
   if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') {
     const message = (error as { message?: unknown }).message
     if (typeof message !== 'string') return false
-    if (!/cannot find (module|package)|failed to resolve/i.test(message)) return false
+    // Node says "Cannot find package"; Vite, esbuild and friends say "Could
+    // not resolve" / "Failed to resolve".
+    if (!/cannot find (module|package)|(failed to|could not) resolve/i.test(message)) return false
     return message.includes(specifier)
   }
   const message = (error as { message?: unknown }).message
@@ -43,15 +45,87 @@ export function installHint(provider: ProviderId, specifier: string): EngineErro
   return new EngineError('not_ready', {
     message:
       `Provider "${provider}" requires an optional dependency.\n` +
-      `  Install it:  pnpm add ${specifier}`,
+      `  Install it:  pnpm add ${providerInstallSpec(specifier)}`,
     detail: `missing optional peer dependency ${specifier}`,
   })
 }
 
 /**
+ * Import an optional peer the way the *project* would see it.
+ *
+ * A bare `import()` resolves from wherever this file is installed. That is
+ * right for a flat `node_modules`, but under pnpm's isolated layout — and in
+ * any workspace where `@sitebot/core` is linked rather than installed — the
+ * project's own `@ai-sdk/anthropic` is invisible from here. So a miss falls
+ * back to resolving from the project: the config file's directory, then the
+ * working directory. `process.getBuiltinModule` reaches `node:module` without
+ * a static Node import, so this file stays edge-safe; on the edge the fallback
+ * simply does not exist and the original miss stands.
+ */
+export async function importOptional(
+  specifier: string,
+  options: { from?: Array<string | null | undefined> } = {},
+): Promise<Loaded> {
+  try {
+    return await dynamicImport(specifier)
+  } catch (error) {
+    if (!isModuleNotFound(error, specifier)) throw error
+    const fromProject = await importFromProject(specifier, options.from ?? [])
+    if (fromProject !== undefined) return fromProject
+    throw error
+  }
+}
+
+type BuiltinGetter = (id: string) => unknown
+interface NodeModuleApi {
+  createRequire(path: string): { resolve(specifier: string): string }
+}
+interface NodeUrlApi {
+  pathToFileURL(path: string): URL
+}
+
+async function importFromProject(
+  specifier: string,
+  from: Array<string | null | undefined>,
+): Promise<Loaded | undefined> {
+  const process = (
+    globalThis as {
+      process?: { getBuiltinModule?: BuiltinGetter; cwd?: () => string }
+    }
+  ).process
+  const getBuiltin = process?.getBuiltinModule
+  if (typeof getBuiltin !== 'function') return undefined
+  const nodeModule = getBuiltin('node:module') as NodeModuleApi | undefined
+  const nodeUrl = getBuiltin('node:url') as NodeUrlApi | undefined
+  if (nodeModule === undefined || nodeUrl === undefined) return undefined
+  const bases = [...from, process?.cwd?.()].filter(
+    (base): base is string => typeof base === 'string' && base !== '',
+  )
+  for (const base of new Set(bases)) {
+    let resolved: string
+    try {
+      resolved = nodeModule
+        .createRequire(`${base.replace(/[\\/]+$/, '')}/noop.js`)
+        .resolve(specifier)
+    } catch {
+      continue
+    }
+    const loaded = await dynamicImport(nodeUrl.pathToFileURL(resolved).href)
+    // A CommonJS build imported from ESM puts its exports on `default` when
+    // the lexer cannot see them; flatten so `createX` is found either way.
+    const fallback = loaded.default
+    return typeof fallback === 'object' && fallback !== null ? { ...fallback, ...loaded } : loaded
+  }
+  return undefined
+}
+
+/**
  * Import a provider SDK, translating a missing package into the install hint.
  */
-export async function importProviderPackage(provider: ProviderId): Promise<Loaded> {
+export async function importProviderPackage(
+  provider: ProviderId,
+  options: { baseDir?: string | null | undefined } = {},
+): Promise<Loaded> {
   const specifier = PROVIDER_PACKAGES[provider]
   if (specifier === null) {
     throw new EngineError('not_ready', {
@@ -59,7 +133,7 @@ export async function importProviderPackage(provider: ProviderId): Promise<Loade
     })
   }
   try {
-    return await dynamicImport(specifier)
+    return await importOptional(specifier, { from: [options.baseDir] })
   } catch (error) {
     if (isModuleNotFound(error, specifier)) throw installHint(provider, specifier)
     throw error

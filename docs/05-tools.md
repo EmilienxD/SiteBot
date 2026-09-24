@@ -282,7 +282,7 @@ server: rehydrate, inject the result, continue the loop
 | ------------------- | ---------------------------------------------------------------------------------- |
 | `highlight`         | `scrollIntoView({behavior:'smooth'})` + a temporary outline on the matched element |
 | `navigate`          | `location.assign(path)` or `history.pushState` for SPA routes                      |
-| `fill_form`         | Set values on named inputs within a form. **Never submits.**                       |
+| `fill_form`         | Set values on named inputs within a form, verified per field. **Never submits.**   |
 | `read_element`      | Return the text content of a selector (e.g. read the cart total)                   |
 | `get_page_context`  | Return a fresh extraction                                                          |
 | `open_url`          | `window.open` in a new tab                                                         |
@@ -309,11 +309,12 @@ window.SiteBot.registerTool('get_cart', () => ({
 
 1. **Server-declared allowlist wins.** The widget executes only names present in `capabilities.clientTools`. A `data-client-tool-call` for anything else is dropped and reported as an `error` event.
 2. `navigate` may only target paths declared in `siteContext.routes`, or matching `ui.behaviour.navigateAllowlist`. Open redirect is not acceptable.
-3. `fill_form` writes values but never dispatches submit. A model must not be able to place an order by filling a form.
+3. `fill_form` writes values but never dispatches submit. A model must not be able to place an order by filling a form. It reads each field back and returns `{ filled, filledFields, rejected, missing }`; `filled` is true only when every requested field took its value. A `<select>` or radio group accepts an option's value or its visible label (ignoring case, whitespace and dash style); anything else is rejected with `reason: 'invalid_option'` and the valid `options`, so the model can correct itself rather than tell the visitor a form is filled when it isn't. Hidden and file inputs are never written.
 4. `read_element` is subject to a `readSelectorDenylist` (default: `input[type=password]`, `[data-sensitive]`, `iframe`) so it cannot exfiltrate credentials.
 5. Client tool results are capped at 16 KB and validated against the tool's declared _output_ schema when one is supplied.
 6. Every client tool call is surfaced in the panel as a visible tool chip. Silent DOM manipulation driven by a model is not acceptable UX.
-7. Client tools that are not `readOnly` are subject to the same approval gate as server tools.
+7. Client tools that are not `readOnly` are subject to the same approval gate as server tools. Once approved, the call is handed to the page and does not run on the server. See [`03`](./03-protocol.md) §5 rule 4.
+8. The allowlist carries tool *names*, and `capabilities.clientToolIds` maps each name to its executor `id`. A tool named `highlight_section` with `executor: { type: client, id: highlight }` runs the built-in `highlight`. The widget never infers the executor from the name.
 
 ---
 

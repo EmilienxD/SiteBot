@@ -1,3 +1,4 @@
+import { importOptional } from '../providers/optional-import.js'
 import type {
   Chunk,
   QueryOptions,
@@ -43,7 +44,7 @@ export async function createPgVectorStore(options: PgVectorStoreOptions): Promis
   if (pool === undefined) {
     let pg: { Pool?: new (config: { connectionString: string }) => PgPool }
     try {
-      pg = (await import(optionalPeer('pg'))) as typeof pg
+      pg = (await importOptional('pg')) as typeof pg
     } catch (cause) {
       throw new Error(
         'knowledge.store "pgvector" requires the optional dependency pg.\n' +
@@ -65,15 +66,6 @@ function sanitizeTable(name: string): string {
       `pgvector table name "${name}" is not a valid SQL identifier (letters, digits, underscores only).`,
     )
   }
-  return name
-}
-
-/**
- * Optional-peer specifier behind a function call — TypeScript must not try to
- * resolve it statically, or the package would have to be installed to build
- * the lockfile of a project that does not use this store.
- */
-function optionalPeer(name: string): string {
   return name
 }
 

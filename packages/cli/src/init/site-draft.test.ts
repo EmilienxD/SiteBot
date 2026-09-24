@@ -33,7 +33,10 @@ const PAGE = `<!doctype html>
 
 /** A fetch that answers once with `body`, and records what it was asked. */
 function stubFetch(body: string, init: { status?: number } = {}) {
-  return vi.fn(async () => new Response(body, { status: init.status ?? 200 }))
+  return vi.fn(
+    async (_input: string | URL, _init?: RequestInit) =>
+      new Response(body, { status: init.status ?? 200 }),
+  )
 }
 
 const HOME = new URL('https://northwind.example.com/')
@@ -69,7 +72,9 @@ describe('draftSiteContext', () => {
     await draftSiteContext('https://northwind.example.com', {
       fetchImpl: fetchImpl as unknown as typeof fetch,
     })
-    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit & { headers: Record<string, string> }
+    const init = fetchImpl.mock.calls[0]?.[1] as unknown as RequestInit & {
+      headers: Record<string, string>
+    }
     expect(init.headers['user-agent']).toBe('sitebot-init')
     expect(init.headers.accept).toContain('text/html')
     expect(init.redirect).toBe('follow')
@@ -147,9 +152,9 @@ describe('extractDraft — company and description', () => {
   })
 
   it('falls back to the hostname when the page says nothing', () => {
-    expect(extractDraft('<html><body></body></html>', new URL('https://www.acme.com/')).company).toBe(
-      'Acme',
-    )
+    expect(
+      extractDraft('<html><body></body></html>', new URL('https://www.acme.com/')).company,
+    ).toBe('Acme')
   })
 
   it('falls back through og:description to the h1', () => {

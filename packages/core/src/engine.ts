@@ -297,6 +297,7 @@ export function createEngine(
       attempt: async (entry) => {
         const resolved = await resolveModel(entry, {
           ...(deps.adapters === undefined ? {} : { adapters: deps.adapters }),
+          baseDir: config.$meta.baseDir,
         })
 
         // The chunk stream only carries a redacted string; `classifyError`
@@ -516,8 +517,17 @@ export function createEngine(
               request.resume.runId,
               now(),
             )
-            session = await applyResume(loaded.session, loaded.pending, request.resume)
+            const resumed = await applyResume(loaded.session, loaded.pending, request.resume)
+            session = resumed.session
             await sessionStore.set(session)
+            if (resumed.handoffs.length > 0) {
+              return clientHandoffResponse(
+                ctx.requestId,
+                request.resume.runId,
+                loaded.pending.responseMessage.id,
+                resumed.handoffs,
+              )
+            }
             history = session.messages
             resumeRunId = request.resume.runId
           } else {
@@ -724,6 +734,7 @@ export function createEngine(
         try {
           const resolved = await resolveModel(chain[0] as (typeof chain)[number], {
             ...(deps.adapters === undefined ? {} : { adapters: deps.adapters }),
+            baseDir: config.$meta.baseDir,
           })
           providerCheck = { status: 'ok', latencyMs: now() - started, at: now() }
           checks.provider = {
@@ -864,9 +875,10 @@ export function createEngine(
     session: NonNullable<Awaited<ReturnType<SessionStore['get']>>>,
     pending: PendingRun,
     resume: NonNullable<ChatRequest['resume']>,
-  ): Promise<typeof session> {
+  ): Promise<{ session: typeof session; handoffs: ClientToolHandoff[] }> {
     let responseMessage = structuredClone(pending.responseMessage)
     let nextSession = session
+    const handoffs: ClientToolHandoff[] = []
 
     for (const approval of resume.approvals ?? []) {
       const part = findToolPart(
@@ -876,8 +888,14 @@ export function createEngine(
           candidate.approval?.id === approval.approvalId,
       )
       if (part === undefined) throw new CheckpointError('Approval replay was rejected.', 403)
-      part.state = 'approval-responded'
-      part.approval = { ...part.approval, approved: approval.decision === 'approve' }
+      const approved = approval.decision === 'approve'
+      part.approval = { ...part.approval, approved }
+      // An approved client tool has no server executor for the model run to
+      // call: it goes back to the page, which answers with `clientToolResults`.
+      if (approved && isClientTool(toolName(part)) && part.toolCallId !== undefined) {
+        part.state = 'input-available'
+        handoffs.push({ toolCallId: part.toolCallId, toolName: toolName(part), input: part.input })
+      } else part.state = 'approval-responded'
       if (approval.decision === 'approve' && config.agent.approvalPolicy === 'once-per-session') {
         nextSession = await grantApproval(nextSession, toolName(part), part.input)
       }
@@ -902,10 +920,43 @@ export function createEngine(
 
     responseMessage = { ...responseMessage, parts: responseMessage.parts }
     return {
-      ...nextSession,
-      messages: replaceOrAppend(nextSession.messages, responseMessage),
-      state: { ...nextSession.state, pendingRun: { ...pending, responseMessage } },
+      session: {
+        ...nextSession,
+        messages: replaceOrAppend(nextSession.messages, responseMessage),
+        state: { ...nextSession.state, pendingRun: { ...pending, responseMessage } },
+      },
+      handoffs,
     }
+  }
+
+  /**
+   * Answers a resume whose approvals released client tools: the page runs
+   * them and resumes again with results, so no model call happens yet. The
+   * pending run stays checkpointed for that second resume.
+   */
+  function clientHandoffResponse(
+    requestId: string,
+    runId: string,
+    messageId: string,
+    handoffs: ClientToolHandoff[],
+  ): Response {
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: 'start', messageId })
+        for (const call of handoffs) {
+          writer.write({
+            type: 'data-client-tool-call',
+            transient: true,
+            data: { runId, ...call },
+          } as UIMessageChunk)
+        }
+        writer.write({ type: 'finish', finishReason: 'tool-calls' } as UIMessageChunk)
+      },
+    })
+    return createUIMessageStreamResponse({
+      stream,
+      headers: { 'x-sitebot-request-id': requestId },
+    })
   }
 
   function isClientTool(name: string): boolean {
@@ -952,6 +1003,8 @@ function appendCitations(
     }),
   )
 }
+
+type ClientToolHandoff = { toolCallId: string; toolName: string; input: unknown }
 
 type MutableToolPart = {
   type: string

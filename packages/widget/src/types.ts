@@ -1,5 +1,22 @@
 import type { PublicConfig, Ui } from '@sitebot/config'
-import type { UIMessage } from 'ai'
+
+/**
+ * One part of a message, as the AI SDK UI Message Stream builds it — docs/03
+ * §3. Structural rather than imported from `ai`: the widget no longer ships
+ * that package (docs/07 §1), and the shape is the wire contract, not a type
+ * the SDK owns on our behalf.
+ */
+export interface UIPart {
+  type: string
+  [key: string]: unknown
+}
+
+export interface UIMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  parts: UIPart[]
+  metadata?: unknown
+}
 
 export type WidgetState =
   'idle' | 'submitted' | 'streaming' | 'executing-client-tool' | 'awaiting-approval' | 'error'
@@ -32,6 +49,24 @@ export interface InlineErrorData {
   code: string
   message: string
   retryable: boolean
+}
+
+/**
+ * A failed request, reduced to what the widget may show — docs/07 §10. The
+ * provider's own error text never reaches this type.
+ */
+export interface WidgetError {
+  code:
+    | 'network'
+    | 'rate_limited'
+    | 'budget_exceeded'
+    | 'run_expired'
+    | 'provider_error'
+    | (string & {})
+  message: string
+  retryable: boolean
+  /** Seconds, from `Retry-After`, for `rate_limited`. */
+  retryAfter?: number
 }
 
 export interface UsageData {
@@ -79,7 +114,7 @@ export interface WidgetController {
   config: PublicConfig
   readonly messages: UIMessage[]
   readonly state: WidgetState
-  readonly error?: Error
+  readonly error?: WidgetError
   readonly retryAfter?: number
   readonly composerDisabled: boolean
   readonly statusText?: string

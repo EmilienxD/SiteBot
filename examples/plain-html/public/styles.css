@@ -1,0 +1,125 @@
+/* Harbor & Pine — the example site's own styles. Deliberately opinionated
+   (a global reset, a serif stack, a coloured link rule) so the widget's
+   isolation is visibly doing its job: none of this reaches the chat panel. */
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+:root {
+  --ink: #1f2a24;
+  --paper: #f7f3ec;
+  --pine: #2f5d50;
+  --crema: #c98b4f;
+  color-scheme: light;
+}
+body {
+  font:
+    17px/1.65 Georgia,
+    'Times New Roman',
+    serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+a {
+  color: var(--pine);
+  font-weight: bold;
+}
+button {
+  font: inherit;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+header.site {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem clamp(1rem, 5vw, 4rem);
+  border-bottom: 2px solid var(--ink);
+}
+header.site .brand {
+  font-size: 1.35rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+header.site nav a {
+  margin-left: 1.5rem;
+  text-decoration: none;
+}
+main {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 3rem clamp(1rem, 5vw, 4rem) 8rem;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+h2 {
+  margin: 2.5rem 0 0.75rem;
+}
+p + p {
+  margin-top: 0.9rem;
+}
+.lede {
+  font-size: 1.25rem;
+  max-width: 40rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+.card {
+  background: #fff;
+  border: 2px solid var(--ink);
+  padding: 1.25rem;
+}
+.card .price {
+  color: var(--crema);
+  font-size: 1.35rem;
+  font-weight: bold;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 1rem;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #cbbfae;
+}
+form {
+  display: grid;
+  gap: 1rem;
+  max-width: 32rem;
+  margin-top: 1.5rem;
+}
+label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: bold;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 0.6rem;
+  border: 2px solid var(--ink);
+  background: #fff;
+}
+form button {
+  background: var(--pine);
+  color: #fff;
+  border: 0;
+  padding: 0.8rem 1.2rem;
+  cursor: pointer;
+}
+footer.site {
+  border-top: 2px solid var(--ink);
+  padding: 2rem clamp(1rem, 5vw, 4rem);
+  font-size: 0.9rem;
+}

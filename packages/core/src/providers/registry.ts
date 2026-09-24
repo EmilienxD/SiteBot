@@ -1,4 +1,10 @@
-import { didYouMean, PROVIDERS, type ProviderId } from '@sitebot/config'
+import {
+  didYouMean,
+  PROVIDER_PACKAGES,
+  PROVIDERS,
+  providerInstallSpec,
+  type ProviderId,
+} from '@sitebot/config'
 import type { Backend, BackendEntry } from '@sitebot/config'
 import type { LanguageModel } from 'ai'
 import { EngineError } from '../stream/errors.js'
@@ -18,6 +24,8 @@ export interface ResolvedModel {
 export interface ResolveOptions {
   /** Override the adapter table. Tests inject a stub; nothing else should. */
   adapters?: Partial<Record<ProviderId, ProviderFactory>>
+  /** The config file's directory, for `provider: custom` modules. */
+  baseDir?: string | null | undefined
 }
 
 export async function resolveModel(
@@ -34,7 +42,22 @@ export async function resolveModel(
     })
   }
 
-  const model = await factory(cfg)
+  const model = await factory(cfg, { baseDir: options.baseDir })
+  // ai@6 runs model spec v2 and v3. A provider package from another release
+  // line fails deep inside streamText with a message about "AI SDK 5"; saying
+  // which package and which range here is the difference between a fix and a
+  // search.
+  const spec = (model as { specificationVersion?: unknown }).specificationVersion
+  if (typeof spec === 'string' && spec !== 'v2' && spec !== 'v3') {
+    const pkg = PROVIDER_PACKAGES[cfg.provider]
+    throw new EngineError('not_ready', {
+      message:
+        `The installed ${pkg ?? 'provider package'} implements model spec ${spec}, which this SiteBot build cannot run.` +
+        (pkg === null
+          ? ''
+          : `\n  Install the compatible line:  pnpm add ${providerInstallSpec(pkg)}`),
+    })
+  }
   return { model, id: `${cfg.provider}:${cfg.model}`, entry: cfg }
 }
 

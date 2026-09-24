@@ -1,3 +1,4 @@
+import { importOptional } from '../providers/optional-import.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
@@ -62,7 +63,7 @@ async function openDatabase(path: string): Promise<SqliteDatabase> {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new sqlite.DatabaseSync(path)
   try {
-    const vec = (await import(optionalPeer('sqlite-vec'))) as {
+    const vec = (await importOptional('sqlite-vec')) as {
       getLoadablePath?: () => string
       load?: (db: unknown) => void
     }
@@ -204,11 +205,6 @@ class SqliteVectorStore implements VectorStore {
 // Cosine here would duplicate core's helper — re-export it through the
 // sibling import so there is one implementation.
 import { cosineSimilarity as cosine } from '../knowledge/store.js'
-
-/** See `optionalPeer` in vector-pgvector.ts — same reason. */
-function optionalPeer(name: string): string {
-  return name
-}
 
 function rowToChunk(row: ChunkRow): Chunk {
   return {

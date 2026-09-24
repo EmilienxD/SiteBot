@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { validateConfig } from '@sitebot/config'
@@ -98,6 +101,18 @@ describe('doctor diagnose (offline, no network)', () => {
     expect(secrets?.status).toBe('fail')
     expect(secrets?.detail).toContain('backend.apiKey')
   })
+
+  it('health-checks Node-only session storage instead of crashing on it', async () => {
+    // The edge-safe engine factory refuses sqlite; doctor must build the
+    // store itself, as `serve` does. Online, but the provider probe only
+    // resolves the model — no request leaves the machine.
+    const dir = await mkdtemp(join(tmpdir(), 'sitebot-doctor-'))
+    const report = await diagnose(
+      makeConfig({ storage: { type: 'sqlite', path: join(dir, 'sessions.db') } }),
+      { cwd: dir, env: {} },
+    )
+    expect(report.checks.find((check) => check.name === 'health storage')?.status).toBe('pass')
+  })
 })
 
 describe('Prompter', () => {
@@ -196,5 +211,69 @@ describe('formatMs', () => {
     expect(formatMs(120)).toBe('120ms')
     expect(formatMs(2500)).toBe('2.5s')
     expect(formatMs(90_000)).toBe('2m')
+  })
+})
+
+describe('doctor knowledge index (docs/06 §3.6)', () => {
+  const withKnowledge = () =>
+    makeConfig({
+      knowledge: {
+        sources: [{ type: 'text', id: 'faq', content: 'Support hours are 9-18.' }],
+        embedding: { provider: 'openai', model: 'text-embedding-3-small' },
+        store: { type: 'memory' },
+      },
+    })
+
+  async function indexCheck(manifest?: Record<string, unknown>) {
+    const cwd = await mkdtemp(join(tmpdir(), 'sitebot-doctor-'))
+    if (manifest) {
+      await mkdir(join(cwd, '.sitebot'), { recursive: true })
+      await writeFile(join(cwd, '.sitebot', 'manifest.json'), JSON.stringify(manifest))
+    }
+    const report = await diagnose(withKnowledge(), { cwd, env: {}, offline: true })
+    return report.checks.find((check) => check.name === 'knowledge index')
+  }
+  const manifest = (overrides: Record<string, unknown> = {}) => ({
+    version: 1,
+    model: 'text-embedding-3-small',
+    builtAt: new Date().toISOString(),
+    sources: {
+      faq: {
+        id: 'faq',
+        type: 'text',
+        label: 'faq',
+        documents: { a: { url: 'a', contentHash: 'h', chunkHashes: [] } },
+      },
+    },
+    ...overrides,
+  })
+
+  it('warns when the index was never built', async () => {
+    expect(await indexCheck()).toMatchObject({
+      status: 'warn',
+      fix: expect.stringContaining('sitebot ingest'),
+    })
+  })
+
+  it('passes for a fresh index built with the configured model', async () => {
+    expect(await indexCheck(manifest())).toMatchObject({
+      status: 'pass',
+      detail: expect.stringContaining('1 document, built today'),
+    })
+  })
+
+  it('fails when the configured embedding model differs from the index', async () => {
+    expect(await indexCheck(manifest({ model: 'text-embedding-3-large' }))).toMatchObject({
+      status: 'fail',
+      fix: expect.stringContaining('--force'),
+    })
+  })
+
+  it('warns when the index is older than the staleness window', async () => {
+    const builtAt = new Date(Date.now() - 30 * 86_400_000).toISOString()
+    expect(await indexCheck(manifest({ builtAt }))).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('30 days ago'),
+    })
   })
 })

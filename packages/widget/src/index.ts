@@ -1,18 +1,21 @@
-import { ELEMENT_NAME, SiteChatElement } from './element.js'
+import { ELEMENT_NAME, SiteChatElement, VERSION } from './element.js'
 import type { SiteBotApi, SiteBotEvent, SiteBotOptions } from './types.js'
 
-export { DEFAULT_Z_INDEX, ELEMENT_NAME, SiteChatElement } from './element.js'
+export { DEFAULT_Z_INDEX, ELEMENT_NAME, SiteChatElement, VERSION } from './element.js'
 export { storageKey } from './storage.js'
-export { extractPageContext, matchesAny } from './context.js'
+export { matchesAny } from './paths.js'
 export type {
   PageContext,
   SiteBotApi,
   SiteBotEvent,
   SiteBotOptions,
   WidgetController,
+  WidgetError,
   WidgetState,
 } from './types.js'
-export { runClientTool, registerClientTool, unregisterClientTool } from './client-tools.js'
+// The page-context extractor and client-tool runtime are not re-exported:
+// they belong to the lazy panel chunk, and an export here would pull them
+// into the launcher's initial payload (docs/07 §1).
 export type { ClientToolHandler, ClientToolOptions } from './client-tools.js'
 
 const queue: Array<(element: SiteChatElement) => void> = []
@@ -74,7 +77,7 @@ export const SiteBot: SiteBotApi = {
     }
   },
   ready,
-  version: '1.0.0',
+  version: VERSION,
 }
 /**
  * The tag that loaded us. `document.currentScript` is null inside a module

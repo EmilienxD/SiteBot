@@ -1,0 +1,137 @@
+# yaml-language-server: $schema=../../packages/config/schema/chatbot.schema.json
+#
+# A static site with no build step: four HTML files and this config.
+# `pnpm dev` serves both from one process — see README.md.
+
+version: 1
+name: Harbor & Pine
+mode: agent
+
+backend:
+  # Anthropic by default; the key is read from ANTHROPIC_API_KEY. To run fully
+  # local instead, set SITEBOT_PROVIDER=ollama and SITEBOT_MODEL=qwen2.5:14b
+  # (any Ollama model with tool calling) — no key needed.
+  provider: ${env.SITEBOT_PROVIDER:-anthropic}
+  model: ${env.SITEBOT_MODEL:-claude-sonnet-5}
+  maxOutputTokens: 800
+  temperature: 0.3
+
+prompt:
+  system: |
+    You are the assistant on Harbor & Pine's website, a small coffee roastery
+    in Portland, Maine. Help visitors choose coffee, brew it well, and find
+    their way around the site. Keep answers to two or three sentences.
+
+    Use the page the visitor is on and the site facts you are given. When you
+    point at something on the current page, use the highlight tool so they can
+    see it. If you do not know, say so and suggest the relevant page.
+  includePageContext: true
+  guardrails:
+    refuseOffTopic: true
+    offTopicMessage: I can only help with Harbor & Pine coffee, brewing and orders.
+
+siteContext:
+  company: Harbor & Pine Coffee Roasters
+  description: Small-batch specialty coffee roasted to order in Portland, Maine.
+  primaryUrl: http://localhost:3000
+  tone: Warm, brief and practical.
+  facts:
+    - Every bag is 340 g and ships within 48 hours of roasting.
+    - Free US shipping on orders over $45; otherwise a flat $6. No international shipping yet.
+    - Subscriptions take 10% off and can be paused or cancelled any time.
+    - The café at 214 Commercial Street opens Mon–Fri 7:00–16:00, weekends 8:00–15:00.
+  routes:
+    - path: /shop
+      summary: The four coffees, prices and bag sizes.
+    - path: /brewing
+      summary: Recipes for pour-over, French press, AeroPress and espresso.
+    - path: /wholesale
+      summary: Volume pricing for cafés and offices, and the wholesale inquiry form.
+
+# Sessions survive a restart. `node:sqlite` ships with Node 22.5+.
+storage:
+  type: sqlite
+  path: ./.sitebot/sessions.db
+  ttlSeconds: 86400
+
+agent:
+  maxSteps: 5
+  onMaxSteps: summarize
+  approvalPolicy: always
+
+tools:
+  - name: list_site_sections
+    description: |
+      List the pages of the Harbor & Pine site and what each covers.
+      Use when the visitor asks where to find something.
+    readOnly: true
+    executor: { type: builtin, id: list_site_sections }
+
+  - name: navigate
+    description: |
+      Take the visitor to another page of the site, e.g. /shop or /brewing.
+      Use only when they ask to go somewhere, not to answer a question.
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        path: { type: string, description: 'A site path such as /shop.' }
+      required: [path]
+    executor: { type: builtin, id: navigate }
+
+  - name: highlight_section
+    description: |
+      Scroll the visitor's current page to an element and outline it.
+      Use a CSS selector for an element on the page, e.g. "#pour-over" or "#huila".
+    readOnly: true
+    parameters:
+      type: object
+      properties:
+        selector: { type: string, description: 'CSS selector, e.g. #espresso' }
+      required: [selector]
+    executor: { type: client, id: highlight }
+
+  - name: fill_wholesale_form
+    description: |
+      Prefill the wholesale inquiry form on /wholesale with details the visitor gave.
+      Never submits — the visitor reviews and sends it themselves.
+    # Writes into the page, so the visitor approves it first (docs/05 §5 rule 7).
+    readOnly: false
+    requiresApproval: true
+    approvalRisk: low
+    approvalSummary: Prefill the wholesale inquiry form on this page. Nothing is sent.
+    parameters:
+      type: object
+      properties:
+        selector: { type: string, description: 'Always "#wholesale-form".' }
+        fields:
+          type: object
+          description: 'Field values keyed by input name: business, email, volume (one of 5-20, 20-50, 50+ — i.e. 5–20 kg, 20–50 kg, over 50 kg; if the amount fits none, ask), message.'
+      required: [selector, fields]
+    executor: { type: client, id: fill_form }
+
+ui:
+  panel:
+    title: Harbor & Pine
+  theme:
+    primary: '#2f5d50'
+  messages:
+    greeting: Hi! Looking for a coffee, a brew recipe, or wholesale info?
+    placeholder: Ask about our coffee…
+    suggestions:
+      - label: Which coffee for pour-over?
+        action:
+          { type: send, text: Which of your coffees is best for pour-over? }
+      - label: Show me the shop
+        action: { type: navigate, path: /shop }
+      - label: Wholesale pricing
+        action: { type: send, text: What does wholesale cost? }
+  footer:
+    text: AI answers can be wrong — check prices at checkout.
+    linkText: Privacy
+    linkUrl: /privacy
+
+security:
+  rateLimit:
+    perSession: 30/5m
+    perIp: 120/1h

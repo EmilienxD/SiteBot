@@ -11,7 +11,9 @@
 
 import { DEFAULT_BASE_PATH } from '@sitebot/server'
 import type { FlagSpecs } from '../args.js'
+import { resolve } from 'node:path'
 import { startListener, PortInUseError, untilShutdown } from './listener.js'
+import { resolveWidgetBundle, serveStatic } from './static.js'
 import {
   loadForCommand,
   reportConfigError,
@@ -32,12 +34,17 @@ export const SERVE_FLAGS: FlagSpecs = {
     summary: `Where the endpoints are mounted. Default ${DEFAULT_BASE_PATH}.`,
     placeholder: '<path>',
   },
+  static: {
+    type: 'string',
+    summary: 'Also serve this folder as the site, same-origin with the endpoints.',
+    placeholder: '<dir>',
+  },
 }
 
 export const DEFAULT_SERVE_PORT = 8787
 
 export async function runServe(context: CommandContext): Promise<CommandResult> {
-  const { ui, flags, env } = context
+  const { ui, flags, env, cwd } = context
 
   let loaded
   try {
@@ -61,6 +68,12 @@ export async function runServe(context: CommandContext): Promise<CommandResult> 
     return { exitCode: 1 }
   }
 
+  const staticDir = typeof flags['static'] === 'string' ? resolve(cwd, flags['static']) : undefined
+  // The widget bundle is served whenever it is installed, so a host page can
+  // load it from the sidecar (`<script src="https://chat.acme.com/sitebot.js">`)
+  // instead of a public CDN.
+  const widget = resolveWidgetBundle(cwd)
+
   let running
   try {
     running = await startListener({
@@ -68,6 +81,13 @@ export async function runServe(context: CommandContext): Promise<CommandResult> 
       basePath,
       host,
       port,
+      extraRoutes: (request, response) =>
+        serveStatic(request, response, {
+          dir: staticDir,
+          widget,
+          basePath,
+          cacheControl: 'public, max-age=300',
+        }),
       onResponse: ({ method, url, status, durationMs }) => {
         // One line per request, in a shape a log aggregator can parse.
         ui.line(
@@ -96,6 +116,8 @@ export async function runServe(context: CommandContext): Promise<CommandResult> 
     `${basePath}, ${basePath}/config, ${basePath}/feedback, ${basePath}/health`,
   )
   ui.detail('Probe:', '/health')
+  if (staticDir !== undefined) ui.detail('Site:', staticDir)
+  if (widget !== null) ui.detail('Widget:', '/sitebot.js')
 
   if (config.security.allowedOrigins.length === 0) {
     ui.warn(

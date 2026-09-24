@@ -245,6 +245,11 @@ for (const [name, factory] of Object.entries(TRANSPORTS)) {
       })
       expect(reply.headers.get('x-sitebot-request-id')).toMatch(/^req_/)
       expect(reply.headers.get('access-control-allow-origin')).toBe('https://acme.com')
+      // The widget reads both cross-origin: the id for support, Retry-After
+      // for the 429 countdown (docs/07 §10).
+      expect(reply.headers.get('access-control-expose-headers')).toBe(
+        'x-sitebot-request-id, retry-after',
+      )
       // docs/08 §7: we never use cookies, so this must never be sent.
       expect(reply.headers.get('access-control-allow-credentials')).toBeNull()
     })

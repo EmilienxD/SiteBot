@@ -8,7 +8,12 @@
  * for `init` to demonstrate the good pattern rather than describe it.
  */
 
-import { PROVIDER_ENV_VARS, PROVIDER_PACKAGES, type ProviderId } from '@sitebot/config'
+import {
+  PROVIDER_ENV_VARS,
+  PROVIDER_PACKAGES,
+  providerInstallSpec,
+  type ProviderId,
+} from '@sitebot/config'
 import type { Framework } from './detect.js'
 import type { SiteDraft } from './site-draft.js'
 
@@ -277,13 +282,15 @@ const LOADER_COMMENT = `/**
 /**
  * Node deps, wired by hand for the frameworks that have no adapter of their own.
  *
- * \`createSafeFetch\` is what stops an \`http\` tool being turned into a request
- * against 169.254.169.254 (docs/08-security.md §5). The Next.js and Node
- * adapters wire it for you; SvelteKit and Astro get a \`Request\` directly, so
- * their scaffold has to do it explicitly.
+ * \`withNodeRuntime\` adds what a Node host needs on top of the edge-safe
+ * handler: the SSRF guard for \`http\` tools (docs/08-security.md §5), the stdio
+ * MCP transport, and the sqlite/redis/postgres session and rate-limit stores.
+ * The Next.js and Node adapters apply it for you; Nuxt, SvelteKit and Astro
+ * hand over a \`Request\` directly, so their scaffold applies it explicitly.
  */
-const NODE_DEPS_COMMENT = `// createSafeFetch is the SSRF guard for \`http\` tools (docs/08-security.md §5).
-// Without it an http tool can be pointed at the cloud metadata endpoint.`
+const NODE_DEPS_COMMENT = `// withNodeRuntime wires the SSRF guard for \`http\` tools (docs/08-security.md §5)
+// and the Node-only session stores. Without it an http tool can be pointed at
+// the cloud metadata endpoint.`
 
 function nextAppRoute(answers: ScaffoldAnswers): string {
   return `import { loadConfig } from '@sitebot/config/node'
@@ -333,7 +340,7 @@ export default async function route(req: NextApiRequest, res: NextApiResponse): 
 function nuxtRoute(answers: ScaffoldAnswers): string {
   return `import { loadConfig } from '@sitebot/config/node'
 import { createSiteBotHandler, type SiteBotHandler } from '@sitebot/server'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
+import { withNodeRuntime } from '@sitebot/server/node'
 
 ${LOADER_COMMENT}
 
@@ -342,11 +349,10 @@ let handler: Promise<SiteBotHandler> | undefined
 function get(): Promise<SiteBotHandler> {
   handler ??= loadConfig(undefined, { dotenv: true }).then((config) => {
     ${NODE_DEPS_COMMENT.split('\n').join('\n    ')}
-    const safe = createSafeFetch()
-    return createSiteBotHandler(config, {
-      basePath: ${JSON.stringify(answers.basePath)},
-      deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp },
-    })
+    return createSiteBotHandler(
+      config,
+      withNodeRuntime(config, { basePath: ${JSON.stringify(answers.basePath)} }),
+    )
   })
   return handler
 }
@@ -359,7 +365,7 @@ export default defineEventHandler(async (event) => await (await get())(toWebRequ
 function svelteKitRoute(answers: ScaffoldAnswers): string {
   return `import { loadConfig } from '@sitebot/config/node'
 import { createSiteBotHandler, type SiteBotHandler } from '@sitebot/server'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
+import { withNodeRuntime } from '@sitebot/server/node'
 import type { RequestHandler } from './$types'
 
 ${LOADER_COMMENT}
@@ -369,11 +375,10 @@ let handler: Promise<SiteBotHandler> | undefined
 function get(): Promise<SiteBotHandler> {
   handler ??= loadConfig(undefined, { dotenv: true }).then((config) => {
     ${NODE_DEPS_COMMENT.split('\n').join('\n    ')}
-    const safe = createSafeFetch()
-    return createSiteBotHandler(config, {
-      basePath: ${JSON.stringify(answers.basePath)},
-      deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp },
-    })
+    return createSiteBotHandler(
+      config,
+      withNodeRuntime(config, { basePath: ${JSON.stringify(answers.basePath)} }),
+    )
   })
   return handler
 }
@@ -389,7 +394,7 @@ export const OPTIONS = dispatch
 function astroRoute(answers: ScaffoldAnswers): string {
   return `import { loadConfig } from '@sitebot/config/node'
 import { createSiteBotHandler, type SiteBotHandler } from '@sitebot/server'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
+import { withNodeRuntime } from '@sitebot/server/node'
 import type { APIRoute } from 'astro'
 
 ${LOADER_COMMENT}
@@ -402,11 +407,10 @@ let handler: Promise<SiteBotHandler> | undefined
 function get(): Promise<SiteBotHandler> {
   handler ??= loadConfig(undefined, { dotenv: true }).then((config) => {
     ${NODE_DEPS_COMMENT.split('\n').join('\n    ')}
-    const safe = createSafeFetch()
-    return createSiteBotHandler(config, {
-      basePath: ${JSON.stringify(answers.basePath)},
-      deps: { fetchImpl: safe.fetch, resolveHost: safe.resolveHost, connectStdioMcp },
-    })
+    return createSiteBotHandler(
+      config,
+      withNodeRuntime(config, { basePath: ${JSON.stringify(answers.basePath)} }),
+    )
   })
   return handler
 }
@@ -489,7 +493,7 @@ export function requiredPackages(answers: ScaffoldAnswers): string[] {
   const packages = ['@sitebot/config', '@sitebot/server']
   if (answers.framework === 'static') packages.push('@sitebot/cli')
   const provider = PROVIDER_PACKAGES[answers.provider]
-  if (provider !== null) packages.push(provider)
+  if (provider !== null) packages.push(providerInstallSpec(provider))
   if (!answers.selfHostWidget) return packages
   return [...packages, '@sitebot/widget']
 }

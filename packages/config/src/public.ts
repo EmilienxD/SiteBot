@@ -42,6 +42,12 @@ export interface PublicCapabilities {
    * for any name not in this list (docs/05-tools.md §5 rule 1).
    */
   clientTools: string[]
+  /**
+   * Tool name → the client implementation it runs, when they differ: a tool
+   * named `highlight_section` with `executor: { type: client, id: highlight }`
+   * runs the builtin `highlight`. Names absent here run under their own name.
+   */
+  clientToolIds?: Record<string, string>
   /** Server-declared routes that the navigate client tool may target. */
   routes: string[]
   authMode: AuthMode
@@ -70,9 +76,13 @@ export function toPublicConfig(
   const envPaths = config.$meta?.envPaths ?? []
 
   const clientTools: string[] = []
+  const clientToolIds: Record<string, string> = {}
   for (const entry of config.tools) {
     if (isMcpImport(entry) || entry.enabled === false) continue
-    if (entry.executor?.type === 'client') clientTools.push(entry.name)
+    if (entry.executor?.type === 'client') {
+      clientTools.push(entry.name)
+      if (entry.executor.id !== entry.name) clientToolIds[entry.name] = entry.executor.id
+    }
   }
 
   const publicConfig: PublicConfig = {
@@ -82,6 +92,7 @@ export function toPublicConfig(
       streaming: config.ui.behaviour.streaming,
       fileUpload: config.ui.behaviour.allowFileUpload,
       clientTools,
+      ...(Object.keys(clientToolIds).length > 0 ? { clientToolIds } : {}),
       routes: config.siteContext.routes.map((route) => route.path),
       authMode: config.security.auth.mode,
     },

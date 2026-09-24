@@ -16,9 +16,8 @@
  *   `--inspect` — the stream events themselves.
  */
 
-import { readFile, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { watch, type FSWatcher } from 'node:fs'
-import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { DEFAULT_BASE_PATH } from '@sitebot/server'
 import { findConfigFile } from '@sitebot/config/node'
@@ -27,6 +26,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { WIDGET_CDN_URL } from '../init/templates.js'
+import { resolveWidgetBundle, serveStatic } from './static.js'
 import { startListener, PortInUseError, untilShutdown, type RunningServer } from './listener.js'
 import {
   loadForCommand,
@@ -50,6 +50,11 @@ export const DEV_FLAGS: FlagSpecs = {
   },
   open: { type: 'boolean', summary: 'Open the playground page in a browser.' },
   inspect: { type: 'boolean', summary: 'Log request bodies and stream events.' },
+  static: {
+    type: 'string',
+    summary: 'Serve this folder as the site instead of the built-in playground page.',
+    placeholder: '<dir>',
+  },
   'no-watch': { type: 'boolean', summary: 'Do not hot-reload on config changes.' },
 }
 
@@ -73,6 +78,7 @@ export async function runDev(context: CommandContext): Promise<CommandResult> {
   const inspect = flags['inspect'] === true
 
   const widget = resolveWidgetBundle(cwd)
+  const staticDir = typeof flags['static'] === 'string' ? resolve(cwd, flags['static']) : undefined
 
   let running: RunningServer
   try {
@@ -82,7 +88,8 @@ export async function runDev(context: CommandContext): Promise<CommandResult> {
       host,
       port,
       version: 'dev',
-      extraRoutes: (request, response) => devRoutes(request, response, { basePath, widget }),
+      extraRoutes: (request, response) =>
+        devRoutes(request, response, { basePath, widget, staticDir }),
       onResponse: ({ method, url, status, durationMs }) => {
         if (!url.startsWith(basePath)) return
         const colour = status >= 500 ? 'red' : status >= 400 ? 'yellow' : 'green'
@@ -112,7 +119,7 @@ export async function runDev(context: CommandContext): Promise<CommandResult> {
 
   ui.line()
   ui.success(`sitebot dev — ${ui.style(running.url, 'cyan')}`)
-  ui.detail('Playground:', `${running.url}/`)
+  ui.detail(staticDir === undefined ? 'Playground:' : 'Site:      ', `${running.url}/`)
   ui.detail('Endpoint:  ', `${running.url}${basePath}`)
   ui.detail('Widget:    ', widget === null ? `${WIDGET_CDN_URL} (CDN)` : `${widget} (local)`)
   if (inspect) ui.detail('Inspector: ', 'on — request bodies and stream events are logged')
@@ -141,10 +148,9 @@ export async function runDev(context: CommandContext): Promise<CommandResult> {
 interface DevRouteOptions {
   basePath: string
   widget: string | null
+  /** `--static <dir>`: the developer's own site replaces the playground page. */
+  staticDir?: string | undefined
 }
-
-/** The widget entry and its sibling chunks — nothing else is served from disk. */
-const WIDGET_ASSET = /^\/sitebot(-[a-z][\da-z-]*)?\.js$/
 
 async function devRoutes(
   request: IncomingMessage,
@@ -153,7 +159,7 @@ async function devRoutes(
 ): Promise<boolean> {
   const path = (request.url ?? '/').split('?')[0] ?? '/'
 
-  if (path === '/' || path === '/index.html') {
+  if (options.staticDir === undefined && (path === '/' || path === '/index.html')) {
     send(response, 200, 'text/html; charset=utf-8', playgroundPage(options))
     return true
   }
@@ -162,16 +168,12 @@ async function devRoutes(
   // rather than whatever the CDN is currently serving. `/sitebot-*.js` covers
   // the lazy panel chunk (docs/07 §1), which the entry pulls in by name from
   // the same directory the moment the panel first opens.
-  if (WIDGET_ASSET.test(path) && options.widget !== null) {
-    const file = resolve(dirname(options.widget), path.slice(1))
-    const source = await readFile(file, 'utf8').catch(() => null)
-    if (source !== null) {
-      send(response, 200, 'text/javascript; charset=utf-8', source)
-      return true
-    }
-  }
-
-  return false
+  return serveStatic(request, response, {
+    dir: options.staticDir,
+    widget: options.widget,
+    basePath: options.basePath,
+    cacheControl: 'no-store',
+  })
 }
 
 function send(response: ServerResponse, status: number, type: string, body: string): void {
@@ -349,15 +351,6 @@ async function watchConfig(
  * project that has not installed the widget yet, which is precisely the state a
  * developer is in the first time they run it.
  */
-function resolveWidgetBundle(cwd: string): string | null {
-  try {
-    const require = createRequire(resolve(cwd, 'noop.js'))
-    return require.resolve('@sitebot/widget/sitebot.js')
-  } catch {
-    return null
-  }
-}
-
 async function openBrowser(url: string): Promise<void> {
   const { spawn } = await import('node:child_process')
   const command =

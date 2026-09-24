@@ -86,6 +86,9 @@ describe('toPublicConfig — the allowlist', () => {
       // Only client tools; the server-side ones are none of the browser's
       // business, and this list is the authoritative execution allowlist.
       clientTools: ['highlight_section', 'get_cart'],
+      // A tool whose name differs from its client implementation says which
+      // one to run; the widget allowlists by name and dispatches by id.
+      clientToolIds: { highlight_section: 'highlight' },
       routes: [],
       authMode: 'required',
     })

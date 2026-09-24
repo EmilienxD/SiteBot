@@ -1,5 +1,8 @@
 import type { Ui } from '@sitebot/config'
+import { matchesAny } from './paths.js'
 import type { PageContext } from './types.js'
+
+export { matchesAny }
 
 const REMOVE = 'script,style,noscript,nav,footer,aside,svg,[aria-hidden="true"],site-chat'
 
@@ -18,7 +21,10 @@ export async function extractPageContext(
       /* invalid selector */
     }
   }
-  const extract = truncate(toStructuredText(clone), 4000)
+  // Forms go last but are reserved room, so truncation never cuts them off.
+  const forms = describeForms(clone)
+  const text = truncate(toStructuredText(clone), 4000 - (forms ? forms.length + 1 : 0))
+  const extract = forms ? `${text}\n${forms}` : text
   const hash = await hashText(extract)
   const meta: Record<string, string> = {}
   document.querySelectorAll<HTMLMetaElement>('meta[property^="og:"]').forEach((node) => {
@@ -39,13 +45,6 @@ export async function extractPageContext(
   }
 }
 
-export function matchesAny(path: string, patterns: readonly string[]): boolean {
-  return patterns.some((pattern) =>
-    new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(
-      path,
-    ),
-  )
-}
 function toStructuredText(root: HTMLElement): string {
   const lines: string[] = []
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
@@ -63,6 +62,55 @@ function toStructuredText(root: HTMLElement): string {
     .replace(/\s+([.,!?;:])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
+}
+/**
+ * A compact outline of the page's forms — field names, types and the options
+ * of each select or radio group, never current values — so the model can
+ * call `fill_form` with values the form accepts instead of guessing.
+ */
+function describeForms(root: HTMLElement): string {
+  const out: string[] = []
+  for (const form of [...root.querySelectorAll('form')].slice(0, 5)) {
+    // Only a selector `fill_form` can use verbatim is worth describing.
+    const formName = form.getAttribute('name') ?? ''
+    const selector = /^[A-Za-z][\w-]*$/.test(form.id)
+      ? `#${form.id}`
+      : /^[\w-]+$/.test(formName)
+        ? `form[name="${formName}"]`
+        : null
+    if (selector === null) continue
+    const fields: string[] = []
+    const seen = new Set<string>()
+    for (const control of form.querySelectorAll<HTMLElement>('input,select,textarea')) {
+      const name = control.getAttribute('name')
+      if (!name || seen.has(name) || fields.length >= 20) continue
+      seen.add(name)
+      if (control instanceof HTMLSelectElement) {
+        const options = [...control.options]
+          .filter((option) => option.value !== '')
+          .slice(0, 20)
+          .map((option) => choice(option.value, option.textContent ?? ''))
+        fields.push(`${name} (select: ${options.join(' | ')})`)
+      } else if (control instanceof HTMLTextAreaElement) fields.push(`${name} (textarea)`)
+      else if (control instanceof HTMLInputElement) {
+        if (['hidden', 'password', 'file', 'submit', 'button', 'reset'].includes(control.type))
+          continue
+        if (control.type === 'radio') {
+          const options = [...form.querySelectorAll<HTMLInputElement>('input[type="radio"]')]
+            .filter((radio) => radio.name === name)
+            .slice(0, 20)
+            .map((radio) => choice(radio.value, radio.closest('label')?.textContent ?? ''))
+          fields.push(`${name} (radio: ${options.join(' | ')})`)
+        } else fields.push(`${name} (${control.type})`)
+      }
+    }
+    if (fields.length > 0) out.push(`[Form ${selector}: ${fields.join(', ')}]`)
+  }
+  return out.join('\n').slice(0, 1200)
+}
+function choice(value: string, label: string): string {
+  const text = label.replace(/\s+/g, ' ').trim()
+  return text && text !== value ? `${value} "${text}"` : value
 }
 function truncate(text: string, limit: number): string {
   if (text.length <= limit) return text

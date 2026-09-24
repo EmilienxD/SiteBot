@@ -1,13 +1,15 @@
-import { render } from 'preact'
+import { render, type JSX } from 'preact'
 import type { PublicConfig } from '@sitebot/config'
-import { matchesAny } from './context.js'
+import { matchesAny } from './paths.js'
 import { mergeConfig } from './defaults.js'
+import { Icon, LAUNCHER_GLYPHS } from './icons.js'
 import { readValue, storageKey, writeValue } from './storage.js'
 import { styles } from './styles.js'
-import type { Citation, SiteBotOptions, WidgetController } from './types.js'
+import type { Citation, SiteBotEvent, SiteBotOptions, WidgetController } from './types.js'
 
 export const ELEMENT_NAME = 'site-chat'
 export const DEFAULT_Z_INDEX = 2147483000
+export const VERSION = '1.0.0'
 
 /**
  * Type-only view of the lazy chunk: `import type` is erased at compile time, so
@@ -27,6 +29,8 @@ export class SiteChatElement extends HTMLElement {
   #controller?: WidgetController
   #chunk?: PanelChunk
   #config?: PublicConfig
+  #configFailed = false
+  #navigated = false
   #resolved?: ResolvedOptions
   #booting?: Promise<void>
   #loading?: Promise<void>
@@ -39,11 +43,16 @@ export class SiteChatElement extends HTMLElement {
   #open = false
   #options: SiteBotOptions = {}
   #launcher?: HTMLButtonElement
+  #cleanup: Array<() => void> = []
   #readyResolve!: () => void
   readonly ready: Promise<void> = new Promise((resolve) => (this.#readyResolve = resolve))
-  readonly version = '1.0.0'
+  readonly version = VERSION
+
   connectedCallback(): void {
     this.safe(() => void this.boot())
+  }
+  disconnectedCallback(): void {
+    for (const cleanup of this.#cleanup.splice(0)) cleanup()
   }
   configure(options: SiteBotOptions): void {
     this.#options = { ...this.#options, ...options }
@@ -51,18 +60,21 @@ export class SiteChatElement extends HTMLElement {
   }
   open(): void {
     this.safe(() => {
+      if (this.#open) return
       this.#open = true
       void this.load()
       this.render()
-      this.dispatch('open')
+      this.dispatch('open', {})
     })
   }
   close(): void {
     this.safe(() => {
+      if (!this.#open) return
       this.#open = false
       this.render()
+      // docs/07 §8: focus returns to the launcher on close.
       this.#launcher?.focus()
-      this.dispatch('close')
+      this.dispatch('close', {})
     })
   }
   toggle(): void {
@@ -81,12 +93,13 @@ export class SiteChatElement extends HTMLElement {
   reset(): void {
     this.safe(() => {
       this.withController((controller) => controller.reset())
-      this.dispatch('reset')
+      this.dispatch('reset', {})
     })
   }
   destroy(): void {
     this.safe(() => {
       this.#controller?.stop()
+      if (this.#mount) render(null, this.#mount)
       this.remove()
     })
   }
@@ -100,7 +113,10 @@ export class SiteChatElement extends HTMLElement {
     this.safe(() => this.withController((controller) => controller.setContext(data)))
   }
   setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void {
-    this.safe(() => this.withController((controller) => controller.setSuggestions(items)))
+    this.safe(() => {
+      if (this.#config) this.#config.ui.messages.suggestions = items
+      this.withController((controller) => controller.setSuggestions(items))
+    })
   }
   refreshPageContext(): void {
     this.safe(() =>
@@ -111,13 +127,21 @@ export class SiteChatElement extends HTMLElement {
       ),
     )
   }
+  registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void {
+    this.safe(() => this.withController((controller) => controller.registerTool(name, handler)))
+  }
+  unregisterTool(name: string): void {
+    this.safe(() => this.withController((controller) => controller.unregisterTool(name)))
+  }
 
   /**
    * The cheap half of boot: shadow root, styles, config, launcher. Guarded so
    * `connectedCallback` and `configure` can both call it and only one runs.
    */
   boot(): Promise<void> {
-    this.#booting ??= this.mount()
+    this.#booting ??= this.mount().catch((error: unknown) => {
+      console.warn('[SiteBot] failed to boot', error)
+    })
     return this.#booting
   }
 
@@ -131,31 +155,35 @@ export class SiteChatElement extends HTMLElement {
       `position:fixed!important;inset:0!important;width:0!important;height:0!important;z-index:${DEFAULT_Z_INDEX}!important;display:block!important`,
     )
     this.#root = this.attachShadow({ mode: 'closed' })
-    const style = document.createElement('style')
-    style.textContent = styles
-    const nonce = options.nonce ?? this.dataset.nonce
-    if (nonce) style.nonce = nonce
+    this.#root.append(this.styleElement(styles, options))
     this.#mount = document.createElement('div')
-    this.#root.append(style, this.#mount)
-    const sessionKey = storageKey(publicKey || 'anonymous', 'sessionId')
-    const storedSessionId =
-      readValue(sessionKey, 'session') ?? readValue(sessionKey, 'local') ?? undefined
-    const config = mergeConfig(await fetchConfig(endpoint, publicKey, storedSessionId ?? undefined))
+    this.#root.append(this.#mount)
+    const prefix = publicKey || 'anonymous'
+    const sessionKey = storageKey(prefix, 'sessionId')
+    const storedSessionId = readValue(sessionKey, 'session') ?? readValue(sessionKey, 'local')
+    const remote = await fetchConfig(endpoint, publicKey, storedSessionId ?? undefined)
+    this.#configFailed = remote === undefined
+    const config = mergeConfig(remote)
     if (options.position) config.ui.position = options.position
     if (options.theme) config.ui.theme.mode = options.theme
     this.#config = config
     this.#resolved = options
+    this.applyConfig(config)
+    // docs/02 §11 `resetOnNavigate`: a full page load onto a different path is
+    // a navigation too, not only an SPA route change.
+    const pathKey = storageKey(prefix, 'path')
+    const lastPath = readValue(pathKey, 'session')
+    this.#navigated = lastPath !== null && lastPath !== location.pathname
+    writeValue(pathKey, location.pathname, 'session')
+    const onPopState = () => {
+      if (this.#config?.ui.behaviour.resetOnNavigate) this.#controller?.reset()
+    }
+    addEventListener('popstate', onPopState)
+    this.#cleanup.push(() => removeEventListener('popstate', onPopState))
     this.#readyResolve()
     this.dispatch('ready', { config })
-    this.dataset.theme = config.ui.theme.mode
-    this.style.setProperty('--sb-panel-w', `${config.ui.panel.width}px`)
-    this.style.setProperty('--sb-panel-h', `${config.ui.panel.height}px`)
-    this.style.setProperty('--sb-offset-x', `${config.ui.offset.x}px`)
-    this.style.setProperty('--sb-offset-y', `${config.ui.offset.y}px`)
-    this.style.setProperty('z-index', `${config.ui.zIndex}`, 'important')
-    applyTheme(this, config)
     if (matchesAny(location.pathname, config.ui.launcher.hideOnPaths)) return
-    const remembered = readValue(storageKey(publicKey || 'anonymous', 'open'), 'local') === 'true'
+    const remembered = readValue(storageKey(prefix, 'open'), 'local') === 'true'
     this.#open = Boolean(
       options.autoOpen ??
       (this.dataset.autoOpen === 'true' ||
@@ -163,11 +191,44 @@ export class SiteChatElement extends HTMLElement {
         config.ui.panel.openOnFirstVisit),
     )
     if (this.#open) void this.load()
-    setTimeout(() => this.render(), config.ui.launcher.showAfterMs)
+    const timer = setTimeout(() => this.render(), config.ui.launcher.showAfterMs)
+    this.#cleanup.push(() => clearTimeout(timer))
     const viewport = typeof visualViewport === 'undefined' ? null : visualViewport
-    viewport?.addEventListener('resize', () =>
-      this.style.setProperty('--sb-vh', `${viewport.height}px`),
-    )
+    if (viewport) {
+      // docs/07 §6: keep the composer above the on-screen keyboard.
+      const onResize = () => this.style.setProperty('--sb-vh', `${viewport.height}px`)
+      viewport.addEventListener('resize', onResize)
+      this.#cleanup.push(() => viewport.removeEventListener('resize', onResize))
+    }
+  }
+
+  applyConfig(config: PublicConfig): void {
+    this.dataset.theme = config.ui.theme.mode
+    this.style.setProperty('--sb-panel-w', `${config.ui.panel.width}px`)
+    this.style.setProperty('--sb-panel-h', `${config.ui.panel.height}px`)
+    this.style.setProperty('--sb-offset-x', `${config.ui.offset.x}px`)
+    this.style.setProperty('--sb-offset-y', `${config.ui.offset.y}px`)
+    this.style.setProperty('z-index', `${config.ui.zIndex}`, 'important')
+    applyTheme(this, config)
+  }
+
+  /**
+   * docs/07 §10: "`/config` fetch fails — launcher renders with built-in
+   * defaults; panel shows a retry state on open." This is the retry.
+   */
+  async retryConfig(): Promise<void> {
+    const options = this.#resolved
+    if (!options) return
+    const remote = await fetchConfig(options.endpoint, options.publicKey)
+    if (remote === undefined) return
+    this.#configFailed = false
+    const config = mergeConfig(remote)
+    if (options.position) config.ui.position = options.position
+    if (options.theme) config.ui.theme.mode = options.theme
+    this.#config = config
+    this.applyConfig(config)
+    if (this.#chunk) this.buildController(this.#chunk)
+    this.render()
   }
 
   /**
@@ -183,30 +244,42 @@ export class SiteChatElement extends HTMLElement {
   async loadPanel(): Promise<void> {
     try {
       await this.boot()
-      const config = this.#config
-      const options = this.#resolved
       // No config means boot bailed out (no Shadow DOM). Clear the guard so a
       // later call can try again rather than latching a failure forever.
-      if (!config || !options) {
+      if (!this.#config || !this.#resolved || !this.#root) {
         this.#loading = undefined
         return
       }
       const chunk = await import('./panel-chunk.js')
       this.#chunk = chunk
-      const controller = chunk.createController(options, config, () => this.render())
-      controller.open = () => this.open()
-      controller.close = () => this.close()
-      controller.toggle = () => this.toggle()
-      controller.clickCitation = (citation) => this.citationClick(citation)
-      this.#controller = controller
-      if (config.pending) controller.rehydratePending(config.pending)
+      this.#root.append(this.styleElement(chunk.panelStyles, this.#resolved))
+      const controller = this.buildController(chunk)
+      if (this.#config.ui.behaviour.resetOnNavigate && this.#navigated) controller.reset()
+      if (this.#config.pending) controller.rehydratePending(this.#config.pending)
       for (const action of this.#queue.splice(0)) action(controller)
       this.render()
     } catch (error) {
       this.#loading = undefined
       console.warn('[SiteBot] failed to load the chat panel', error)
-      this.#options.onEvent?.({ type: 'error', detail: error })
+      this.dispatch('error', { code: 'chunk_load_failed', message: 'The chat failed to load.' })
     }
+  }
+
+  buildController(chunk: PanelChunk): WidgetController {
+    const options = this.#resolved!
+    const controller = chunk.createController(
+      // The controller reports through `onEvent`; route it through `dispatch`
+      // so `SiteBot.on(...)` DOM listeners hear controller events as well.
+      { ...options, onEvent: (event) => this.dispatch(event.type, event.detail) },
+      this.#config!,
+      () => this.render(),
+    )
+    controller.open = () => this.open()
+    controller.close = () => this.close()
+    controller.toggle = () => this.toggle()
+    controller.clickCitation = (citation) => this.citationClick(citation)
+    this.#controller = controller
+    return controller
   }
 
   /** Run `action` now if the controller exists, otherwise when it arrives. */
@@ -220,28 +293,58 @@ export class SiteChatElement extends HTMLElement {
     const config = this.#config
     if (!mount || !config) return
     const ui = config.ui
-    const Panel = this.#chunk?.Panel
-    const IframePanel = this.#chunk?.IframePanel
+    const chunk = this.#chunk
     const controller = this.#controller
+    const close = () => this.close()
+    const offline = this.#configFailed ? { retry: () => void this.retryConfig() } : undefined
+    let panel: JSX.Element | null = null
+    if (this.#open && controller && chunk) {
+      panel =
+        ui.isolation === 'iframe' ? (
+          <chunk.IframePanel
+            controller={controller}
+            close={close}
+            offline={offline}
+            styleText={styles + chunk.panelStyles}
+            variables={hostVariables(this)}
+            theme={ui.theme.mode}
+          />
+        ) : (
+          <chunk.PanelBoundary close={close}>
+            <chunk.Panel controller={controller} close={close} offline={offline} />
+          </chunk.PanelBoundary>
+        )
+    }
+    const left = ui.position === 'bottom-left'
     render(
       <>
-        {this.#open &&
-          controller &&
-          (config.ui.isolation === 'iframe' && IframePanel ? (
-            <IframePanel controller={controller} close={() => this.close()} styleText={styles} />
-          ) : Panel ? (
-            <Panel controller={controller} close={() => this.close()} />
-          ) : null)}
+        {panel}
         <button
           ref={(node) => {
             this.#launcher = node ?? undefined
           }}
-          class={`launcher ${ui.position === 'bottom-left' ? 'left' : ''} ${ui.launcher.label ? 'pill' : ''}`}
+          type="button"
+          class={`launcher${left ? ' left' : ''}${ui.launcher.label ? ' pill' : ''}${this.#open ? ' open' : ''}`}
           aria-label={ui.a11y.launcherAriaLabel}
           aria-expanded={this.#open}
+          aria-haspopup="dialog"
+          tabIndex={this.#open ? -1 : 0}
           onClick={() => this.toggle()}
         >
-          {this.#open ? 'X' : icon(ui.launcher.icon)}
+          {ui.launcher.icon === 'custom' && ui.launcher.iconUrl ? (
+            <img src={ui.launcher.iconUrl} alt="" />
+          ) : (
+            <Icon
+              d={
+                LAUNCHER_GLYPHS[
+                  ui.launcher.icon === 'chat' || ui.launcher.icon === 'question'
+                    ? ui.launcher.icon
+                    : 'sparkle'
+                ]
+              }
+              size={24}
+            />
+          )}
           {ui.launcher.label && <span>{ui.launcher.label}</span>}
           {ui.launcher.badge.enabled && <span class="badge">{ui.launcher.badge.text}</span>}
         </button>
@@ -255,23 +358,20 @@ export class SiteChatElement extends HTMLElement {
         'local',
       )
   }
-  registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void {
-    this.withController((controller) => controller.registerTool(name, handler))
+
+  dispatch(type: SiteBotEvent['type'], detail?: unknown): void {
+    try {
+      this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true, detail }))
+      this.#options.onEvent?.({ type, detail })
+    } catch (error) {
+      console.warn('[SiteBot] an event handler threw', error)
+    }
   }
-  unregisterTool(name: string): void {
-    this.withController((controller) => controller.unregisterTool(name))
-  }
-  dispatch(type: 'open' | 'close' | 'reset' | 'ready', detail?: unknown): void {
-    this.dispatchEvent(new CustomEvent(`sitebot:${type}`, { bubbles: true, detail }))
-    this.#options.onEvent?.({ type, detail })
-  }
-  /** docs/03 §7 — a citation chip click opens the source and notifies the host. */
+  /** docs/03 §9 — a citation chip click opens the source and notifies the host. */
   citationClick(citation: Citation): void {
     this.safe(() => {
       window.open(citation.url, '_blank', 'noopener,noreferrer')
-      const detail = { url: citation.url, title: citation.title }
-      this.dispatchEvent(new CustomEvent('sitebot:citation-click', { bubbles: true, detail }))
-      this.#options.onEvent?.({ type: 'citation-click', detail })
+      this.dispatch('citation-click', { url: citation.url, title: citation.title })
     })
   }
   safe(action: () => void): void {
@@ -279,8 +379,19 @@ export class SiteChatElement extends HTMLElement {
       action()
     } catch (error) {
       console.warn('[SiteBot] widget recovered from an error', error)
-      this.#options.onEvent?.({ type: 'error', detail: error })
+      try {
+        this.#options.onEvent?.({ type: 'error', detail: error })
+      } catch {
+        /* never throw into the host */
+      }
     }
+  }
+  styleElement(text: string, options: SiteBotOptions): HTMLStyleElement {
+    const style = document.createElement('style')
+    style.textContent = text
+    const nonce = options.nonce ?? this.dataset.nonce
+    if (nonce) style.nonce = nonce
+    return style
   }
 }
 
@@ -299,54 +410,65 @@ async function fetchConfig(
     return undefined
   }
 }
-function icon(name: string) {
-  const path =
-    name === 'question'
-      ? 'M12 17h.01M9.5 9a2.5 2.5 0 1 1 4.3 1.8c-.9.8-1.8 1.1-1.8 2.7'
-      : name === 'chat'
-        ? 'M4 5h16v11H8l-4 3V5Z'
-        : 'M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z'
-  return (
-    <svg
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d={path} />
-    </svg>
-  )
+
+/** The `--sb-*` properties set inline on the host, for the iframe's `:root`. */
+function hostVariables(host: HTMLElement): string {
+  const declarations: string[] = []
+  for (let index = 0; index < host.style.length; index += 1) {
+    const name = host.style.item(index)
+    if (name.startsWith('--sb-')) declarations.push(`${name}:${host.style.getPropertyValue(name)}`)
+  }
+  return declarations.join(';')
 }
+
 function applyTheme(host: HTMLElement, config: PublicConfig): void {
   const theme = config.ui.theme
-  if (theme.primary) host.style.setProperty('--sb-primary', theme.primary)
-  host.style.setProperty('--sb-on-primary', theme.onPrimary ?? contrast(theme.primary ?? '#4f46e5'))
-  if (theme.surface) host.style.setProperty('--sb-surface', theme.surface)
-  if (theme.text) host.style.setProperty('--sb-text', theme.text)
-  if (theme.muted) host.style.setProperty('--sb-muted', theme.muted)
-  if (theme.bubbleAssistant) host.style.setProperty('--sb-assistant', theme.bubbleAssistant)
-  if (theme.bubbleUser) host.style.setProperty('--sb-user', theme.bubbleUser)
+  const set = (name: string, value: string | undefined) => {
+    if (value) host.style.setProperty(name, value)
+  }
+  set('--sb-primary', theme.primary)
+  // docs/07 §4: `--sb-on-primary` is computed by luminance, not trusted.
+  host.style.setProperty(
+    '--sb-on-primary',
+    theme.onPrimary ?? readableOn(theme.primary ?? '#4f46e5'),
+  )
+  set('--sb-surface', theme.surface)
+  set('--sb-pill-bg', theme.surface)
+  set('--sb-text', theme.text)
+  set('--sb-muted', theme.muted)
+  if (theme.bubbleAssistant) {
+    set('--sb-bubble-assistant-bg', theme.bubbleAssistant)
+    set('--sb-bubble-assistant-fg', readableOn(theme.bubbleAssistant, theme.text))
+  }
+  if (theme.bubbleUser) {
+    set('--sb-bubble-user-bg', theme.bubbleUser)
+    set('--sb-bubble-user-fg', readableOn(theme.bubbleUser))
+  }
   if (theme.radius !== undefined) host.style.setProperty('--sb-panel-radius', `${theme.radius}px`)
-  if (theme.font)
-    host.style.setProperty(
-      '--sb-font',
-      theme.font === 'system' ? 'ui-sans-serif,system-ui,sans-serif' : theme.font,
-    )
-  if (theme.shadow) host.style.setProperty('--sb-shadow', theme.shadow)
+  if (theme.font === 'inherit') {
+    // `:host { all: initial }` cuts inheritance, so "inherit" means reading
+    // the page's font once and pinning it.
+    set('--sb-font', getComputedStyle(document.body).fontFamily)
+  } else if (theme.font === 'system') {
+    set('--sb-font', 'ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif')
+  } else set('--sb-font', theme.font)
+  set('--sb-shadow', theme.shadow)
 }
-function contrast(hex: string): string {
-  const match = /^#([\da-f]{6})$/i.exec(hex)
-  if (!match) return '#fff'
-  const digits = match[1] ?? ''
-  const rgb = [0, 2, 4]
+
+/** Black or white, whichever reads on `background` — WCAG relative luminance. */
+export function readableOn(background: string, preferred?: string): string {
+  const luminance = relativeLuminance(background)
+  if (luminance === undefined) return preferred ?? '#fff'
+  return luminance > 0.179 ? '#000' : '#fff'
+}
+
+export function relativeLuminance(hex: string): number | undefined {
+  const match = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(hex.trim())
+  if (!match) return undefined
+  let digits = match[1] ?? ''
+  if (digits.length === 3) digits = [...digits].map((digit) => digit + digit).join('')
+  const [r, g, b] = [0, 2, 4]
     .map((index) => parseInt(digits.slice(index, index + 2), 16) / 255)
     .map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
-  return 0.2126 * (rgb[0] ?? 0) + 0.7152 * (rgb[1] ?? 0) + 0.0722 * (rgb[2] ?? 0) > 0.179
-    ? '#000'
-    : '#fff'
+  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
 }

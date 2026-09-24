@@ -2,7 +2,8 @@ import { type ProviderId } from '@sitebot/config'
 import type { BackendEntry } from '@sitebot/config'
 import type { LanguageModel } from 'ai'
 import { EngineError } from '../stream/errors.js'
-import { importProviderPackage, readEnv } from './optional-import.js'
+import { loadModuleExport, parseModuleSpec } from '../modules.js'
+import { importOptional, importProviderPackage, readEnv } from './optional-import.js'
 
 /**
  * One adapter per provider — docs/04-providers-and-engine.md §2.
@@ -16,21 +17,35 @@ import { importProviderPackage, readEnv } from './optional-import.js'
  * so a model released after this package was published works immediately.
  */
 
-export type ProviderFactory = (cfg: BackendEntry) => Promise<LanguageModel>
+export interface ProviderContext {
+  /** The config file's directory — where `provider: custom` modules resolve from. */
+  baseDir?: string | null | undefined
+}
+
+export type ProviderFactory = (
+  cfg: BackendEntry,
+  context?: ProviderContext,
+) => Promise<LanguageModel>
 
 /**
  * The common shape: a `createX({ apiKey, baseURL, headers })` factory that
- * returns a callable provider. Every hosted provider we support in Phase 2
- * fits it; the ones that do not (bedrock, vertex, azure) need cloud credential
- * plumbing and land with Phase 8's deployment work.
+ * returns a callable provider. The cloud providers fit it too — their SDKs
+ * read the rest of their credentials from the environment (Azure's resource
+ * name, Vertex's project and application default credentials, AWS's region),
+ * so `extra` only has to add what the environment cannot express.
  */
 function standardAdapter(
   provider: ProviderId,
   factoryName: string,
-  options: { envVar?: string | null; requiresBaseUrl?: boolean } = {},
+  options: {
+    envVar?: string | null
+    requiresBaseUrl?: boolean
+    defaults?: Record<string, unknown>
+    extra?: (cfg: BackendEntry) => Promise<Record<string, unknown>>
+  } = {},
 ): ProviderFactory {
-  return async (cfg) => {
-    const mod = await importProviderPackage(provider)
+  return async (cfg, context) => {
+    const mod = await importProviderPackage(provider, { baseDir: context?.baseDir })
     const create = mod[factoryName]
     if (typeof create !== 'function') {
       throw new EngineError('not_ready', {
@@ -48,26 +63,67 @@ function standardAdapter(
       })
     }
 
-    const settings: Record<string, unknown> = {}
+    const settings: Record<string, unknown> = { ...options.defaults }
     if (apiKey !== undefined) settings.apiKey = apiKey
     if (cfg.baseUrl !== undefined) settings.baseURL = cfg.baseUrl
     if (Object.keys(cfg.headers).length > 0) settings.headers = cfg.headers
-    // `openai-compatible` requires a name for its telemetry/provider id.
-    if (provider === 'openai-compatible') settings.name = 'openai-compatible'
+    Object.assign(settings, await options.extra?.(cfg))
 
     const instance = create(settings) as (model: string) => LanguageModel
     return instance(cfg.model)
   }
 }
 
-/** Providers whose credentials do not fit the `apiKey` shape. */
-function unsupported(provider: ProviderId, why: string): ProviderFactory {
-  return async () => {
+/**
+ * Bedrock reads `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the
+ * environment by itself. Everything else in the AWS credential chain — SSO,
+ * instance roles, `~/.aws/credentials` — needs the AWS SDK's provider chain,
+ * which is used when it is installed and static keys are absent.
+ */
+async function bedrockCredentials(): Promise<Record<string, unknown>> {
+  if (
+    readEnv('AWS_ACCESS_KEY_ID') !== undefined ||
+    readEnv('AWS_BEARER_TOKEN_BEDROCK') !== undefined
+  )
+    return {}
+  try {
+    const chain = await importOptional('@aws-sdk/credential-providers')
+    if (typeof chain.fromNodeProviderChain === 'function')
+      return { credentialProvider: chain.fromNodeProviderChain() }
+  } catch {
+    /* not installed: the provider reports missing credentials itself */
+  }
+  return {}
+}
+
+/**
+ * `provider: custom` — docs/04 §2. `backend.module` names a module exporting a
+ * factory, `"./providers/acme.ts#createModel"`; the factory receives the
+ * backend entry and returns an AI SDK `LanguageModel`.
+ */
+const customAdapter: ProviderFactory = async (cfg, context) => {
+  if (cfg.module === undefined) {
     throw new EngineError('not_ready', {
-      message: `Provider "${provider}" is not available yet: ${why}`,
-      detail: `provider ${provider} has no adapter in this build`,
+      message: 'provider: custom requires backend.module, e.g. "./providers/acme.ts#createModel".',
     })
   }
+  const { path, exportName } = parseModuleSpec(cfg.module)
+  const factory = await loadModuleExport(path, exportName, {
+    baseDir: context?.baseDir,
+    kind: 'Custom provider',
+  })
+  if (typeof factory !== 'function') {
+    throw new EngineError('not_ready', {
+      message: `Custom provider export "${exportName}" is not a function.`,
+    })
+  }
+  const model = (await (factory as (cfg: BackendEntry) => unknown)(cfg)) as LanguageModel
+  if (typeof model !== 'object' || model === null || !('doStream' in model)) {
+    throw new EngineError('not_ready', {
+      message: `Custom provider "${cfg.module}" did not return a LanguageModel.`,
+    })
+  }
+  return model
 }
 
 export const ADAPTERS: Record<ProviderId, ProviderFactory> = {
@@ -81,15 +137,23 @@ export const ADAPTERS: Record<ProviderId, ProviderFactory> = {
   'openai-compatible': standardAdapter('openai-compatible', 'createOpenAICompatible', {
     envVar: null,
     requiresBaseUrl: true,
+    // The package requires a name for its telemetry/provider id.
+    defaults: { name: 'openai-compatible' },
   }),
-  // Ollama is local: no key, and a conventional default endpoint.
-  ollama: standardAdapter('ollama', 'createOllama', { envVar: null }),
-
-  azure: unsupported('azure', 'Azure resource-name credentials arrive with Phase 8.'),
-  bedrock: unsupported('bedrock', 'the AWS credential chain arrives with Phase 8.'),
-  vertex: unsupported('vertex', 'GCP application default credentials arrive with Phase 8.'),
-  // `provider: custom` loads a module from disk, which the edge-safe entry
-  // cannot do. It is wired up by the Node loader alongside `module` tool
-  // executors in Phase 5.
-  custom: unsupported('custom', 'module loading arrives with Phase 5.'),
+  // Ollama is local: no key, its OpenAI-compatible endpoint on the default
+  // port, overridable with backend.baseUrl.
+  ollama: standardAdapter('ollama', 'createOpenAICompatible', {
+    envVar: null,
+    defaults: { name: 'ollama', baseURL: 'http://localhost:11434/v1' },
+  }),
+  // The model id is the Azure *deployment* name; the resource comes from
+  // AZURE_RESOURCE_NAME unless backend.baseUrl points at the endpoint.
+  azure: standardAdapter('azure', 'createAzure', { envVar: 'AZURE_API_KEY' }),
+  bedrock: standardAdapter('bedrock', 'createAmazonBedrock', {
+    envVar: null,
+    extra: bedrockCredentials,
+  }),
+  // Application default credentials plus GOOGLE_VERTEX_PROJECT/LOCATION.
+  vertex: standardAdapter('vertex', 'createVertex', { envVar: null }),
+  custom: customAdapter,
 }

@@ -125,9 +125,8 @@ describe('resolvePolicy — agent mode (docs/04 §4)', () => {
   it('defaults retrieval to tool, and honours an explicit mode', () => {
     expect(resolvePolicy(agentConfig()).retrieval).toBe('tool')
     expect(
-      resolvePolicy(
-        testConfig({ mode: 'agent', knowledge: { retrieval: { mode: 'hybrid' } } }),
-      ).retrieval,
+      resolvePolicy(testConfig({ mode: 'agent', knowledge: { retrieval: { mode: 'hybrid' } } }))
+        .retrieval,
     ).toBe('hybrid')
   })
 

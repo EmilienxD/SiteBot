@@ -21,11 +21,14 @@ import { resolve } from 'node:path'
 import {
   PROVIDER_ENV_VARS,
   PROVIDER_PACKAGES,
+  providerInstallSpec,
   containsEnvPlaceholder,
   type ResolvedConfig,
 } from '@sitebot/config'
 import { createEngine, importProviderPackage } from '@sitebot/core'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
+import { connectStdioMcp, createNodeSessionStore, createSafeFetch } from '@sitebot/core/node'
+import { lazySessionStore } from '@sitebot/server/node'
+import { readManifest } from '@sitebot/ingest'
 import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { findInlineSecrets, productionDoctor } from '../production.js'
@@ -259,7 +262,7 @@ async function providerChecks(config: ResolvedConfig, options: DiagnoseOptions):
     }
 
     try {
-      await importProviderPackage(entry.provider)
+      await importProviderPackage(entry.provider, { baseDir: config.$meta.baseDir })
       checks.push({
         name: `provider ${entry.provider}`,
         status: 'pass',
@@ -270,7 +273,10 @@ async function providerChecks(config: ResolvedConfig, options: DiagnoseOptions):
         name: `provider ${entry.provider}`,
         status: 'fail',
         detail: `${specifier} is not installed`,
-        fix: error instanceof Error ? firstLine(error.message) : `npm i ${specifier}`,
+        fix:
+          error instanceof Error
+            ? firstLine(error.message)
+            : `pnpm add ${providerInstallSpec(specifier)}`,
       })
     }
   }
@@ -285,6 +291,16 @@ async function providerChecks(config: ResolvedConfig, options: DiagnoseOptions):
     fetchImpl: options.fetchImpl ?? safe.fetch,
     resolveHost: safe.resolveHost,
     connectStdioMcp,
+    // sqlite/redis/postgres/custom are Node-only, so the edge-safe engine
+    // factory refuses them; build the store the way `serve` does. Opened
+    // lazily, a store that cannot connect becomes a failing storage check.
+    ...(config.storage.type === 'memory' || config.storage.type === 'none'
+      ? {}
+      : {
+          sessionStore: lazySessionStore(() =>
+            createNodeSessionStore(config.storage, { baseDir: config.$meta.baseDir }),
+          ),
+        }),
   })
 
   try {
@@ -438,14 +454,7 @@ async function knowledgeChecks(config: ResolvedConfig, options: DiagnoseOptions)
     })
   }
 
-  // The store and the index itself are Phase 6 work. Reporting that honestly is
-  // better than reporting a freshness we cannot read.
-  checks.push({
-    name: 'knowledge index',
-    status: 'skip',
-    detail: 'index freshness and the retrieval smoke test need the Phase 6 ingest pipeline',
-    fix: 'docs/06-knowledge.md — @sitebot/ingest does not implement the pipeline yet.',
-  })
+  checks.push(await indexCheck(config, options))
 
   if (options.offline !== true && knowledge.store.type === 'sqlite') {
     const path = resolve(options.cwd, knowledge.store.path)
@@ -462,6 +471,53 @@ async function knowledgeChecks(config: ResolvedConfig, options: DiagnoseOptions)
   }
 
   return checks
+}
+
+/** An index older than this is reported as stale — docs/06 §5 re-ingest cadence. */
+export const INDEX_STALE_AFTER_DAYS = 7
+
+/**
+ * The ingest manifest is the index's own record of what it holds and which
+ * embedding model built it (docs/06 §3.6), so it answers the three questions
+ * that matter without a network call: was it built, does it match the
+ * configured model, and how old is it.
+ */
+async function indexCheck(config: ResolvedConfig, options: DiagnoseOptions): Promise<Check> {
+  const manifest = await readManifest({ dir: options.cwd })
+  if (manifest === null) {
+    return {
+      name: 'knowledge index',
+      status: 'warn',
+      detail: 'no index has been built — answers fall back to siteContext and page context',
+      fix: 'Run `sitebot ingest` (add --dry-run first for a cost estimate).',
+    }
+  }
+  const model = config.knowledge.embedding?.model
+  if (model !== undefined && manifest.model !== model) {
+    return {
+      name: 'knowledge index',
+      status: 'fail',
+      detail: `built with "${manifest.model}" but knowledge.embedding.model is "${model}"`,
+      fix: 'Embedding spaces do not mix: run `sitebot ingest --force` to rebuild.',
+    }
+  }
+  const documents = Object.values(manifest.sources).reduce(
+    (total, source) => total + Object.keys(source.documents).length,
+    0,
+  )
+  const ageDays = (Date.now() - Date.parse(manifest.builtAt)) / 86_400_000
+  const age = ageDays < 1 ? 'today' : `${Math.floor(ageDays)} day${ageDays < 2 ? '' : 's'} ago`
+  const stale = ageDays > INDEX_STALE_AFTER_DAYS
+  return {
+    name: 'knowledge index',
+    status: documents === 0 || stale ? 'warn' : 'pass',
+    detail: `${documents} document${documents === 1 ? '' : 's'}, built ${age} with ${manifest.model}`,
+    ...(documents === 0
+      ? { fix: 'The sources matched nothing — check their URLs, globs and exclude patterns.' }
+      : stale
+        ? { fix: 'Re-run `sitebot ingest`; unchanged pages cost no embedding calls.' }
+        : {}),
+  }
 }
 
 function storageChecks(config: ResolvedConfig): Check[] {

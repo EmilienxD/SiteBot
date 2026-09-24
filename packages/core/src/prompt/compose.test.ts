@@ -184,7 +184,9 @@ describe('composePrompt — block presence permutations', () => {
 
   it('drops page_context when includePageContext is false, even with a page', () => {
     const result = composePrompt({
-      config: testConfig({ prompt: { system: 'You are Acme’s website assistant.', includePageContext: false } }),
+      config: testConfig({
+        prompt: { system: 'You are Acme’s website assistant.', includePageContext: false },
+      }),
       ctx: { pageContext: PAGE },
       delimiterId: DELIMITER,
     })
@@ -287,7 +289,12 @@ describe('composePrompt — block presence permutations', () => {
 
   it('names the company in the guardrails block, falling back to the bot name', () => {
     const named = composePrompt({
-      config: testConfig({ prompt: { system: 'You are Acme’s website assistant.', guardrails: { refuseOffTopic: true } } }),
+      config: testConfig({
+        prompt: {
+          system: 'You are Acme’s website assistant.',
+          guardrails: { refuseOffTopic: true },
+        },
+      }),
       delimiterId: DELIMITER,
     })
     expect(named.text).toContain('Only answer questions about Acme and this website.')
@@ -295,7 +302,10 @@ describe('composePrompt — block presence permutations', () => {
 
     const withCompany = composePrompt({
       config: testConfig({
-        prompt: { system: 'You are Acme’s website assistant.', guardrails: { refuseOffTopic: true } },
+        prompt: {
+          system: 'You are Acme’s website assistant.',
+          guardrails: { refuseOffTopic: true },
+        },
         siteContext: { company: 'Acme Inc' },
       }),
       delimiterId: DELIMITER,

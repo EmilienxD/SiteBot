@@ -1,7 +1,7 @@
 {
   "name": "@sitebot/ingest",
   "version": "0.0.0",
-  "description": "Crawler, extractor, chunker, embedder and store writer for the SiteBot knowledge index. Layer 3, Node only.",
+  "description": "Crawler, extractor, chunker, embedder and store writer for the SiteBot knowledge index. Layer 3; Node only, except the edge-safe ./query entry.",
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -16,6 +16,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./query": {
+      "import": {
+        "types": "./dist/query.d.ts",
+        "default": "./dist/query.js"
+      },
+      "require": {
+        "types": "./dist/query.d.cts",
+        "default": "./dist/query.cjs"
       }
     },
     "./package.json": "./package.json"
@@ -37,7 +47,7 @@
     "@ai-sdk/google": "^3",
     "@ai-sdk/mistral": "^3",
     "@ai-sdk/openai": "^3",
-    "@ai-sdk/openai-compatible": "^3",
+    "@ai-sdk/openai-compatible": "^2",
     "@upstash/vector": "^1",
     "pg": "^8",
     "sqlite-vec": "^0.1"

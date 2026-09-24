@@ -124,7 +124,7 @@ Ordered phases with explicit acceptance criteria. Each phase is a coherent unit 
 - Playwright screenshots at 4 viewports × 2 themes match baselines, and a manual side-by-side against `example-from-ramp-website.png` is signed off.
 - Hostile-CSS fixture pages (Tailwind preflight, Bootstrap, `* { color: red !important }`) leave the widget unaffected.
 - axe-core clean in every state.
-- `size-limit`: launcher (initial) ≤ 15 KB, panel (lazy) ≤ 66 KB, total ≤ 80 KB gzip — see [`07`](./07-widget.md) §1 for what sets those numbers.
+- `size-limit`: launcher (initial) ≤ 14 KB, panel (lazy) ≤ 24 KB, total ≤ 38 KB gzip — see [`07`](./07-widget.md) §1 for what sets those numbers.
 - The widget never throws into the host page (error-injection test).
 
 **Milestone: v0.1 — a configurable, good-looking, streaming chatbot.** Shippable on its own.
@@ -303,8 +303,8 @@ Phases 5, 6 and 7 are independently parallelisable once 4 lands, if more than on
 
 Recorded here rather than guessed at now. None blocks Phase 0–2.
 
-1. **AI SDK `Chat` class API surface.** This spec assumes v6 exposes a UI-framework-agnostic `Chat` that the widget can bind to signals. Verify against the installed version at the start of Phase 4; if the binding is React-only, fall back to a `preact/compat` alias (costs ~3 KB) rather than forking the protocol client.
-2. **Exact `@ai-sdk/*` major versions** paired with `ai@6` at implementation time.
+1. ~~**AI SDK `Chat` class API surface.**~~ **Resolved:** the widget does not use `ai` at runtime. `AbstractChat` and its transport cost ~40 KB gzip and broke the launcher budget, so `packages/widget/src/ui-stream.ts` is a small UI Message Stream reader. `ai` stays a dev dependency, and a conformance test replays real `ai`-produced streams through the reader so it cannot drift from the wire format.
+2. ~~**Exact `@ai-sdk/*` major versions**~~ **Resolved:** the `ai@6` lines are `@ai-sdk/openai-compatible@^2` (also used for `ollama`), `@ai-sdk/amazon-bedrock@^4`, `@ai-sdk/google-vertex@^4`, and `^3` for the rest. They are pinned in `PROVIDER_PACKAGE_RANGES` (`@sitebot/config`) and used by install hints and `sitebot init`. The provider registry rejects a model whose spec version is not v2/v3 and names the right release line.
 3. **sqlite-vec packaging on Windows.** Confirm the prebuilt binary story before committing it as the default store; `memory` is the fallback default if it is painful.
 4. **Semantic chunking cost.** The embedding-distance split needs embeddings before chunking. Measure whether the quality gain justifies it, or make `heading` the default.
 5. **Prompt-cache breakpoint placement** across providers — the ordering in [`04`](./04-providers-and-engine.md) §5 is designed for it, but per-provider mechanics differ.

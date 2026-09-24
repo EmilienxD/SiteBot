@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wholesale — Harbor &amp; Pine Coffee Roasters</title>
+    <meta
+      name="description"
+      content="Coffee for cafés, restaurants and offices. Volume pricing and free training."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site">
+      <a class="brand" href="/">Harbor &amp; Pine</a>
+      <nav>
+        <a href="/shop">Shop</a>
+        <a href="/brewing">Brewing</a>
+        <a href="/wholesale">Wholesale</a>
+      </nav>
+    </header>
+
+    <main>
+      <h1>Wholesale</h1>
+      <p class="lede">
+        We supply 40 cafés and offices across New England. Accounts start at 5 kg a week.
+      </p>
+
+      <h2 id="pricing">Volume pricing</h2>
+      <p>
+        5–20 kg a week: $32/kg. 20–50 kg: $29/kg. Over 50 kg: talk to us. Every account includes
+        free barista training at the roastery and a quarterly equipment check.
+      </p>
+
+      <h2 id="inquiry">Wholesale inquiry</h2>
+      <p>Tell us about your business and we will reply within two working days.</p>
+      <form id="wholesale-form" action="/wholesale" method="get">
+        <label>Business name <input name="business" required /></label>
+        <label>Contact email <input name="email" type="email" required /></label>
+        <label
+          >Weekly volume
+          <select name="volume">
+            <option value="">Choose…</option>
+            <option value="5-20">5–20 kg</option>
+            <option value="20-50">20–50 kg</option>
+            <option value="50+">Over 50 kg</option>
+          </select>
+        </label>
+        <label>Message <textarea name="message" rows="4"></textarea></label>
+        <button type="submit">Send inquiry</button>
+      </form>
+    </main>
+
+    <footer class="site">
+      © Harbor &amp; Pine Coffee Roasters · 214 Commercial St, Portland, ME
+    </footer>
+    <script type="module" src="/sitebot.js" data-endpoint="/api/chat"></script>
+  </body>
+</html>

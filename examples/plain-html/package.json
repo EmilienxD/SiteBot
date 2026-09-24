@@ -1,0 +1,19 @@
+{
+  "name": "@sitebot/example-plain-html",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A static HTML site with no build step: one script tag and one config file.",
+  "type": "module",
+  "scripts": {
+    "dev": "sitebot dev --static public",
+    "start": "sitebot serve --static public --port 3000",
+    "validate": "sitebot validate",
+    "doctor": "sitebot doctor"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.104",
+    "@ai-sdk/openai-compatible": "^2.0.78",
+    "@sitebot/cli": "workspace:*",
+    "@sitebot/widget": "workspace:*"
+  }
+}

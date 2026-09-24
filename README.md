@@ -2,10 +2,11 @@
 
 A drop-in, fully configurable AI assistant for any website. One config file, one route handler, one script tag.
 
-> **Status: Phase 1 — `@sitebot/config` complete.**
-> The config file is real: schema, loader, `${env.*}` interpolation, `extends` merging, cross-field
-> validation and a published JSON Schema. No engine yet.
-> The full specification lives in [`docs/`](./docs) and is the implementation blueprint.
+> **Status: Phases 0–9 complete; Phase 10 (examples, docs site, release) in progress. Not yet published to npm.**
+> Config, engine (chat and agent mode, approvals, client tools, MCP), knowledge ingest and retrieval,
+> server adapters, the widget, the React wrapper and the CLI are implemented and tested:
+> ~775 unit/integration tests plus 44 security tests, all green. The one runnable example is
+> [`examples/plain-html`](./examples/plain-html). The full specification lives in [`docs/`](./docs).
 
 ---
 
@@ -23,7 +24,7 @@ Everything — model, provider, system prompt, tools, chat-vs-agent, knowledge s
 | ----------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Config**        | YAML primary (JSON/TOML also parsed), optional `defineConfig()` TypeScript layer for inline handlers                 |
 | **Backend**       | TypeScript core + thin adapters (Next.js, Express, Fastify, Hono, `fetch`); sidecar server for Python/Ruby/PHP sites |
-| **Widget**        | Custom Element + Shadow DOM + Preact, ~25 KB gzip, works on any site                                                 |
+| **Widget**        | Custom Element + Shadow DOM + Preact; 13 KB gzip launcher, panel lazy-loaded on first open (~35 KB total)            |
 | **Model layer**   | Vercel AI SDK v6 — provider registry, streaming, tool calling                                                        |
 | **Wire format**   | AI SDK UI Message Stream over SSE, with custom data parts for citations, approvals, and client tools                 |
 | **Knowledge**     | Four layers: static site context → live page context → embedded knowledge base → live API tools                      |
@@ -132,7 +133,7 @@ pnpm build        # turbo, topologically ordered
 pnpm test         # vitest, one project per package
 pnpm lint         # eslint, including the dependency-boundary rules
 pnpm typecheck
-pnpm size         # widget bundle budgets: 12 KB launcher, 25 KB total
+pnpm size         # widget bundle budgets (gzip): 14 KB launcher, 24 KB launcher + panel, 38 KB total
 ```
 
 `pnpm test:live` is a separate, opt-in suite. No test in the default pipeline makes a real provider call.
@@ -160,6 +161,24 @@ so it cannot drift from what the loader actually accepts.
 
 ---
 
+## Try it
+
+The fastest way to see it is the no-build example: a static four-page coffee-shop site with the
+widget in agent mode (page context, highlight and navigate tools, an approval-gated form fill).
+
+```bash
+pnpm install && pnpm build
+cd examples/plain-html
+ANTHROPIC_API_KEY=sk-ant-… pnpm dev          # or, fully local:
+SITEBOT_PROVIDER=ollama SITEBOT_MODEL=qwen2.5:14b pnpm dev
+```
+
+Open http://localhost:3000. See [`examples/plain-html/README.md`](./examples/plain-html/README.md).
+
+---
+
 ## Next step
 
-[Phase 2 — `@sitebot/core`, chat mode only](./docs/09-implementation-plan.md#phase-2--sitebotcore-chat-mode-only): the provider registry with lazy imports and install hints, the fallback chain, prompt composition, session storage, guards, and `handleChat` streaming against `MockLanguageModelV2`.
+[Phase 10 — examples, docs, release](./docs/09-implementation-plan.md#phase-10--examples-docs-release):
+the Next.js, Express-sidecar and Cloudflare Worker examples, the docs site with a config reference
+generated from the Zod schema, recipes, and the release pipeline (changesets, provenance, SRI hashes).

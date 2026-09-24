@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { UIMessage } from 'ai'
+import type { UIMessage } from './types.js'
 import { citationList } from './panel.js'
 
 /**

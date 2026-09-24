@@ -1,10 +1,5 @@
-import type {
-  Chunk,
-  QueryOptions,
-  ScoredChunk,
-  VectorStore,
-  VectorStoreStats,
-} from '../knowledge/store.js'
+import { importOptional } from '../providers/optional-import.js'
+import type { Chunk, QueryOptions, ScoredChunk, VectorStore, VectorStoreStats } from './store.js'
 
 /**
  * `knowledge.store.type: upstash` — the serverless / edge store (docs/06 §3.7).
@@ -53,7 +48,7 @@ export async function createUpstashVectorStore(
   if (client === undefined) {
     let sdk: { Index?: new (config: { url: string; token: string }) => UpstashIndexLike }
     try {
-      sdk = (await import(optionalPeer('@upstash/vector'))) as typeof sdk
+      sdk = (await importOptional('@upstash/vector')) as typeof sdk
     } catch (cause) {
       throw new Error(
         'knowledge.store "upstash" requires the optional dependency @upstash/vector.\n' +
@@ -154,10 +149,6 @@ class UpstashVectorStore implements VectorStore {
   }
 
   async close(): Promise<void> {}
-}
-
-function optionalPeer(name: string): string {
-  return name
 }
 
 function upstashMatches(

@@ -5,6 +5,8 @@ import {
   checkPublicKey,
   createBudgetTracker,
   createEngine,
+  createVectorStore,
+  isEdgeVectorStore,
   createEventDispatcher,
   createJwtVerifier,
   createLogger,
@@ -162,12 +164,16 @@ export function createSiteBotHandler(
       if (options.engine !== undefined) return // external engine, external deps
       if (config.knowledge.sources.length === 0 || config.knowledge.embedding === undefined) return
       try {
-        const { createNodeVectorStore } = await import('@sitebot/core/node')
-        const { createQueryEmbedder } = await import('@sitebot/ingest')
-        const store = await createNodeVectorStore(config.knowledge.store, {
-          model: config.knowledge.embedding.model,
-          baseDir: config.$meta.baseDir ?? null,
-        })
+        // `memory` and `upstash` need only `fetch`, so a Workers host (docs/00
+        // T3) builds them here without ever importing the Node entry.
+        const storeConfig = config.knowledge.store
+        const model = config.knowledge.embedding.model
+        const store = isEdgeVectorStore(storeConfig)
+          ? await createVectorStore(storeConfig, { model })
+          : await (
+              await import('@sitebot/core/node')
+            ).createNodeVectorStore(storeConfig, { model, baseDir: config.$meta.baseDir ?? null })
+        const { createQueryEmbedder } = await import('@sitebot/ingest/query')
         const embedder = await createQueryEmbedder(config.knowledge.embedding)
         engineDeps.knowledge = { store, embedder }
       } catch (error) {

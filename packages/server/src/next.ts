@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from '@sitebot/config'
-import { connectStdioMcp, createSafeFetch } from '@sitebot/core/node'
 import { createSiteBotHandler, type SiteBotHandler, type SiteBotHandlerOptions } from './handler.js'
+import { withNodeRuntime } from './node-runtime.js'
 
 /**
  * `@sitebot/server/next` — App Router route handlers.
@@ -31,16 +31,7 @@ export function createRouteHandlers(
   config: ResolvedConfig,
   options: SiteBotHandlerOptions = {},
 ): NextRouteHandlers {
-  const safe = createSafeFetch()
-  const handler = createSiteBotHandler(config, {
-    ...options,
-    deps: {
-      fetchImpl: safe.fetch,
-      resolveHost: safe.resolveHost,
-      connectStdioMcp,
-      ...options.deps,
-    },
-  })
+  const handler = createSiteBotHandler(config, withNodeRuntime(config, options))
   return {
     GET: handler,
     POST: handler,

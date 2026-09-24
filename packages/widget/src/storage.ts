@@ -1,4 +1,4 @@
-import type { UIMessage } from 'ai'
+import type { UIMessage } from './types.js'
 const memory = new Map<string, string>()
 export function storageKey(publicKey: string, name: string): string {
   return `sitebot:${publicKey}:${name}`

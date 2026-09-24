@@ -436,4 +436,57 @@ describe('warnings', () => {
     if (!result.ok) return
     expect(result.warnings.some((w) => w.rule === 'public/env-sourced-field')).toBe(true)
   })
+
+  describe('docs/05 §7 rule 5 — writable tools reachable without approval', () => {
+    const writable = {
+      name: 'fill_wholesale_form',
+      description: 'Prefill the wholesale form.',
+      readOnly: false,
+      executor: { type: 'client', id: 'fill_form' },
+    }
+    const unapproved = (overrides: Record<string, unknown>) => {
+      const result = validateConfig(
+        { ...minimalConfig(), mode: 'agent', storage: { type: 'memory' }, ...overrides },
+        { env: {} },
+      )
+      if (!result.ok) throw new Error(JSON.stringify(result.errors))
+      return result.warnings.filter((w) => w.rule === 'tools/unapproved-writable')
+    }
+
+    it('warns on a writable tool that is not approval-gated', () => {
+      expect(unapproved({ tools: [writable] })).toEqual([
+        expect.objectContaining({
+          path: 'tools[0]',
+          message:
+            'Writable tool "fill_wholesale_form" runs without an approval card: it is not readOnly and not approval-gated.',
+        }),
+      ])
+    })
+
+    it('is satisfied by requiresApproval or agent.approvalRequired', () => {
+      expect(unapproved({ tools: [{ ...writable, requiresApproval: true }] })).toEqual([])
+      expect(
+        unapproved({ tools: [writable], agent: { approvalRequired: ['fill_wholesale_form'] } }),
+      ).toEqual([])
+    })
+
+    it('still warns under approvalPolicy: never, whatever the tool declares', () => {
+      const [warning] = unapproved({
+        tools: [{ ...writable, requiresApproval: true }],
+        agent: { approvalPolicy: 'never' },
+      })
+      expect(warning?.message).toContain('approvalPolicy is "never"')
+    })
+
+    it('ignores readOnly and disabled tools', () => {
+      expect(
+        unapproved({
+          tools: [
+            { ...writable, readOnly: true },
+            { ...writable, name: 'x', enabled: false },
+          ],
+        }),
+      ).toEqual([])
+    })
+  })
 })
