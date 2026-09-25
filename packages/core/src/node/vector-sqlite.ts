@@ -167,7 +167,11 @@ class SqliteVectorStore implements VectorStore {
     return scored.slice(0, opts.topK)
   }
   async documentChunks(url: string): Promise<Chunk[]> {
-    const rows = this.#db.prepare(`SELECT * FROM chunks WHERE url = ?`).all(url) as ChunkRow[]
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM chunks WHERE url = ? ORDER BY json_extract(metadata, '$.ordinal'), rowid`,
+      )
+      .all(url) as ChunkRow[]
     return rows.map(rowToChunk)
   }
 

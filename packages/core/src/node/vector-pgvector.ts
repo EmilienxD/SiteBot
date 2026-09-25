@@ -218,15 +218,18 @@ class PgVectorStore implements VectorStore {
 
   async documentChunks(url: string): Promise<Chunk[]> {
     const { rows } = await this.#pool.query(
-      `SELECT id, text, metadata FROM ${this.#table} WHERE url = $1 ORDER BY updated_at, id`,
+      `SELECT id, text, metadata, embedding::text AS embedding FROM ${this.#table}
+       WHERE url = $1 ORDER BY (metadata->>'ordinal')::int NULLS LAST, updated_at, id`,
       [url],
     )
-    return (rows as { id: string; text: string; metadata: unknown }[]).map((row) => ({
-      id: row.id,
-      text: row.text,
-      metadata: row.metadata as Chunk['metadata'],
-      embedding: [],
-    }))
+    return (rows as { id: string; text: string; metadata: unknown; embedding: string }[]).map(
+      (row) => ({
+        id: row.id,
+        text: row.text,
+        metadata: row.metadata as Chunk['metadata'],
+        embedding: JSON.parse(row.embedding) as number[],
+      }),
+    )
   }
 
   async deleteBySource(sourceId: string): Promise<void> {

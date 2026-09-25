@@ -5,7 +5,7 @@ A drop-in, fully configurable AI assistant for any website. One config file, one
 > **Status: Phases 0–9 complete; Phase 10 (examples, docs site, release) in progress. Not yet published to npm.**
 > Config, engine (chat and agent mode, approvals, client tools, MCP), knowledge ingest and retrieval,
 > server adapters, the widget, the React wrapper and the CLI are implemented and tested:
-> ~795 unit/integration tests, 44 security tests and 41 browser tests (Playwright, axe-core, visual
+> ~900 unit/integration tests, 56 security tests and 41 browser tests (Playwright, axe-core, visual
 > baselines), all green. Five runnable examples are listed under [Try it](#try-it). The full
 > specification lives in [`docs/`](./docs).
 
@@ -192,6 +192,5 @@ each and a smoke test against a scripted offline model, so none of them needs a 
 ## Next step
 
 [Phase 10 — examples, docs, release](./docs/09-implementation-plan.md#phase-10--examples-docs-release):
-the examples are done. What remains is the docs site (a config reference generated from the Zod
-schema, deployment guides and recipes), the release pipeline (changesets, npm provenance, SRI
-hashes), and the rule-to-test audit.
+the examples, docs site, and release workflow are implemented. Before publishing, close the two
+remaining [rule-audit gaps](./docs/rule-audit.md#open-tasks) and run the release gate in CI.

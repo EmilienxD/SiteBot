@@ -256,7 +256,7 @@ Much of this landed with its feature. This phase closes the gaps and proves the 
 
 **Acceptance:** every example runs from a clean clone with only an API key set. Docs config reference is generated, so it cannot drift from the schema.
 
-**Status:** the four examples are done, each with a README and `.env.example`. CI runs `doctor` on each, smoke-tests the Next.js and Express servers against a scripted offline model, and dry-run bundles the Worker, failing on any `node:*` import. The browser suite (`e2e/`) covers plain-html and the cross-origin sidecar. `cloudflare-worker` chats with only an OpenAI key; its Upstash retrieval additionally needs an Upstash index. Still open: `apps/docs`, the recipes, and the release pipeline.
+**Status:** the four examples are done, each with a README and `.env.example`. CI runs `doctor` on each, smoke-tests the Next.js and Express servers against a scripted offline model, and dry-run bundles the Worker, failing on any `node:*` import. The browser suite (`e2e/`) covers plain-html and the cross-origin sidecar. `cloudflare-worker` chats with only an OpenAI key; its Upstash retrieval additionally needs an Upstash index. The VitePress docs site, generated config reference, four recipes, changeset, provenance release workflow, and SRI manifest are implemented. Publishing has not happened yet.
 
 ---
 
@@ -299,7 +299,7 @@ Phases 5, 6 and 7 are independently parallelisable once 4 lands, if more than on
 - [x] `npx sitebot init` to working chatbot in under five minutes, verified on a fresh machine (Phase 9, recorded above)
 - [x] Config reference docs generated from the Zod schema (`apps/docs`, checked in the build and the tests)
 - [x] Deployment security checklist published and enforced by `doctor --production`
-- [ ] Every normative rule in docs 02–08 has at least one corresponding test — audited in [`rule-audit.md`](./rule-audit.md): all covered except three open items (history summary, chunk-level re-embedding, the remaining browser fixtures)
+- [ ] Every normative rule in docs 02–08 has at least one corresponding test — audited in [`rule-audit.md`](./rule-audit.md): all covered except two open items (history summary and the remaining browser fixtures)
 
 ---
 

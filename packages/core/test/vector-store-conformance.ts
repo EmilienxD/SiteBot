@@ -40,6 +40,7 @@ function chunk(
       contentHash: overrides.contentHash ?? `hash-${id}`,
       updatedAt: overrides.updatedAt ?? '2026-08-03T00:00:00Z',
       tokens: overrides.tokens ?? 10,
+      ...(overrides.ordinal === undefined ? {} : { ordinal: overrides.ordinal }),
       ...(overrides.lang === undefined ? {} : { lang: overrides.lang }),
     },
   }
@@ -50,10 +51,12 @@ const CORPUS: Chunk[] = [
   chunk('shipping-1', 'How long does shipping take? Orders ship in 2 business days.', [1, 0, 0], {
     url: 'https://example.com/shipping',
     title: 'Shipping',
+    ordinal: 0,
   }),
   chunk('shipping-2', 'Express shipping is overnight for most addresses.', [0.95, 0.05, 0], {
     url: 'https://example.com/shipping',
     title: 'Shipping',
+    ordinal: 1,
   }),
   chunk('returns-1', 'Return any item within 30 days for a full refund.', [0, 1, 0], {
     url: 'https://example.com/returns',
@@ -209,7 +212,11 @@ export function runVectorStoreConformance(factory: StoreFactory): void {
         if (s.documentChunks === undefined) return context.skip('documentChunks not implemented')
         await s.upsert(CORPUS)
         const chunks = await s.documentChunks('https://example.com/shipping')
-        expect(chunks.map((c) => c.id).sort()).toEqual(['shipping-1', 'shipping-2'])
+        expect(chunks.map((c) => c.id)).toEqual(['shipping-1', 'shipping-2'])
+        expect(chunks.map((c) => c.embedding)).toEqual([
+          [1, 0, 0],
+          [0.95, 0.05, 0],
+        ])
       } finally {
         await s.close()
       }

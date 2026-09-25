@@ -116,7 +116,7 @@ The others were correctness issues:
 | §3.5 Model recorded in the manifest; a mismatch refuses incremental runs | `ingest/src/pipeline.test.ts` "model mismatch error text names --force"      | ✅     |
 | §3.6 s2 Unchanged documents cost no embedding calls                | `ingest/src/pipeline.test.ts`                                                        | ✅     |
 | §3.6 s3 Conditional GET with the recorded validators               | `ingest/src/pipeline.test.ts` "re-fetches a sitemap page conditionally…"             | 🔧     |
-| §3.6 s4 Only changed *chunks* re-embedded                           | Document-level only: a changed document is re-embedded whole                          | ⚠️ 2   |
+| §3.6 s4 Only changed *chunks* re-embedded                           | `ingest/src/pipeline.test.ts` "re-embeds only changed chunks"                         | ✅     |
 | §3.6 s5–6 Removed documents lose their chunks; atomic manifest      | `ingest/src/pipeline.test.ts`                                                        | ✅     |
 | §3.7 Unreachable store → degraded, chat continues                   | `core/src/engine-knowledge.test.ts`                                                  | ✅     |
 | §3.8 Retrieval: `minScore` note, neighbours, dedupe, recall          | `core/src/knowledge/golden-retrieval.test.ts`, `store-conformance.test.ts`            | ✅     |
@@ -162,10 +162,7 @@ The others were correctness issues:
    with a cheap model call, cache the summary in `session.state`, and refresh it every ten dropped
    messages. `truncateHistory` already accepts the summary; the engine has to produce and cache it.
    Until then, turns past the context window are simply gone.
-2. **Chunk-level re-embedding (06 §3.6 step 4).** Chunk ids are positional, so an edit to one paragraph
-   re-embeds the whole document. Content-addressed chunk ids would let unchanged chunks keep their
-   vectors. This affects cost only; results are unchanged.
-3. **Browser coverage still missing (07 §11).** Tailwind and Bootstrap fixture pages (one maximally
+2. **Browser coverage still missing (07 §11).** Tailwind and Bootstrap fixture pages (one maximally
    hostile stylesheet covers the mechanism today), an SPA fixture for `refreshPageContext`, a browser
    test for resume-after-drop (unit-tested in `widget/src/chat.test.ts`), and the manual screen-reader
    script.

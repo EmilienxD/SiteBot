@@ -69,7 +69,9 @@ export class MemoryVectorStore implements VectorStore {
 
   /** Chunks of one document in stored ordinal order — for `expandNeighbours`. */
   async documentChunks(url: string): Promise<Chunk[]> {
-    return [...this.chunks.values()].filter((chunk) => chunk.metadata.url === url)
+    return [...this.chunks.values()]
+      .filter((chunk) => chunk.metadata.url === url)
+      .sort((a, b) => (a.metadata.ordinal ?? 0) - (b.metadata.ordinal ?? 0))
   }
 
   async deleteByIds(ids: string[]): Promise<void> {

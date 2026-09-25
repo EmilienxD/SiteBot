@@ -14,7 +14,7 @@
 
 /** docs/06 §3.4 — one indexed chunk, with the metadata citations need. */
 export interface Chunk {
-  /** Stable: sha256(sourceId + path + ordinal). */
+  /** Stable for unchanged content within a document. */
   id: string
   text: string
   embedding: number[]
@@ -32,6 +32,8 @@ export interface ChunkMetadata {
   contentHash: string
   updatedAt: string
   tokens: number
+  /** Position within the current document, used for neighbour expansion. */
+  ordinal?: number
   lang?: string
 }
 

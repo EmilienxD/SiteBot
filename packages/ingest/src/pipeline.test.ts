@@ -151,24 +151,60 @@ describe('runIngest()', () => {
     expect(kept.etag).toBe('"v1"')
   })
 
-  // Document-level: a changed document is re-embedded whole. Re-embedding only
-  // its changed chunks (docs/06 §3.6 step 4) is not implemented yet; see
-  // docs/rule-audit.md.
-  it('a changed document is re-embedded', async () => {
+  it('re-embeds only changed chunks and removes replaced vectors', async () => {
     const embedder = countingEmbedder()
     const store = new MemoryVectorStore()
-    const first = configFor('Version one of the policy text.')
+    const original = [
+      'Alpha policy applies to all new orders.',
+      'Beta policy covers returns within thirty days.',
+      'Gamma policy explains the warranty period.',
+    ].join('\n\n')
+    const first = configFor(original)
+    first.knowledge.chunk.strategy = 'fixed'
+    first.knowledge.chunk.maxTokens = 12
+    first.knowledge.chunk.overlapTokens = 0
     await runIngest(first, { store, embedder, manifestDir: dir })
-    const before = await store.stats()
+    const beforeIds = (await readManifest({ dir }))!.sources.docs!.documents['sitebot:docs']!
+      .chunkHashes
+    expect(beforeIds).toHaveLength(3)
     embedder.calls.length = 0
-    await runIngest(configFor('Version two of the policy text, now longer.'), {
+    const revised = configFor(original.replace('Alpha policy', 'Updated policy'))
+    revised.knowledge.chunk.strategy = 'fixed'
+    revised.knowledge.chunk.maxTokens = 12
+    revised.knowledge.chunk.overlapTokens = 0
+    const run = await runIngest(revised, {
       store,
       embedder,
       manifestDir: dir,
     })
-    expect(embedder.calls.length).toBeGreaterThan(0)
-    const after = await store.stats()
-    expect(after.chunks).toBeGreaterThanOrEqual(before.chunks)
+    const afterIds = (await readManifest({ dir }))!.sources.docs!.documents['sitebot:docs']!
+      .chunkHashes
+    expect(afterIds).toHaveLength(3)
+    expect(afterIds[0]).not.toBe(beforeIds[0])
+    expect(afterIds.slice(1)).toEqual(beforeIds.slice(1))
+    expect(run.embedding.chunks).toBe(1)
+    expect(run.chunksAffected).toBe(2)
+    expect(embedder.calls).toHaveLength(1)
+    expect(embedder.calls[0]).toHaveLength(1)
+    expect((await store.stats()).chunks).toBe(3)
+    const stored = await store.documentChunks('sitebot:docs')
+    expect(stored.map((chunk) => chunk.id)).toEqual(afterIds)
+
+    embedder.calls.length = 0
+    const withIntro = configFor(
+      `An introductory note was added today.\n\n${original.replace('Alpha policy', 'Updated policy')}`,
+    )
+    withIntro.knowledge.chunk.strategy = 'fixed'
+    withIntro.knowledge.chunk.maxTokens = 12
+    withIntro.knowledge.chunk.overlapTokens = 0
+    const inserted = await runIngest(withIntro, { store, embedder, manifestDir: dir })
+    const insertedIds = (await readManifest({ dir }))!.sources.docs!.documents['sitebot:docs']!
+      .chunkHashes
+    expect(insertedIds.slice(1)).toEqual(afterIds)
+    expect(inserted.embedding.chunks).toBe(1)
+    expect((await store.documentChunks('sitebot:docs')).map((chunk) => chunk.id)).toEqual(
+      insertedIds,
+    )
   })
 
   it('a removed document removes its chunks', async () => {
@@ -195,6 +231,34 @@ describe('runIngest()', () => {
     expect(run.sources[0]!.removed).toBe(1)
     const afterCount = (await store.stats()).chunks
     expect(afterCount).toBeLessThan(withBothCount)
+  })
+
+  it('a selected source refresh preserves the other sources in the manifest', async () => {
+    const config = configFor('First source content.')
+    config.knowledge.sources.push({ type: 'text', id: 'other', content: 'Other source content.' })
+    const store = new MemoryVectorStore()
+    const embedder = countingEmbedder()
+    await runIngest(config, { store, embedder, manifestDir: dir })
+    const otherBefore = (await readManifest({ dir }))!.sources.other
+
+    config.knowledge.sources[0] = { type: 'text', id: 'docs', content: 'Updated first source.' }
+    await runIngest(config, { store, embedder, manifestDir: dir, sourceIds: ['docs'] })
+
+    expect((await readManifest({ dir }))!.sources.other).toEqual(otherBefore)
+    expect((await store.stats()).documents).toBe(2)
+  })
+
+  it('removes vectors belonging to sources removed from the config', async () => {
+    const config = configFor('First source content.')
+    config.knowledge.sources.push({ type: 'text', id: 'other', content: 'Other source content.' })
+    const store = new MemoryVectorStore()
+    const embedder = countingEmbedder()
+    await runIngest(config, { store, embedder, manifestDir: dir })
+
+    await runIngest(configFor('First source content.'), { store, embedder, manifestDir: dir })
+
+    expect((await readManifest({ dir }))!.sources.other).toBeUndefined()
+    expect((await store.stats()).documents).toBe(1)
   })
 
   it('a model change without --force fails with a clear message', async () => {
@@ -228,6 +292,29 @@ describe('runIngest()', () => {
       force: true,
     })
     expect(run.embedding.chunks).toBeGreaterThan(0)
+  })
+
+  it('--force removes stale chunks from the existing store', async () => {
+    const store = new MemoryVectorStore()
+    const embedder = countingEmbedder()
+    await runIngest(configFor('The former policy has been retired.'), {
+      store,
+      embedder,
+      manifestDir: dir,
+    })
+    const oldIds = (await readManifest({ dir }))!.sources.docs!.documents['sitebot:docs']!
+      .chunkHashes
+    const run = await runIngest(configFor('The new policy is now active.'), {
+      store,
+      embedder,
+      manifestDir: dir,
+      force: true,
+    })
+    const nextIds = (await readManifest({ dir }))!.sources.docs!.documents['sitebot:docs']!
+      .chunkHashes
+    expect(run.embedding.chunks).toBe(1)
+    expect(nextIds).not.toEqual(oldIds)
+    expect((await store.documentChunks('sitebot:docs')).map((chunk) => chunk.id)).toEqual(nextIds)
   })
 
   it('--dry-run writes nothing, spends nothing', async () => {

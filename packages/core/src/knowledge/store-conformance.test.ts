@@ -156,14 +156,20 @@ function fakePg(rows: PgRows = { chunks: new Map(), meta: new Map() }) {
         const limit = Number(params.at(-1)) || 10
         return { rows: scoresOf(vector).slice(0, limit) as unknown as Record<string, unknown>[] }
       }
-      if (text.startsWith('SELECT id, text, metadata FROM')) {
+      if (text.startsWith('SELECT id, text, metadata, embedding::text AS embedding FROM')) {
         return {
           rows: [...rows.chunks.values()]
             .filter((row) => row['url'] === params[0])
+            .sort((a, b) => {
+              const left = (a['metadata'] as { ordinal?: number }).ordinal ?? Infinity
+              const right = (b['metadata'] as { ordinal?: number }).ordinal ?? Infinity
+              return left - right
+            })
             .map((row) => ({
               id: row['id'],
               text: row['text'],
               metadata: row['metadata'],
+              embedding: row['embedding'],
             })),
         }
       }

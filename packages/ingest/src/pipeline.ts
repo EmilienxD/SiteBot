@@ -97,16 +97,31 @@ export async function runIngest(
   const sources = selectSources(config.knowledge.sources, options.sourceIds)
   const progress = options.onProgress ?? (() => {})
 
-  const manifest = options.force
-    ? null
-    : await readManifest({
-        ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }),
-      })
+  const previousManifest = await readManifest({
+    ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }),
+  })
+  const manifest = options.force ? null : previousManifest
   const fingerprint = {
     model: embedding.model,
     ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
   }
   assertModelCompatible(manifest, fingerprint)
+  const selectedIds = new Set(sources.map(idOf))
+  const partialRun = sources.length < config.knowledge.sources.length
+  if (
+    options.force &&
+    partialRun &&
+    previousManifest !== null &&
+    (previousManifest.model !== fingerprint.model ||
+      previousManifest.dimensions !== fingerprint.dimensions)
+  ) {
+    throw new Error(
+      'A model change requires rebuilding every source; rerun --force without --source.',
+    )
+  }
+  const removedSources = partialRun
+    ? []
+    : Object.keys(previousManifest?.sources ?? {}).filter((id) => !selectedIds.has(id))
 
   // ── 1. fetch ─────────────────────────────────────────────────────────────
   const planned: PlannedSource[] = []
@@ -130,6 +145,7 @@ export async function runIngest(
 
     const remaining = new Set(Object.keys(existing?.documents ?? {}))
     const plannedDocuments: PlannedDocument[] = []
+    const removedChunkIdsForDocument: string[] = []
 
     for (const raw of documents) {
       remaining.delete(raw.url)
@@ -151,11 +167,23 @@ export async function runIngest(
           : before.contentHash === raw.contentHash
             ? 'unchanged'
             : 'changed'
-      const chunks = chunkDocument(document, config.knowledge.chunk)
-      for (const chunk of chunks) chunk.id = chunkId(id, raw.url, chunk.ordinal)
+      const chunks = raw.notModified ? [] : chunkDocument(document, config.knowledge.chunk)
+      const occurrences = new Map<string, number>()
+      for (const chunk of chunks) {
+        const content = JSON.stringify([chunk.headingPath, chunk.text])
+        const occurrence = occurrences.get(content) ?? 0
+        occurrences.set(content, occurrence + 1)
+        chunk.id = chunkId(id, raw.url, content, occurrence)
+      }
+      if (before !== undefined && status === 'changed') {
+        const nextIds = new Set(chunks.map((chunk) => chunk.id))
+        removedChunkIdsForDocument.push(
+          ...before.chunkHashes.filter((chunkId) => !nextIds.has(chunkId)),
+        )
+      }
       plannedDocuments.push({
         document,
-        chunks: raw.notModified ? [] : chunks,
+        chunks,
         status,
         ...(raw.notModified && before ? { keptChunkHashes: before.chunkHashes } : {}),
         ...(raw.etag === undefined ? {} : { etag: raw.etag }),
@@ -163,7 +191,7 @@ export async function runIngest(
       })
     }
 
-    const removedChunkIds: string[] = []
+    const removedChunkIds: string[] = [...removedChunkIdsForDocument]
     for (const url of remaining) {
       const before = existing?.documents[url]
       if (before === undefined) continue
@@ -178,39 +206,36 @@ export async function runIngest(
     })
   }
 
-  const chunksAffected = planned.reduce(
-    (total, plan) =>
-      total +
-      plan.documents.reduce(
-        (count, doc) => count + (doc.status === 'unchanged' ? 0 : doc.chunks.length),
-        0,
-      ),
-    0,
-  )
   const toEmbed: { document: DocumentInput; chunk: RawChunk }[] = []
-  const estimatedTokens = planned.reduce(
-    (total, plan) =>
-      total +
-      plan.documents.reduce(
-        (count, doc) =>
-          count +
-          (doc.status === 'unchanged'
-            ? 0
-            : doc.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0)),
-        0,
-      ),
-    0,
-  )
   for (const plan of planned) {
     for (const doc of plan.documents) {
       if (doc.status === 'unchanged') continue
-      for (const chunk of doc.chunks) toEmbed.push({ document: doc.document, chunk })
+      const previousIds = new Set(
+        manifest?.sources[idOf(plan.source)]?.documents[doc.document.url]?.chunkHashes ?? [],
+      )
+      for (const chunk of doc.chunks) {
+        if (!previousIds.has(chunk.id)) toEmbed.push({ document: doc.document, chunk })
+      }
     }
   }
+  const chunksAffected =
+    toEmbed.length +
+    planned.reduce((total, plan) => total + plan.removedChunkIds.length, 0) +
+    removedSources.reduce(
+      (total, id) =>
+        total +
+        Object.values(previousManifest?.sources[id]?.documents ?? {}).reduce(
+          (count, document) => count + document.chunkHashes.length,
+          0,
+        ),
+      0,
+    )
+  const estimatedTokens = toEmbed.reduce((total, { chunk }) => total + chunk.tokens, 0)
 
   // ── 2. embed + write ─────────────────────────────────────────────────────
   let embeddingTokens = 0
   let embeddingBatches = 0
+  let chunksToWrite: Chunk[] = []
   let store = options.store
   if (store === undefined && !options.dryRun) {
     store = await createNodeVectorStore(config.knowledge.store, {
@@ -238,7 +263,7 @@ export async function runIngest(
     embeddingTokens = result.tokens
     embeddingBatches = Math.ceil(texts.length / embedding.batchSize)
 
-    const chunksToWrite: Chunk[] = toEmbed.map((entry, index) => ({
+    chunksToWrite = toEmbed.map((entry, index) => ({
       id: entry.chunk.id,
       text: entry.chunk.text,
       embedding: result.embeddings[index]!,
@@ -251,14 +276,55 @@ export async function runIngest(
         contentHash: entry.document.contentHash,
         updatedAt: entry.document.updatedAt,
         tokens: entry.chunk.tokens,
+        ordinal: entry.chunk.ordinal,
         ...(entry.document.lang === undefined ? {} : { lang: entry.document.lang }),
       },
     }))
-    if (chunksToWrite.length > 0) await store.upsert(chunksToWrite)
   }
   if (!options.dryRun && store !== undefined) {
-    const removedIds = planned.flatMap((plan) => plan.removedChunkIds)
-    if (removedIds.length > 0) await store.deleteByIds(removedIds)
+    const reordered: Chunk[][] = []
+    if (!options.force && store.documentChunks !== undefined) {
+      const newChunks = new Map(chunksToWrite.map((chunk) => [chunk.id, chunk]))
+      for (const plan of planned) {
+        for (const doc of plan.documents) {
+          if (doc.status !== 'changed') continue
+          const existing = (await store.documentChunks(doc.document.url)).filter(
+            (chunk) => chunk.metadata.sourceId === doc.document.sourceId,
+          )
+          const oldChunks = new Map(existing.map((chunk) => [chunk.id, chunk]))
+          const ordered = doc.chunks.map((chunk) => {
+            const fresh = newChunks.get(chunk.id)
+            if (fresh !== undefined) return fresh
+            const kept = oldChunks.get(chunk.id)
+            if (kept === undefined || kept.embedding.length === 0) return null
+            return {
+              ...kept,
+              metadata: {
+                ...kept.metadata,
+                title: doc.document.title,
+                contentHash: doc.document.contentHash,
+                updatedAt: doc.document.updatedAt,
+                ordinal: chunk.ordinal,
+              },
+            }
+          })
+          if (existing.length === 0 || ordered.some((chunk) => chunk === null)) continue
+          reordered.push(ordered as Chunk[])
+          for (const chunk of doc.chunks) newChunks.delete(chunk.id)
+        }
+      }
+      chunksToWrite = [...newChunks.values()]
+    }
+    if (options.force) {
+      for (const plan of planned) await store.deleteBySource(idOf(plan.source))
+    }
+    for (const id of removedSources) await store.deleteBySource(id)
+    for (const chunks of reordered) if (chunks.length > 0) await store.upsert(chunks)
+    if (chunksToWrite.length > 0) await store.upsert(chunksToWrite)
+    if (!options.force) {
+      const removedIds = planned.flatMap((plan) => plan.removedChunkIds)
+      if (removedIds.length > 0) await store.deleteByIds(removedIds)
+    }
   }
 
   // ── 3. manifest ──────────────────────────────────────────────────────────
@@ -268,7 +334,7 @@ export async function runIngest(
       model: fingerprint.model,
       ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
       builtAt: new Date().toISOString(),
-      sources: {},
+      sources: partialRun && previousManifest !== null ? { ...previousManifest.sources } : {},
     }
     for (const plan of planned) {
       const documents: Record<string, ManifestDocument> = {}
@@ -326,7 +392,11 @@ export async function runIngest(
         ? {
             chunks: planned.reduce(
               (total, plan) =>
-                total + plan.documents.reduce((count, doc) => count + doc.chunks.length, 0),
+                total +
+                plan.documents.reduce(
+                  (count, doc) => count + (doc.keptChunkHashes?.length ?? doc.chunks.length),
+                  0,
+                ),
               0,
             ),
             documents: planned.reduce((total, plan) => total + plan.documents.length, 0),
@@ -407,6 +477,6 @@ async function loadSource(
   }
 }
 
-function chunkId(sourceId: string, url: string, ordinal: number): string {
-  return sha256(`${sourceId}:${url}:${ordinal}`)
+function chunkId(sourceId: string, url: string, content: string, occurrence: number): string {
+  return sha256(JSON.stringify([sourceId, url, content, occurrence]))
 }

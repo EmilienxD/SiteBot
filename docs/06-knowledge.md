@@ -95,7 +95,7 @@ Every chunk carries metadata that matters at query time:
 
 ```ts
 interface Chunk {
-  id: string // stable: sha256(sourceId + path + ordinal)
+  id: string // stable for unchanged text and heading within a document
   text: string
   embedding: number[]
   metadata: {

@@ -29,7 +29,7 @@ export interface DocumentInput {
 }
 
 export interface RawChunk {
-  /** sha256(sourceId + url + ordinal) — set by the pipeline, not the chunker. */
+  /** Content-addressed id, set by the pipeline after chunking. */
   id: string
   text: string
   headingPath: string[]
