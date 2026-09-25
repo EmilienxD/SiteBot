@@ -247,7 +247,7 @@ Before the model call:
 2. Append the new user message from the request. **Only the last user message from the request body is trusted** when server storage is on.
 3. Truncate: keep the system prompt, the most recent `N` messages where the running token estimate stays under `contextBudget = maxContextTokens − systemTokens − maxOutputTokens − 20%` headroom.
 4. Never split a tool-call/tool-result pair — truncate to a clean assistant-message boundary.
-5. If truncation dropped more than 4 messages, prepend a synthetic summary message (produced by a cheap model call, cached per session, refreshed every 10 dropped messages).
+5. If truncation dropped more than 4 messages, prepend a synthetic summary message (produced by a cheap model call, cached per session, refreshed every 10 dropped messages). The cheap model is `security.budget.degradeTo` when configured, else the primary; the call is charged to the budget, and if it fails the request goes on without a summary.
 
 `maxContextTokens` is derived per model from a small lookup table with a conservative default of 128k for unknown models.
 

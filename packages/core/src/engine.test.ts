@@ -952,3 +952,95 @@ describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () =
     expect(prompt).not.toContain('fetch failed')
   })
 })
+
+describe('history summary (docs/04 §6 step 5)', () => {
+  const usage = {
+    inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 5, text: 5, reasoning: 0 },
+  }
+  /** Chats with `answer`; summarises with `summary`, or fails if it is an Error. */
+  function summarisingModel(summary: string | Error) {
+    return new MockLanguageModelV3({
+      doGenerate: async () => {
+        if (summary instanceof Error) throw summary
+        return {
+          content: [{ type: 'text', text: summary }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage,
+          warnings: [],
+        }
+      },
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: 'stream-start', warnings: [] },
+            { type: 'text-start', id: 't1' },
+            { type: 'text-delta', id: 't1', delta: 'answer' },
+            { type: 'text-end', id: 't1' },
+            { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage },
+          ] as LanguageModelV3StreamPart[],
+          chunkDelayInMs: null,
+          initialDelayInMs: null,
+        }),
+      }),
+    })
+  }
+  /** Twelve turns far too large for the context window, oldest first. */
+  async function longSession() {
+    const store = new MemorySessionStore()
+    const huge = 'word '.repeat(30_000)
+    for (let turn = 0; turn < 6; turn += 1)
+      await store.append(SESSION, [
+        userMessage(`question ${turn} ${huge}`, `u${turn}`),
+        {
+          id: `a${turn}`,
+          role: 'assistant',
+          parts: [{ type: 'text', text: `reply ${turn} ${huge}` }],
+        },
+      ])
+    return store
+  }
+
+  it('summarises dropped turns, sends the summary, and caches it', async () => {
+    const model = summarisingModel('They asked about returns and were told 30 days.')
+    const store = await longSession()
+    const engine = createEngine(testConfig(), { adapters: adapterFor(model), sessionStore: store })
+    const ask = async (text: string, id: string) =>
+      streamedText(
+        await engine.handleChat(
+          { sessionId: SESSION, messages: [userMessage(text, id)] },
+          testContext(),
+        ),
+      )
+
+    expect(await ask('and exchanges?', 'm_new')).toBe('answer')
+    expect(model.doGenerateCalls).toHaveLength(1)
+    const sent = JSON.stringify(model.doStreamCalls[0]?.prompt)
+    expect(sent).toContain('Summary of the earlier conversation')
+    expect(sent).toContain('They asked about returns and were told 30 days.')
+    expect((await store.get(SESSION))?.state?.['historySummary']).toMatchObject({
+      text: expect.stringContaining('returns'),
+    })
+
+    // A couple more dropped messages is not worth another call.
+    await ask('one more thing', 'm_next')
+    expect(model.doGenerateCalls).toHaveLength(1)
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('They asked about returns')
+  })
+
+  it('answers without a summary when the summary call fails', async () => {
+    const model = summarisingModel(new Error('provider down'))
+    const engine = createEngine(testConfig(), {
+      adapters: adapterFor(model),
+      sessionStore: await longSession(),
+    })
+    const text = await streamedText(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('and exchanges?', 'm_new')] },
+        testContext(),
+      ),
+    )
+    expect(text).toBe('answer')
+    expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).not.toContain('Summary of the earlier')
+  })
+})

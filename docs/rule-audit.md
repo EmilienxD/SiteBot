@@ -80,7 +80,7 @@ The others were correctness issues:
 | §4 Policy, stop conditions, `onMaxSteps`                           | `core/src/agent/policy.test.ts`                                                              | ✅     |
 | §6 r1–2 Only the last user message is trusted                      | `core/src/engine.test.ts` "trusts only the last user message from the body"                   | ✅     |
 | §6 r3–4 Truncate to the budget at a clean boundary; tool pairs intact | `core/src/session/truncate.test.ts`                                                       | 🔧     |
-| §6 r5 Synthetic summary when more than 4 messages are dropped      | `truncateHistory` supports it; the engine never supplies one                                  | ⚠️ 1   |
+| §6 r5 Synthetic summary when more than 4 messages are dropped, cached, refreshed every 10 | `core/src/engine.test.ts` "history summary" | 🔧 |
 | §7 `mapError`: fixed table, no provider text, detail only in debug and non-production | `core/src/stream/errors.test.ts`                                           | 🔧     |
 | §8 Usage and cost over every step                                   | `core/src/engine.test.ts` "onStep and onFinish report steps, usage and the model"            | 🔧     |
 | §9 Hooks: all eight, isolation of a throwing hook                   | `core/src/engine.test.ts` "hooks", `server/src/hooks.test.ts`                                 | 🔧     |
@@ -158,11 +158,7 @@ The others were correctness issues:
 
 ## Open tasks
 
-1. **History summary (04 §6 step 5).** When truncation drops more than four messages, summarise them
-   with a cheap model call, cache the summary in `session.state`, and refresh it every ten dropped
-   messages. `truncateHistory` already accepts the summary; the engine has to produce and cache it.
-   Until then, turns past the context window are simply gone.
-2. **Browser coverage still missing (07 §11).** Tailwind and Bootstrap fixture pages (one maximally
+1. **Browser coverage still missing (07 §11).** Tailwind and Bootstrap fixture pages (one maximally
    hostile stylesheet covers the mechanism today), an SPA fixture for `refreshPageContext`, a browser
    test for resume-after-drop (unit-tested in `widget/src/chat.test.ts`), and the manual screen-reader
    script.

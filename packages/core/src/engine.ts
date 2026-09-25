@@ -4,6 +4,7 @@ import {
   createUIMessageStreamResponse,
   dynamicTool,
   generateId,
+  generateText,
   jsonSchema,
   streamText,
   type ModelMessage,
@@ -579,13 +580,25 @@ export function createEngine(
           } else {
             history = await buildHistory(request)
           }
-          const truncated = truncateHistory(history, {
-            budgetTokens: contextBudget({
-              modelId: `${config.backend.provider}:${config.backend.model}`,
-              systemTokens: estimateTokens(system),
-              maxOutputTokens: config.backend.maxOutputTokens,
-            }),
+          const budgetTokens = contextBudget({
+            modelId: `${config.backend.provider}:${config.backend.model}`,
+            systemTokens: estimateTokens(system),
+            maxOutputTokens: config.backend.maxOutputTokens,
           })
+          let truncated = truncateHistory(history, { budgetTokens })
+          // docs/04 §6 step 5: more than a few dropped turns get a summary, so
+          // a long conversation keeps its thread instead of losing it.
+          if (truncated.summaryNeeded) {
+            const summary = await summarizeDropped(
+              history.slice(0, truncated.dropped),
+              session,
+              ctx,
+            )
+            if (summary !== undefined) {
+              truncated = truncateHistory(history, { budgetTokens, summary })
+              if (session !== null) session = await sessionStore.get(request.sessionId)
+            }
+          }
           const estimatedTokens =
             estimateTokens(system) +
             Math.ceil(JSON.stringify(truncated.messages).length / 4) +
@@ -1009,6 +1022,69 @@ export function createEngine(
     })
   }
 
+  /**
+   * A summary of the turns truncation dropped (docs/04 §6 step 5), cached in
+   * the session and refreshed once {@link SUMMARY_REFRESH} more messages have
+   * been dropped since. Made with `security.budget.degradeTo` when one is
+   * configured — the config's own "cheap model" — else the primary, and
+   * charged to the budget like any call. Any failure means no summary, never
+   * a failed chat.
+   */
+  async function summarizeDropped(
+    dropped: UIMessage[],
+    session: Awaited<ReturnType<SessionStore['get']>>,
+    ctx: RequestContext,
+  ): Promise<string | undefined> {
+    const cached = session?.state?.['historySummary'] as
+      { droppedCount: number; text: string } | undefined
+    if (cached !== undefined && dropped.length - cached.droppedCount < SUMMARY_REFRESH)
+      return cached.text
+    try {
+      const entry = config.security.budget.degradeTo ?? chain[0]!
+      const resolved = await resolveModel(entry, {
+        ...(deps.adapters === undefined ? {} : { adapters: deps.adapters }),
+        baseDir: config.$meta.baseDir,
+      })
+      const transcript = dropped
+        .map((message) => {
+          const text = message.parts
+            .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+            .join(' ')
+          return text === '' ? '' : `${message.role}: ${text}`
+        })
+        .filter(Boolean)
+        .join('\n')
+      const result = await generateText({
+        model: resolved.model,
+        system:
+          'Summarise this earlier part of a website chat in at most five short sentences: what the visitor wanted, what they were told, and anything still open. Plain text, no preamble.',
+        prompt: transcript,
+        maxOutputTokens: 300,
+        maxRetries: 1,
+        abortSignal: ctx.signal,
+      })
+      void ctx.budget.record(
+        {
+          inputTokens: result.usage.inputTokens ?? 0,
+          outputTokens: result.usage.outputTokens ?? 0,
+          totalTokens: result.usage.totalTokens ?? 0,
+        },
+        resolved.id,
+      )
+      const text = `Summary of the earlier conversation, which is no longer shown in full:\n${result.text.trim()}`
+      if (session !== null && config.storage.type !== 'none') {
+        await sessionStore.set({
+          ...session,
+          state: { ...session.state, historySummary: { droppedCount: dropped.length, text } },
+        })
+      }
+      return text
+    } catch (error) {
+      ctx.logger.warn('history summary failed; continuing without it', { error })
+      return undefined
+    }
+  }
+
   function isClientTool(name: string): boolean {
     return config.tools.some(
       (entry) => !('from' in entry) && entry.name === name && entry.executor?.type === 'client',
@@ -1032,6 +1108,9 @@ export function createEngine(
     return checked.ok ? output : { error: 'invalid_output', issues: checked.issues }
   }
 }
+
+/** docs/04 §6 step 5: refresh a cached summary every this many newly dropped messages. */
+const SUMMARY_REFRESH = 10
 
 /** Same bound as the widget's (docs/05 §5 rule 5). */
 const CLIENT_RESULT_MAX_CHARS = 16_384
