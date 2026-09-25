@@ -180,6 +180,11 @@ export function createController(
         signal: controller.signal,
       })
       if (!response.ok || !response.body) throw await responseError(response)
+      // `pageHash` is the hash the *server* holds (docs/03 §10 cost control). It
+      // moves only once a request carrying the extract has been accepted: a
+      // refreshPageContext() or a failed send must not make the next request
+      // send a bare hash the server has never seen.
+      if (body.pageContext?.extract !== undefined) pageHash = body.pageContext.extractHash
       for await (const chunk of readEvents(response.body)) {
         if (!applyChunk(streaming, chunk, onData)) continue
         status.value = 'streaming'
@@ -375,7 +380,6 @@ export function createController(
       autoRetried = false
       lastSend = { text: value, hidden: sendOptions?.hidden }
       pageContext = await extractPageContext(config.ui, pageHash, customContext)
-      pageHash = pageContext?.extractHash
       const id = `m_${createSessionId().replace(/-/g, '')}`
       emit('message', { role: 'user', text: value, messageId: id })
       setMessages([
@@ -469,7 +473,6 @@ export function createController(
     },
     async refreshPageContext() {
       pageContext = await extractPageContext(config.ui, pageHash, customContext)
-      pageHash = pageContext?.extractHash
       return pageContext
     },
     registerTool(name, handler) {

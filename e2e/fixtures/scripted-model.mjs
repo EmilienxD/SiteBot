@@ -8,6 +8,7 @@
 //   "fill bad"        → same, with a volume that is not an option
 //   "go to shop"      → navigate to /shop
 //   "forms?"          → echo the form outline from the page context
+//   "markers?"        → list the PAGE-MARKER-x tokens in the page context
 //   "slow"            → a long answer streamed in small, delayed chunks
 //   anything else     → a short markdown answer
 // After a tool result, it reports that result back verbatim.
@@ -77,6 +78,15 @@ function script(prompt, call) {
       )
       .join('\n')
     return reply(/\[Form [^\]]*\]/.exec(all)?.[0] ?? 'No forms on this page.')
+  }
+  if (text.includes('markers?')) {
+    // Every PAGE-MARKER-x token in the system prompt, i.e. in the page context.
+    const system = prompt
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n')
+    const markers = [...new Set(system.match(/PAGE-MARKER-\w+/g) ?? [])]
+    return reply(markers.length > 0 ? markers.join(' ') : 'no markers')
   }
   if (text.includes('slow'))
     return {

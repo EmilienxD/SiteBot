@@ -299,7 +299,7 @@ Phases 5, 6 and 7 are independently parallelisable once 4 lands, if more than on
 - [x] `npx sitebot init` to working chatbot in under five minutes, verified on a fresh machine (Phase 9, recorded above)
 - [x] Config reference docs generated from the Zod schema (`apps/docs`, checked in the build and the tests)
 - [x] Deployment security checklist published and enforced by `doctor --production`
-- [ ] Every normative rule in docs 02–08 has at least one corresponding test — audited in [`rule-audit.md`](./rule-audit.md): all covered except two open items (history summary and the remaining browser fixtures)
+- [x] Every normative rule in docs 02–08 has at least one corresponding test — see [`rule-audit.md`](./rule-audit.md); screen-reader behaviour is a manual check ([`screen-reader-check.md`](./screen-reader-check.md))
 
 ---
 

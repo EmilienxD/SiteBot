@@ -33,6 +33,7 @@ The others were correctness issues:
 | Ingest never sent the conditional-GET validators it recorded, so every re-run re-downloaded every page | 06 §3.6 s3  | Validators passed; a 304 keeps the document's chunks                 |
 | The script tag's `data-endpoint`/`data-key` were ignored, so a cross-origin embed called its own origin | 07 §2 s1    | `scriptOptions()`; browser test against the sidecar example          |
 | Inherited text styles on `<site-chat>` leaked through the shadow root                            | 07 §4, §11  | Pinned with `!important` on `:host`; pixel test with hostile CSS     |
+| After `refreshPageContext()`, the next request sent a bare hash the server had never seen, so an SPA lost its page context after every route change | 03 §9–10 | The hash advances only once the server has accepted the extract |
 | An unknown `EngineError` code threw inside the error path                                        | 04 §7       | Degrades to `internal_error`                                          |
 
 ## 02 — Configuration
@@ -138,7 +139,9 @@ The others were correctness issues:
 | §9 History persistence namespaced by public key, capped at 50      | `widget/src/chat.test.ts`, `widget/src/index.test.ts`                                 | ✅     |
 | §10 Error table; provider text never shown; never throws into the host | `widget/src/chat.test.ts`, `widget/src/panel.test.tsx`, `widget/src/element-api.test.tsx` | ✅ |
 | §11 Visual baselines, 4 viewports × 2 themes                       | `e2e/visual.spec.ts`                                                                 | ✅     |
-| §11 Tailwind/Bootstrap fixtures, SPA fixture, resume-after-drop in a browser, screen-reader script | One hostile stylesheet stands in for the CSS fixtures; the rest are unit-level or manual | ⚠️ 3 |
+| §11 Tailwind and Bootstrap on the host page; SPA route changes; resume after a drop | `e2e/visual.spec.ts` "… on the host page", `e2e/fixture-pages.spec.ts`, `widget/src/chat.test.ts` "page context hashing" | 🔧 |
+| §8 Screen-reader behaviour | Manual: [`screen-reader-check.md`](./screen-reader-check.md), run before each release | ✅ |
+| §8 Launcher `aria-controls` names the dialog | `e2e/chat.spec.ts` "shows the greeting…" | 🔧 |
 
 ## 08 — Security
 
@@ -158,7 +161,5 @@ The others were correctness issues:
 
 ## Open tasks
 
-1. **Browser coverage still missing (07 §11).** Tailwind and Bootstrap fixture pages (one maximally
-   hostile stylesheet covers the mechanism today), an SPA fixture for `refreshPageContext`, a browser
-   test for resume-after-drop (unit-tested in `widget/src/chat.test.ts`), and the manual screen-reader
-   script.
+None. Every normative rule in docs 02–08 has a test, except screen-reader behaviour, which is
+checked by hand with [`screen-reader-check.md`](./screen-reader-check.md).

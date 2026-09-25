@@ -327,6 +327,9 @@ export class SiteChatElement extends HTMLElement {
           class={`launcher${left ? ' left' : ''}${ui.launcher.label ? ' pill' : ''}${this.#open ? ' open' : ''}`}
           aria-label={ui.a11y.launcherAriaLabel}
           aria-expanded={this.#open}
+          // docs/07 §8. Only while the panel is in this shadow root: in iframe
+          // mode it lives in another document, where an id reference is void.
+          aria-controls={panel !== null && ui.isolation !== 'iframe' ? 'sitebot-panel' : undefined}
           aria-haspopup="dialog"
           tabIndex={this.#open ? -1 : 0}
           onClick={() => this.toggle()}

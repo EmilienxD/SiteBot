@@ -85,6 +85,38 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('page context hashing (docs/03 §9–10)', () => {
+  it('sends the extract once, then only its hash — and again after an SPA route change', async () => {
+    document.body.innerHTML = '<main><p>First view of the app.</p></main>'
+    const controller = setup()
+    fetchMock.mockImplementation(async () => sse(answer('ok')))
+    const context = (call: number) => body(call).pageContext as Json
+
+    await controller.send('one')
+    expect(context(0).extract).toContain('First view')
+    await controller.send('two')
+    expect(context(1).extract).toBeUndefined()
+    expect(context(1).extractHash).toBe(context(0).extractHash)
+
+    // The route changes client-side; the app calls refreshPageContext().
+    document.body.innerHTML = '<main><p>Second view, pricing.</p></main>'
+    await controller.refreshPageContext()
+    await controller.send('three')
+    expect(context(2).extract).toContain('Second view')
+  })
+
+  it('resends the extract when the request that carried it failed', async () => {
+    document.body.innerHTML = '<main><p>Only view.</p></main>'
+    const controller = setup()
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 500 }))
+    await controller.send('one')
+    fetchMock.mockResolvedValueOnce(sse(answer('ok')))
+    await controller.send('two')
+    const last = body(fetchMock.mock.calls.length - 1).pageContext as Json
+    expect(last.extract).toContain('Only view.')
+  })
+})
+
 describe('identity (docs/07 §9)', () => {
   it('keeps the identify() token in memory, never in local or session storage', async () => {
     fetchMock.mockResolvedValueOnce(sse(answer('Hello!')))

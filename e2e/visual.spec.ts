@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { expect, test } from './fixtures.js'
 
 /**
@@ -54,3 +55,42 @@ test.describe('hostile host CSS', () => {
     await expect(widget.panel).toHaveScreenshot('panel-desktop-light.png')
   })
 })
+
+// The real framework stylesheets docs/07 §11 names, loaded from their npm
+// packages so the test runs offline: Tailwind's preflight reset and the whole
+// of Bootstrap, each with the usual tweaks a site makes on top.
+const FRAMEWORKS = {
+  'tailwind preflight': {
+    path: join(import.meta.dirname, '..', 'node_modules', 'tailwindcss', 'preflight.css'),
+    extra: 'html { font-size: 18px; } body { font-family: Georgia, serif; line-height: 2; }',
+  },
+  bootstrap: {
+    path: join(
+      import.meta.dirname,
+      '..',
+      'node_modules',
+      'bootstrap',
+      'dist',
+      'css',
+      'bootstrap.min.css',
+    ),
+    extra: ':root { --bs-body-font-size: 1.25rem; --bs-body-color: #d63384; }',
+  },
+}
+
+for (const [name, sheet] of Object.entries(FRAMEWORKS)) {
+  test.describe(`${name} on the host page`, () => {
+    test.use({ viewport: viewports.desktop, colorScheme: 'light', reducedMotion: 'reduce' })
+
+    test('leaves the panel pixel-identical', async ({ page, widget }) => {
+      await page.goto('/')
+      await page.addStyleTag({ path: sheet.path })
+      await page.addStyleTag({ content: sheet.extra })
+      await widget.open()
+      await widget.send('hi there')
+      await widget.idle()
+      await widget.input.blur()
+      await expect(widget.panel).toHaveScreenshot('panel-desktop-light.png')
+    })
+  })
+}

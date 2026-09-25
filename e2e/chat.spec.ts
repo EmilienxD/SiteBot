@@ -5,6 +5,9 @@ test.describe('rendering and streaming', () => {
     await page.goto('/')
     await widget.open()
     await expect(widget.log).toContainText('Looking for a coffee')
+    // docs/07 §8: the launcher names the dialog it controls.
+    await expect(widget.launcher).toHaveAttribute('aria-controls', 'sitebot-panel')
+    await expect(widget.panel).toHaveAttribute('id', 'sitebot-panel')
     await widget.send('hi there')
     await expect(widget.lastAnswer()).toContainText('You said: hi there')
     await expect(widget.lastAnswer().locator('strong')).toHaveText('Hello')

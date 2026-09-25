@@ -29,6 +29,8 @@ export interface PanelProps {
   framed?: boolean
 }
 
+/** The launcher's aria-controls target — element.tsx repeats the literal so the launcher never imports this chunk. */
+const PANEL_ID = 'sitebot-panel'
 const MOBILE_QUERY = '(max-width: 639px)'
 
 /** The panel's glyphs — in the lazy chunk, unlike the launcher's. */
@@ -133,6 +135,7 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
   return (
     <div
       ref={panel}
+      id={PANEL_ID}
       class={`panel${ui.position === 'bottom-left' ? ' left' : ''}${framed ? ' framed' : ''}`}
       role="dialog"
       aria-modal={mobile ? 'true' : 'false'}
