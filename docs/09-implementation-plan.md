@@ -183,6 +183,14 @@ Ordered phases with explicit acceptance criteria. Each phase is a coherent unit 
 - Changing the embedding model without `--force` fails with a clear message.
 - Citations render and link correctly in the browser.
 
+Crawler acceptance (2026-10-01): robots enforcement, redirect checks and
+Retry-After behavior have fixture tests. `renderJs` now uses optional Playwright
+and Chromium for crawl and sitemap pages; setup failures are explicit and
+doctor diagnoses short extraction. `e2e/crawling.spec.ts` verifies asynchronous
+API content, JavaScript-created links, robots-blocked documents/resources,
+503 recovery, changed API content behind an unchanged shell, and real widget
+retrieval with offline model/embeddings.
+
 **Milestone: v0.5 — feature-complete agent.**
 
 ---

@@ -86,6 +86,16 @@ ingesting.
 
 "no index at …" for a `sqlite` store: nothing has been ingested yet. Run `sitebot ingest`.
 
+### `knowledge extraction`
+
+The online doctor samples up to three sitemap pages or the crawl seed, using the
+same robots rules and extraction settings as ingestion. Skipped with `--offline`.
+If every sampled page is shorter than `knowledge.extract.minChars`, check the
+selector or enable `knowledge.extract.renderJs: true` for a JavaScript site.
+Install the optional renderer with `npm install playwright` and
+`npx playwright install chromium`. Missing browser setup, inaccessible sources,
+and unavailable robots rules report a failure with a suggested fix.
+
 ### `knowledge index`
 
 - **"no index has been built"**: run `sitebot ingest`, with `--dry-run` first to see the pages and the

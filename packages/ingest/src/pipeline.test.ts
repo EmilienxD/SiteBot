@@ -103,6 +103,7 @@ describe('runIngest()', () => {
     const seenValidators: (string | null)[] = []
     const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const url = String(input)
+      if (url.endsWith('robots.txt')) return new Response('', { status: 404 })
       if (url.endsWith('sitemap.xml'))
         return new Response('<urlset><url><loc>https://acme.test/returns</loc></url></urlset>', {
           headers: { 'content-type': 'application/xml' },

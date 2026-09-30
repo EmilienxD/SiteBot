@@ -2,6 +2,18 @@ import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import { sha256 } from './hash.js'
 import { globToRegExp, normalizeUrl, sameHost } from './url.js'
 import { extract, type ExtractOptions } from './extract.js'
+import {
+  DEFAULT_UA,
+  fetchPage,
+  requestGate,
+  requestScheduler,
+  type HttpFetchOptions,
+} from './http.js'
+import { robotsPolicy } from './robots.js'
+import { createRenderer } from './render.js'
+
+export { fetchPage } from './http.js'
+export type { HttpFetchOptions } from './http.js'
 
 export interface RawDocument {
   url: string
@@ -19,63 +31,26 @@ export interface RawDocument {
   notModified?: boolean
 }
 
-/**
- * HTTP fetching with the politeness defaults of docs/06 §3.2 —
- * 2 concurrent requests per host, a 200 ms delay between them, a named UA —
- * and conditional `GET`s when the manifest recorded validators.
- *
- * `renderJs: true` is schema-supported but deliberately not implemented: it
- * needs a headless browser, which is a Playwright-sized price that is only
- * worth paying when a site actually needs it. `sitebot doctor` detects "page
- * extracts to nothing" and points at the config switch; turning the switch on
- * with no browser installed fails fast here rather than silently returning an
- * empty corpus.
- */
-
-export interface HttpFetchOptions {
-  fetchImpl?: typeof fetch
-  concurrency?: number
-  delayMs?: number
-  userAgent?: string
-}
-
-interface Fetched {
-  status: number
-  body: string
-  etag?: string
-  lastModified?: string
-  notModified: boolean
-}
-
-const DEFAULT_UA = 'sitebot-ingest/1.0'
-
-export async function fetchPage(
-  url: string,
-  options: HttpFetchOptions & { validators?: { etag?: string; lastModified?: string } } = {},
-): Promise<Fetched> {
-  const headers: Record<string, string> = {
-    'user-agent': options.userAgent ?? DEFAULT_UA,
+/** Shared source lifecycle: robots, request spacing and optional JS rendering. */
+async function webFetcher(config: ResolvedConfig, options: HttpFetchOptions, respectRobots = true) {
+  const http: HttpFetchOptions = {
+    ...options,
+    userAgent:
+      options.userAgent ??
+      `${DEFAULT_UA}${config.siteContext.primaryUrl === undefined ? '' : ` (+${config.siteContext.primaryUrl})`}`,
+    beforeRequest: requestScheduler(options),
+    withRequest: requestGate(options.concurrency),
   }
-  if (options.validators?.etag !== undefined) headers['if-none-match'] = options.validators.etag
-  if (options.validators?.lastModified !== undefined) {
-    headers['if-modified-since'] = options.validators.lastModified
-  }
-  const impl = options.fetchImpl ?? fetch
-  const response = await impl(url, { headers })
-  if (response.status === 304) {
-    return { status: 304, body: '', notModified: true }
-  }
-  const body = await response.text()
+  if (respectRobots) http.allowed = robotsPolicy(http)
+  const renderer = config.knowledge.extract.renderJs ? await createRenderer(http) : undefined
   return {
-    status: response.status,
-    body,
-    notModified: false,
-    ...(response.headers.get('etag') === null
-      ? {}
-      : { etag: response.headers.get('etag') ?? undefined }),
-    ...(response.headers.get('last-modified') === null
-      ? {}
-      : { lastModified: response.headers.get('last-modified') ?? undefined }),
+    fetch: (url: string, validators?: { etag?: string; lastModified?: string }) =>
+      renderer === undefined ? fetchPage(url, { ...http, validators }) : renderer.fetch(url),
+    // Sitemaps are XML, even when their pages need JavaScript.
+    xml: (url: string) => fetchPage(url, http),
+    close: async () => {
+      await renderer?.close()
+    },
   }
 }
 
@@ -408,57 +383,63 @@ export async function loadSitemap(
     onProgress?: (message: string) => void
   } = {},
 ): Promise<RawDocument[]> {
-  const fetched = await fetchPage(source.url, options)
-  if (fetched.status >= 400) throw new Error(`sitemap fetch failed (${fetched.status})`)
-  const urls = parseSitemap(fetched.body)
-  const include = source.include.map(globToRegExp)
-  const exclude = source.exclude.map(globToRegExp)
-  const filtered = urls.filter((url) => {
-    if (include.length > 0 && !include.some((pattern) => pattern.test(url))) return false
-    if (exclude.some((pattern) => pattern.test(url))) return false
-    return true
-  })
-  const limited = source.maxPages === undefined ? filtered : filtered.slice(0, source.maxPages)
+  const web = await webFetcher(config, options)
+  try {
+    const fetched = await web.xml(source.url)
+    if (fetched.status >= 400) throw new Error(`sitemap fetch failed (${fetched.status})`)
+    const urls = parseSitemap(fetched.body)
+    const include = source.include.map(globToRegExp)
+    const exclude = source.exclude.map(globToRegExp)
+    const filtered = urls.filter((url) => {
+      if (include.length > 0 && !include.some((pattern) => pattern.test(url))) return false
+      if (exclude.some((pattern) => pattern.test(url))) return false
+      return true
+    })
+    const limited = source.maxPages === undefined ? filtered : filtered.slice(0, source.maxPages)
 
-  const documents: RawDocument[] = []
-  const concurrency = options.concurrency ?? 2
-  const delayMs = options.delayMs ?? 200
-  let cursor = 0
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, limited.length) }, async () => {
-      while (cursor < limited.length) {
-        const url = limited[cursor++]!
-        const previous = options.previous?.get(url)
-        const page = await fetchPage(url, { ...options, validators: previous ?? {} })
-        if (page.notModified && previous !== undefined) {
-          documents.push(placeholder(url, previous))
-          continue
+    const documents: RawDocument[] = []
+    const concurrency = options.concurrency ?? 2
+    let cursor = 0
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, limited.length) }, async () => {
+        while (cursor < limited.length) {
+          const url = limited[cursor++]!
+          const previous = options.previous?.get(url)
+          const page = await web.fetch(url, previous)
+          if (page.notModified && previous !== undefined) {
+            documents.push(placeholder(url, previous))
+            continue
+          }
+          if (page.status >= 400) continue
+          const extracted = extract(page.body, {
+            selector: config.knowledge.extract.selector,
+            strip: [...config.knowledge.extract.strip],
+            format: config.knowledge.extract.format,
+            minChars: config.knowledge.extract.minChars,
+          })
+          if (extracted.skipped) {
+            options.onProgress?.(`skipped short page ${url}`)
+            continue
+          }
+          documents.push({
+            url: normalizeUrl(url),
+            title: extracted.title,
+            text: extracted.text,
+            contentHash: sha256(extracted.text),
+            updatedAt: new Date().toISOString(),
+            sourceType: 'sitemap',
+            headings: extracted.headings,
+            ...(page.etag === undefined ? {} : { etag: page.etag }),
+            ...(page.lastModified === undefined ? {} : { lastModified: page.lastModified }),
+          })
+          options.onProgress?.(`fetched ${url}`)
         }
-        if (page.status >= 400) continue
-        const extracted = extract(page.body, {
-          selector: config.knowledge.extract.selector,
-          strip: [...config.knowledge.extract.strip],
-          format: config.knowledge.extract.format,
-          minChars: config.knowledge.extract.minChars,
-        })
-        if (extracted.skipped) continue
-        documents.push({
-          url: normalizeUrl(url),
-          title: extracted.title,
-          text: extracted.text,
-          contentHash: sha256(extracted.text),
-          updatedAt: new Date().toISOString(),
-          sourceType: 'sitemap',
-          headings: extracted.headings,
-          ...(page.etag === undefined ? {} : { etag: page.etag }),
-          ...(page.lastModified === undefined ? {} : { lastModified: page.lastModified }),
-        })
-        options.onProgress?.(`fetched ${url}`)
-        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
-      }
-    }),
-  )
-  return documents
+      }),
+    )
+    return documents
+  } finally {
+    await web.close()
+  }
 }
 
 function placeholder(
@@ -489,59 +470,87 @@ export function parseSitemap(xml: string): string[] {
 
 /**
  * `type: crawl` — the fallback when no sitemap exists. Same politeness as
- * `loadSitemap`; `respectRobots` defaults true in the schema and is honoured
- * via the fetcher's UA (a future phase can add full robots parsing).
+ * `loadSitemap`; robots rules are checked before any page or redirect request.
  */
 export async function loadCrawl(
   source: Extract<KnowledgeSource, { type: 'crawl' }>,
   config: ResolvedConfig,
   options: HttpFetchOptions & { onProgress?: (message: string) => void } = {},
 ): Promise<RawDocument[]> {
-  const seed = new URL(source.url)
-  const include = source.include.map(globToRegExp)
-  const exclude = source.exclude.map(globToRegExp)
-  const seen = new Set<string>([source.url])
-  const queue: { url: string; depth: number }[] = [{ url: source.url, depth: 0 }]
-  const documents: RawDocument[] = []
-  const maxPages = source.maxPages ?? Number.POSITIVE_INFINITY
+  const web = await webFetcher(config, options, source.respectRobots)
+  try {
+    const include = source.include.map(globToRegExp)
+    const exclude = source.exclude.map(globToRegExp)
+    const seen = new Set<string>([normalizeUrl(source.url)])
+    const queue: { url: string; depth: number }[] = [{ url: source.url, depth: 0 }]
+    const documents: RawDocument[] = []
+    const maxPages = source.maxPages ?? Number.POSITIVE_INFINITY
 
-  while (queue.length > 0 && documents.length < maxPages) {
-    const { url, depth } = queue.shift()!
-    const page = await fetchPage(url, options)
-    if (page.status >= 400) continue
-    const extracted = extract(page.body, {
-      selector: config.knowledge.extract.selector,
-      strip: [...config.knowledge.extract.strip],
-      format: config.knowledge.extract.format,
-      minChars: config.knowledge.extract.minChars,
-    })
-    if (!extracted.skipped) {
-      documents.push({
-        url: normalizeUrl(url),
-        title: extracted.title,
-        text: extracted.text,
-        contentHash: sha256(extracted.text),
-        updatedAt: new Date().toISOString(),
-        sourceType: 'crawl',
-        headings: extracted.headings,
+    while (queue.length > 0 && documents.length < maxPages) {
+      const { url, depth } = queue.shift()!
+      const page = await web.fetch(url)
+      if (page.status >= 400) continue
+      const extracted = extract(page.body, {
+        selector: config.knowledge.extract.selector,
+        strip: [...config.knowledge.extract.strip],
+        format: config.knowledge.extract.format,
+        minChars: config.knowledge.extract.minChars,
       })
+      if (!extracted.skipped) {
+        documents.push({
+          url: normalizeUrl(url),
+          title: extracted.title,
+          text: extracted.text,
+          contentHash: sha256(extracted.text),
+          updatedAt: new Date().toISOString(),
+          sourceType: 'crawl',
+          headings: extracted.headings,
+        })
+      } else {
+        options.onProgress?.(`skipped short page ${url}`)
+      }
+      options.onProgress?.(`crawled ${url}`)
+      if (depth >= source.maxDepth) continue
+      for (const link of extractLinks(page.body, page.url)) {
+        const normalized = normalizeUrl(link)
+        if (seen.has(normalized)) continue
+        if (!sameHost(normalized, source.url)) continue
+        if (include.length > 0 && !include.some((pattern) => pattern.test(normalized))) continue
+        if (exclude.some((pattern) => pattern.test(normalized))) continue
+        seen.add(normalized)
+        queue.push({ url: normalized, depth: depth + 1 })
+      }
     }
-    options.onProgress?.(`crawled ${url}`)
-    if (depth >= source.maxDepth) continue
-    for (const link of extractLinks(page.body, seed.origin)) {
-      const normalized = normalizeUrl(link)
-      if (seen.has(normalized)) continue
-      if (!sameHost(normalized, source.url)) continue
-      if (include.length > 0 && !include.some((pattern) => pattern.test(normalized))) continue
-      if (exclude.some((pattern) => pattern.test(normalized))) continue
-      seen.add(normalized)
-      queue.push({ url: normalized, depth: depth + 1 })
-    }
-    if ((options.delayMs ?? 200) > 0) {
-      await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 200))
-    }
+    return documents
+  } finally {
+    await web.close()
   }
-  return documents
+}
+
+/** A bounded doctor probe using the same filtering, robots and extraction as ingest. */
+export async function probeWebExtraction(
+  config: ResolvedConfig,
+  options: HttpFetchOptions = {},
+): Promise<{ documents: number; shortPages: number }> {
+  let documents = 0
+  let shortPages = 0
+  const onProgress = (message: string) => {
+    if (message.startsWith('skipped short page ')) shortPages++
+  }
+  for (const source of config.knowledge.sources) {
+    if (source.type === 'sitemap')
+      documents += (
+        await loadSitemap({ ...source, maxPages: Math.min(source.maxPages ?? 3, 3) }, config, {
+          ...options,
+          onProgress,
+        })
+      ).length
+    if (source.type === 'crawl')
+      documents += (
+        await loadCrawl({ ...source, maxDepth: 0, maxPages: 1 }, config, { ...options, onProgress })
+      ).length
+  }
+  return { documents, shortPages }
 }
 
 function extractLinks(html: string, origin: string): string[] {

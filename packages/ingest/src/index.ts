@@ -12,6 +12,7 @@ export const CHUNK_STRATEGIES = ['semantic', 'heading', 'fixed'] as const
 export type ChunkStrategy = (typeof CHUNK_STRATEGIES)[number]
 
 export { runIngest } from './pipeline.js'
+export { probeWebExtraction } from './sources.js'
 export type { IngestOptions, IngestRun } from './pipeline.js'
 
 export { chunkDocument } from './chunk.js'

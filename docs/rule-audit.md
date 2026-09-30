@@ -114,6 +114,11 @@ The others were correctness issues:
 | Rule                                                              | Test                                                                                 | Status |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------ |
 | §2 Page context never sent when `includePageContext: false`        | `core/src/prompt/compose.test.ts`                                                    | ✅     |
+| §3.2 Robots rules, user-agent groups, blocked seeds/redirects, opt-out | `ingest/src/robots.test.ts`, `ingest/src/sources.test.ts`, `e2e/crawling.spec.ts` | 🔧 |
+| §3.2 Per-host concurrency/spacing; Retry-After seconds/dates and bounded recovery | `ingest/src/http.test.ts`, `e2e/crawling.spec.ts` | 🔧 |
+| §3.3 Optional JavaScript rendering for crawl/sitemap; clear missing-browser errors | `ingest/src/render.test.ts`, `e2e/crawling.spec.ts` | 🔧 |
+| §3.3 Doctor diagnoses short SPA extraction, offline probe stays inert | `cli/src/doctor.test.ts` | 🔧 |
+| §3.6 Rendered API changes bypass shell validators; failures preserve the corpus | `e2e/crawling.spec.ts` | 🔧 |
 | §3.5 Model recorded in the manifest; a mismatch refuses incremental runs | `ingest/src/pipeline.test.ts` "model mismatch error text names --force"      | ✅     |
 | §3.6 s2 Unchanged documents cost no embedding calls                | `ingest/src/pipeline.test.ts`                                                        | ✅     |
 | §3.6 s3 Conditional GET with the recorded validators               | `ingest/src/pipeline.test.ts` "re-fetches a sitemap page conditionally…"             | 🔧     |

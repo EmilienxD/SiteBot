@@ -28,7 +28,7 @@ import {
 import { createEngine, importProviderPackage } from '@sitebot/core'
 import { connectStdioMcp, createNodeSessionStore, createSafeFetch } from '@sitebot/core/node'
 import { lazySessionStore } from '@sitebot/server/node'
-import { readManifest } from '@sitebot/ingest'
+import { probeWebExtraction, readManifest } from '@sitebot/ingest'
 import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { findInlineSecrets, productionDoctor } from '../production.js'
@@ -455,6 +455,43 @@ async function knowledgeChecks(config: ResolvedConfig, options: DiagnoseOptions)
   }
 
   checks.push(await indexCheck(config, options))
+  if (knowledge.sources.some((source) => source.type === 'sitemap' || source.type === 'crawl')) {
+    if (options.offline === true) {
+      checks.push({
+        name: 'knowledge extraction',
+        status: 'skip',
+        detail: 'offline; page extraction was not probed',
+      })
+    } else {
+      try {
+        const sample = await probeWebExtraction(config, {
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        })
+        const short = sample.documents === 0 && sample.shortPages > 0
+        checks.push({
+          name: 'knowledge extraction',
+          status: sample.documents > 0 ? 'pass' : 'warn',
+          detail: short
+            ? `all ${sample.shortPages} sampled pages extract below ${knowledge.extract.minChars} characters`
+            : `${sample.documents} sampled documents extracted`,
+          ...(short
+            ? {
+                fix: knowledge.extract.renderJs
+                  ? 'Check knowledge.extract.selector and minChars; the rendered pages still extract too little content.'
+                  : 'For a JavaScript site, install playwright and Chromium, then set knowledge.extract.renderJs: true. Otherwise check selector and minChars.',
+              }
+            : {}),
+        })
+      } catch (error) {
+        checks.push({
+          name: 'knowledge extraction',
+          status: 'fail',
+          detail: error instanceof Error ? error.message : String(error),
+          fix: 'Check source access and robots.txt. For renderJs, install playwright and run `npx playwright install chromium`.',
+        })
+      }
+    }
+  }
 
   if (options.offline !== true && knowledge.store.type === 'sqlite') {
     const path = resolve(options.cwd, knowledge.store.path)

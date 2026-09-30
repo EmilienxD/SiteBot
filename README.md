@@ -192,6 +192,8 @@ each and a smoke test against a scripted offline model, so none of them needs a 
 ## Next step
 
 [Phase 10 — examples, docs, release](./docs/09-implementation-plan.md#phase-10--examples-docs-release):
-the examples, docs site, release workflow and [rule-to-test audit](./docs/rule-audit.md) are done. What
-remains is choosing a license and publishing: add an `NPM_TOKEN` secret, push, and merge the
-"Version Packages" PR the release workflow opens.
+The examples, docs site and release workflow are implemented. SQLite, crawler
+robots compliance and optional JavaScript rendering are complete. Remaining
+retrieval refinements, live validation, accessibility acceptance and release
+work are tracked in the [project status audit](./docs/project-status-audit.md).
+For JavaScript sites, see the [renderer setup](./packages/ingest/README.md).

@@ -214,6 +214,57 @@ describe('formatMs', () => {
   })
 })
 
+describe('doctor web extraction', () => {
+  const webConfig = () =>
+    makeConfig({
+      knowledge: {
+        sources: [{ type: 'sitemap', url: 'https://example.test/sitemap.xml' }],
+        embedding: { provider: 'openai', model: 'offline' },
+      },
+    })
+
+  it('diagnoses empty SPA shells and suggests the working renderer', async () => {
+    const report = await diagnose(webConfig(), {
+      cwd: process.cwd(),
+      env: {},
+      fetchImpl: (async (input) => {
+        const url = String(input)
+        if (url.endsWith('robots.txt')) return new Response('', { status: 404 })
+        if (url.endsWith('sitemap.xml'))
+          return new Response('<urlset><url><loc>https://example.test/spa</loc></url></urlset>')
+        return new Response('<main id="app"></main><script>/* SPA */</script>')
+      }) as typeof fetch,
+    })
+    const check = report.checks.find((entry) => entry.name === 'knowledge extraction')
+    expect(check?.status).toBe('warn')
+    expect(check?.detail).toContain('all 1 sampled pages')
+    expect(check?.fix).toContain('renderJs: true')
+  })
+
+  it('never fetches or starts a browser when offline', async () => {
+    const config = webConfig()
+    config.knowledge.extract.renderJs = true
+    const fetchImpl = (async () => {
+      throw new Error('unexpected fetch')
+    }) as typeof fetch
+    const report = await diagnose(config, { cwd: process.cwd(), env: {}, offline: true, fetchImpl })
+    expect(report.checks.find((entry) => entry.name === 'knowledge extraction')?.status).toBe(
+      'skip',
+    )
+  })
+
+  it('reports inaccessible sources instead of recommending JavaScript blindly', async () => {
+    const report = await diagnose(webConfig(), {
+      cwd: process.cwd(),
+      env: {},
+      fetchImpl: (async () => new Response('', { status: 404 })) as typeof fetch,
+    })
+    expect(report.checks.find((entry) => entry.name === 'knowledge extraction')?.status).toBe(
+      'fail',
+    )
+  })
+})
+
 describe('doctor knowledge index (docs/06 §3.6)', () => {
   const withKnowledge = () =>
     makeConfig({

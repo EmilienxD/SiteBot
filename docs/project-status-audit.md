@@ -1,6 +1,6 @@
 # Project status audit — 2026-09-30
 
-The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **The SQLite work has since been completed**, as recorded below. The other gaps remain; the README's claim that only licensing and publishing remain is too narrow.
+The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **SQLite, robots enforcement and JavaScript rendering have since been completed**, as recorded below. The other gaps remain.
 
 ## Verified locally during the initial audit
 
@@ -35,17 +35,40 @@ The SQLite conformance suite now uses the actual extension instead of fake SQL, 
 
 Validation after these changes: build, lint, formatting, typecheck and package checks pass; **920 unit/integration tests and 56 security tests pass**. The Node 22.13 native/ingestion selection passes 54 tests, with one unrelated optional Upstash neighbour-expansion test skipped.
 
-### 2. Implement crawler robots and retry behavior
+### 2. Crawler robots and retry behavior — resolved 2026-10-01
 
-[`sources.ts`](../packages/ingest/src/sources.ts) never reads `source.respectRobots`, fetches/parses `robots.txt`, or honors `Retry-After`. Sending a named User-Agent does not enforce robots rules. This contradicts [knowledge §3.2](./06-knowledge.md).
+The original probe indexed `/blocked` without requesting robots.txt. Crawl and
+sitemap ingestion now load cached rules per origin and check pages, redirect
+targets and renderer resources before fetching. Crawl opt-out remains explicit.
+Tests cover user-agent precedence, allow/disallow ties, wildcards, queries,
+encoded paths, blocked seeds, redirects, missing/unavailable rules and opt-out.
 
-An offline probe with `respectRobots: true` and a `robots.txt` disallowing `/blocked` requested and indexed both `/` and `/blocked`, without requesting robots.txt at all. Add robots parsing/enforcement and response-aware retry/backoff, with fixture tests covering blocked URLs and 429/503 responses.
+HTTP and browser requests honor Retry-After seconds/dates on 429/503, with
+bounded backoff retries. A per-host request gate limits concurrency to two and
+spaces starts by 200 ms. Persistent server/network failures abort before index
+writes; tests cover failure recovery and preserving the previous corpus.
 
-### 3. Make `knowledge.extract.renderJs` work or reject the option clearly
+### 3. JavaScript rendering — resolved 2026-10-01
 
-The schema and generated reference advertise headless-browser fetching, but no execution path reads the setting. The comment in `sources.ts` says this is unimplemented and fails fast; it actually does neither rendering nor an explicit rejection.
+`renderJs: true` now runs optional Playwright/Chromium for both web source
+types. Isolated contexts execute scripts and API requests before extracting
+the resulting DOM. Crawl discovers JavaScript-created links. Missing setup,
+timeouts and network failures produce explicit errors. HTML-shell validators
+are bypassed so changed API content is re-indexed; content hashes still avoid
+embedding unchanged content. Doctor samples extraction and suggests rendering
+for empty shells; offline mode never probes sources or starts Chromium.
 
-An offline sitemap probe with `renderJs: true` and a page containing only an application shell returned **zero documents without throwing**. The described doctor check that diagnoses SPA extraction and suggests this switch is also absent. Implement the optional renderer and diagnostics, or reject unsupported use and update the documentation.
+`e2e/crawling.spec.ts` uses real Chromium and the real ingestion/store/server/
+widget with offline embeddings and model. It verifies API-loaded content,
+dynamic links, robots exclusions, 503 recovery, API changes behind an unchanged
+HTML shell, and retrieval through the widget. Setup and doctor checks have
+unit tests. Interactive Chrome navigation to the fixture was blocked with
+ERR_BLOCKED_BY_CLIENT; automated Chromium verification succeeds.
+
+Validation after the crawling changes: **955 unit/integration tests pass
+(one unrelated optional-store test skipped), 56 security tests pass, and all
+48 Chromium browser tests pass**. Build, typecheck, lint, formatting and all
+seven package checks pass. The existing Next.js tracing warning remains.
 
 ### 4. Finish or explicitly defer the advertised retrieval refinements
 
@@ -79,4 +102,6 @@ Scope the Next.js example's file tracing so production output does not unintenti
 
 ## Suggested next milestone
 
-SQLite is complete. Fix crawler compliance and the silently ignored settings next. Add provider/hosted-store smoke tests and record manual accessibility results. Then choose the license and release version, update status docs, and run the release gate.
+SQLite and crawling are complete. Resolve the remaining retrieval settings,
+add provider/hosted-store smoke tests and record manual accessibility results.
+Then choose the license and release version and run the release gate.

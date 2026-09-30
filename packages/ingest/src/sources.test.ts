@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { validateConfig, type ResolvedConfig } from '@sitebot/config'
-import { loadOpenApi, loadSitemap, parseSitemap, parseYamlSubset } from './sources.js'
+import { loadCrawl, loadOpenApi, loadSitemap, parseSitemap, parseYamlSubset } from './sources.js'
 
 /**
  * Source tests against a fixture HTTP server — docs/06 §7. No real network:
@@ -32,6 +32,21 @@ beforeAll(async () => {
     requestLog.push({ url: req.url ?? '', ua: req.headers['user-agent'] as string | undefined })
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     switch (url.pathname) {
+      case '/robots.txt':
+        res.end('User-agent: *\nDisallow: /admin\nAllow: /admin/public')
+        return
+      case '/':
+        res.end(
+          page(
+            'Home',
+            '<a href="/docs/getting-started">Start</a><a href="/admin/panel">Admin</a><a href="/redirect">Redirect</a>',
+          ),
+        )
+        return
+      case '/redirect':
+        res.writeHead(302, { location: '/admin/panel' })
+        res.end()
+        return
       case '/sitemap.xml': {
         // `<loc>`s are rewritten with the assigned port — a hard-coded port
         // would make this suite non-portable the first time 80 is taken.
@@ -117,6 +132,17 @@ function configWith(
 }
 
 describe('sources: sitemap', () => {
+  it('checks robots before fetching sitemap entries', async () => {
+    const start = requestLog.length
+    const config = configWith({ type: 'sitemap', url: `http://127.0.0.1:${port}/sitemap.xml` })
+    const source = config.knowledge.sources[0]!
+    if (source.type !== 'sitemap') throw new Error('bad test')
+    const docs = await loadSitemap(source, config, { delayMs: 0 })
+    expect(docs).toHaveLength(3)
+    const log = requestLog.slice(start)
+    expect(log.filter((r) => r.url === '/robots.txt')).toHaveLength(1)
+    expect(log.some((r) => r.url === '/admin/panel')).toBe(false)
+  })
   it('parses and filters the urlset', async () => {
     const config = configWith({
       type: 'sitemap',
@@ -159,6 +185,32 @@ describe('sources: sitemap', () => {
     expect(parseSitemap('<urlset><url><loc> https://a.test/x </loc></url></urlset>')).toEqual([
       'https://a.test/x',
     ])
+  })
+})
+
+describe('sources: crawl', () => {
+  it.each([true, false])(
+    'respectRobots=%s controls both links and redirects',
+    async (respectRobots) => {
+      const start = requestLog.length
+      const config = configWith({ type: 'crawl', url: `http://127.0.0.1:${port}/`, respectRobots })
+      const source = config.knowledge.sources[0]!
+      if (source.type !== 'crawl') throw new Error('bad test')
+      const documents = await loadCrawl(source, config, { delayMs: 0 })
+      const log = requestLog.slice(start)
+      expect(log.some((r) => r.url === '/robots.txt')).toBe(respectRobots)
+      expect(log.some((r) => r.url === '/admin/panel')).toBe(!respectRobots)
+      expect(documents.some((d) => d.title === 'Admin')).toBe(!respectRobots)
+    },
+  )
+
+  it('does not request a blocked seed', async () => {
+    const start = requestLog.length
+    const config = configWith({ type: 'crawl', url: `http://127.0.0.1:${port}/admin/panel` })
+    const source = config.knowledge.sources[0]!
+    if (source.type !== 'crawl') throw new Error('bad test')
+    expect(await loadCrawl(source, config, { delayMs: 0 })).toEqual([])
+    expect(requestLog.slice(start).map((r) => r.url)).toEqual(['/robots.txt'])
   })
 })
 

@@ -58,6 +58,16 @@ Run by `sitebot ingest`, importable as `@sitebot/ingest` for CI.
 
 Crawl politeness: 2 concurrent requests per host by default, 200 ms delay, `User-Agent: sitebot-ingest/1.0 (+<primaryUrl>)`, honours `robots.txt` and `Retry-After`. These are defaults a developer _can_ raise for their own site, but the shipped values are conservative.
 
+Robots checks apply to sitemap pages as well as crawl pages, and to redirect
+targets and renderer resources before they are requested. Crawl sources can
+explicitly opt out with `respectRobots: false`. Rules are cached per origin for
+each source; user-agent groups, longest matching allow/disallow rules, wildcard
+paths, query strings and encoded paths are supported. Missing robots files
+(4xx except 429) allow access. Network errors, unavailable robots files and
+persistent server errors stop ingestion before index writes. HTTP 429/503
+responses retry twice, using `Retry-After` seconds or HTTP dates, otherwise
+exponential backoff.
+
 ### 3.3 Extraction
 
 ```yaml
@@ -74,6 +84,17 @@ knowledge:
 - Headings are preserved — they drive the chunker and make citations meaningful.
 - Pages under `minChars` after extraction are skipped (nav-only shells, redirects).
 - `renderJs: true` opts into a headless-browser fetch for SPA-rendered sites. Off by default because it is slow and adds a Playwright dependency; `sitebot doctor` detects "sitemap present but every page extracts to < 200 chars" and suggests it.
+
+Install the optional peer with `npm install playwright` and install Chromium
+with `npx playwright install chromium` (pnpm equivalents are supported).
+Crawl and sitemap pages render in fresh contexts and wait for network idle,
+with a 30-second timeout. JavaScript-created links are followed by crawl
+sources. Browser/API requests obey robots and retry rules. Missing setup and
+rendering errors fail explicitly. Rendered pages bypass conditional GETs:
+an unchanged HTML-shell ETag says nothing about API-loaded content. Extracted
+content hashes still make unchanged re-ingestion free of embedding calls.
+The online doctor probes at most three sitemap pages or one crawl seed per
+source; `--offline` never starts a browser or fetches sources.
 
 ### 3.4 Chunking
 
