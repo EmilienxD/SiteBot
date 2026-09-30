@@ -244,170 +244,176 @@ export async function runIngest(
     })
   }
 
-  if (!options.dryRun && toEmbed.length > 0 && store !== undefined) {
-    const texts = toEmbed.map(({ chunk }) =>
-      chunk.headingPath.length === 0
-        ? chunk.text
-        : `${chunk.headingPath.join(' > ')}\n\n${chunk.text}`,
-    )
-    const result =
-      options.embedder !== undefined
-        ? await options.embedder.embedBatch(texts)
-        : await (async () => {
-            const { model } = await createEmbeddingModel(embedding)
-            return embedChunks(model, texts, {
-              batchSize: embedding.batchSize,
-              concurrency: options.concurrency ?? 4,
+  try {
+    if (!options.dryRun && toEmbed.length > 0 && store !== undefined) {
+      const texts = toEmbed.map(({ chunk }) =>
+        chunk.headingPath.length === 0
+          ? chunk.text
+          : `${chunk.headingPath.join(' > ')}\n\n${chunk.text}`,
+      )
+      const result =
+        options.embedder !== undefined
+          ? await options.embedder.embedBatch(texts)
+          : await (async () => {
+              const { model } = await createEmbeddingModel(embedding)
+              return embedChunks(model, texts, {
+                batchSize: embedding.batchSize,
+                concurrency: options.concurrency ?? 4,
+              })
+            })()
+      embeddingTokens = result.tokens
+      embeddingBatches = Math.ceil(texts.length / embedding.batchSize)
+
+      chunksToWrite = toEmbed.map((entry, index) => ({
+        id: entry.chunk.id,
+        text: entry.chunk.text,
+        embedding: result.embeddings[index]!,
+        metadata: {
+          url: entry.document.url,
+          title: entry.document.title,
+          headingPath: entry.chunk.headingPath,
+          sourceId: entry.document.sourceId,
+          sourceType: entry.document.sourceType,
+          contentHash: entry.document.contentHash,
+          updatedAt: entry.document.updatedAt,
+          tokens: entry.chunk.tokens,
+          ordinal: entry.chunk.ordinal,
+          ...(entry.document.lang === undefined ? {} : { lang: entry.document.lang }),
+        },
+      }))
+    }
+    if (!options.dryRun && store !== undefined) {
+      const reordered: Chunk[][] = []
+      if (!options.force && store.documentChunks !== undefined) {
+        const newChunks = new Map(chunksToWrite.map((chunk) => [chunk.id, chunk]))
+        for (const plan of planned) {
+          for (const doc of plan.documents) {
+            if (doc.status !== 'changed') continue
+            const existing = (await store.documentChunks(doc.document.url)).filter(
+              (chunk) => chunk.metadata.sourceId === doc.document.sourceId,
+            )
+            const oldChunks = new Map(existing.map((chunk) => [chunk.id, chunk]))
+            const ordered = doc.chunks.map((chunk) => {
+              const fresh = newChunks.get(chunk.id)
+              if (fresh !== undefined) return fresh
+              const kept = oldChunks.get(chunk.id)
+              if (kept === undefined || kept.embedding.length === 0) return null
+              return {
+                ...kept,
+                metadata: {
+                  ...kept.metadata,
+                  title: doc.document.title,
+                  contentHash: doc.document.contentHash,
+                  updatedAt: doc.document.updatedAt,
+                  ordinal: chunk.ordinal,
+                },
+              }
             })
-          })()
-    embeddingTokens = result.tokens
-    embeddingBatches = Math.ceil(texts.length / embedding.batchSize)
+            if (existing.length === 0 || ordered.some((chunk) => chunk === null)) continue
+            reordered.push(ordered as Chunk[])
+            for (const chunk of doc.chunks) newChunks.delete(chunk.id)
+          }
+        }
+        chunksToWrite = [...newChunks.values()]
+      }
+      if (options.force) {
+        for (const plan of planned) await store.deleteBySource(idOf(plan.source))
+      }
+      for (const id of removedSources) await store.deleteBySource(id)
+      for (const chunks of reordered) if (chunks.length > 0) await store.upsert(chunks)
+      if (chunksToWrite.length > 0) await store.upsert(chunksToWrite)
+      if (!options.force) {
+        const removedIds = planned.flatMap((plan) => plan.removedChunkIds)
+        if (removedIds.length > 0) await store.deleteByIds(removedIds)
+      }
+    }
 
-    chunksToWrite = toEmbed.map((entry, index) => ({
-      id: entry.chunk.id,
-      text: entry.chunk.text,
-      embedding: result.embeddings[index]!,
-      metadata: {
-        url: entry.document.url,
-        title: entry.document.title,
-        headingPath: entry.chunk.headingPath,
-        sourceId: entry.document.sourceId,
-        sourceType: entry.document.sourceType,
-        contentHash: entry.document.contentHash,
-        updatedAt: entry.document.updatedAt,
-        tokens: entry.chunk.tokens,
-        ordinal: entry.chunk.ordinal,
-        ...(entry.document.lang === undefined ? {} : { lang: entry.document.lang }),
-      },
-    }))
-  }
-  if (!options.dryRun && store !== undefined) {
-    const reordered: Chunk[][] = []
-    if (!options.force && store.documentChunks !== undefined) {
-      const newChunks = new Map(chunksToWrite.map((chunk) => [chunk.id, chunk]))
+    // ── 3. manifest ──────────────────────────────────────────────────────────
+    if (!options.dryRun) {
+      const next: Manifest = {
+        version: 1,
+        model: fingerprint.model,
+        ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
+        builtAt: new Date().toISOString(),
+        sources: partialRun && previousManifest !== null ? { ...previousManifest.sources } : {},
+      }
       for (const plan of planned) {
+        const documents: Record<string, ManifestDocument> = {}
         for (const doc of plan.documents) {
-          if (doc.status !== 'changed') continue
-          const existing = (await store.documentChunks(doc.document.url)).filter(
-            (chunk) => chunk.metadata.sourceId === doc.document.sourceId,
-          )
-          const oldChunks = new Map(existing.map((chunk) => [chunk.id, chunk]))
-          const ordered = doc.chunks.map((chunk) => {
-            const fresh = newChunks.get(chunk.id)
-            if (fresh !== undefined) return fresh
-            const kept = oldChunks.get(chunk.id)
-            if (kept === undefined || kept.embedding.length === 0) return null
-            return {
-              ...kept,
-              metadata: {
-                ...kept.metadata,
-                title: doc.document.title,
-                contentHash: doc.document.contentHash,
-                updatedAt: doc.document.updatedAt,
-                ordinal: chunk.ordinal,
-              },
-            }
-          })
-          if (existing.length === 0 || ordered.some((chunk) => chunk === null)) continue
-          reordered.push(ordered as Chunk[])
-          for (const chunk of doc.chunks) newChunks.delete(chunk.id)
+          documents[doc.document.url] = {
+            url: doc.document.url,
+            contentHash: doc.document.contentHash,
+            chunkHashes: doc.keptChunkHashes ?? doc.chunks.map((chunk) => chunk.id),
+            ...(doc.etag === undefined ? {} : { etag: doc.etag }),
+            ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
+          }
+        }
+        next.sources[idOf(plan.source)] = {
+          id: idOf(plan.source),
+          type: plan.source.type,
+          label: plan.label,
+          documents,
         }
       }
-      chunksToWrite = [...newChunks.values()]
+      await writeManifest(next, {
+        ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }),
+      })
     }
-    if (options.force) {
-      for (const plan of planned) await store.deleteBySource(idOf(plan.source))
-    }
-    for (const id of removedSources) await store.deleteBySource(id)
-    for (const chunks of reordered) if (chunks.length > 0) await store.upsert(chunks)
-    if (chunksToWrite.length > 0) await store.upsert(chunksToWrite)
-    if (!options.force) {
-      const removedIds = planned.flatMap((plan) => plan.removedChunkIds)
-      if (removedIds.length > 0) await store.deleteByIds(removedIds)
-    }
-  }
 
-  // ── 3. manifest ──────────────────────────────────────────────────────────
-  if (!options.dryRun) {
-    const next: Manifest = {
-      version: 1,
-      model: fingerprint.model,
-      ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
-      builtAt: new Date().toISOString(),
-      sources: partialRun && previousManifest !== null ? { ...previousManifest.sources } : {},
-    }
-    for (const plan of planned) {
-      const documents: Record<string, ManifestDocument> = {}
-      for (const doc of plan.documents) {
-        documents[doc.document.url] = {
-          url: doc.document.url,
-          contentHash: doc.document.contentHash,
-          chunkHashes: doc.keptChunkHashes ?? doc.chunks.map((chunk) => chunk.id),
-          ...(doc.etag === undefined ? {} : { etag: doc.etag }),
-          ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
-        }
-      }
-      next.sources[idOf(plan.source)] = {
+    // ── 4. report ────────────────────────────────────────────────────────────
+    const rate = dollarsPerMillionTokens(embedding.model)
+    const tokens = embeddingTokens > 0 ? embeddingTokens : estimatedTokens
+    const batches =
+      embeddingBatches > 0
+        ? embeddingBatches
+        : toEmbed.length === 0
+          ? 0
+          : Math.ceil(toEmbed.length / embedding.batchSize)
+    const stats = !options.dryRun && store !== undefined ? await store.stats() : null
+    return {
+      sources: planned.map((plan) => ({
         id: idOf(plan.source),
         type: plan.source.type,
         label: plan.label,
-        documents,
-      }
+        found: plan.documents.length,
+        unchanged: plan.documents.filter((doc) => doc.status === 'unchanged').length,
+        changed: plan.documents.filter((doc) => doc.status === 'changed').length,
+        added: plan.documents.filter((doc) => doc.status === 'added').length,
+        removed: plan.removedDocuments,
+      })),
+      chunksAffected,
+      embedding: {
+        chunks: toEmbed.length,
+        batches,
+        tokens,
+        estimatedUsd: rate === undefined ? 0 : (tokens / 1_000_000) * rate,
+      },
+      index:
+        stats === null
+          ? {
+              chunks: planned.reduce(
+                (total, plan) =>
+                  total +
+                  plan.documents.reduce(
+                    (count, doc) => count + (doc.keptChunkHashes?.length ?? doc.chunks.length),
+                    0,
+                  ),
+                0,
+              ),
+              documents: planned.reduce((total, plan) => total + plan.documents.length, 0),
+              lastIndexed: new Date().toISOString(),
+            }
+          : {
+              chunks: stats.chunks,
+              documents: stats.documents,
+              lastIndexed: stats.lastIndexed,
+            },
+      dryRun: options.dryRun === true,
     }
-    await writeManifest(next, {
-      ...(options.manifestDir === undefined ? {} : { dir: options.manifestDir }),
-    })
-  }
-
-  // ── 4. report ────────────────────────────────────────────────────────────
-  const rate = dollarsPerMillionTokens(embedding.model)
-  const tokens = embeddingTokens > 0 ? embeddingTokens : estimatedTokens
-  const batches =
-    embeddingBatches > 0
-      ? embeddingBatches
-      : toEmbed.length === 0
-        ? 0
-        : Math.ceil(toEmbed.length / embedding.batchSize)
-  const stats = !options.dryRun && store !== undefined ? await store.stats() : null
-  return {
-    sources: planned.map((plan) => ({
-      id: idOf(plan.source),
-      type: plan.source.type,
-      label: plan.label,
-      found: plan.documents.length,
-      unchanged: plan.documents.filter((doc) => doc.status === 'unchanged').length,
-      changed: plan.documents.filter((doc) => doc.status === 'changed').length,
-      added: plan.documents.filter((doc) => doc.status === 'added').length,
-      removed: plan.removedDocuments,
-    })),
-    chunksAffected,
-    embedding: {
-      chunks: toEmbed.length,
-      batches,
-      tokens,
-      estimatedUsd: rate === undefined ? 0 : (tokens / 1_000_000) * rate,
-    },
-    index:
-      stats === null
-        ? {
-            chunks: planned.reduce(
-              (total, plan) =>
-                total +
-                plan.documents.reduce(
-                  (count, doc) => count + (doc.keptChunkHashes?.length ?? doc.chunks.length),
-                  0,
-                ),
-              0,
-            ),
-            documents: planned.reduce((total, plan) => total + plan.documents.length, 0),
-            lastIndexed: new Date().toISOString(),
-          }
-        : {
-            chunks: stats.chunks,
-            documents: stats.documents,
-            lastIndexed: stats.lastIndexed,
-          },
-    dryRun: options.dryRun === true,
+  } finally {
+    // A CLI run owns the store it opened, including on embedding/write errors.
+    // An injected store belongs to the caller and must remain usable.
+    if (options.store === undefined) await store?.close()
   }
 }
 

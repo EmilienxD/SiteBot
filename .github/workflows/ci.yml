@@ -54,6 +54,27 @@ jobs:
       - name: Package checks (publint, are-the-types-wrong)
         run: pnpm check:packages
 
+  sqlite-native:
+    # Exercise the actual prebuilt extension, including the minimum Node
+    # release with loadExtension. Native initialization errors must fail.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.13.0', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sitebot/core... build
+      - name: Native SQLite vector tests
+        run: pnpm exec vitest run --project=core --project=ingest packages/core/src/node/vector-sqlite.test.ts packages/core/src/knowledge/store-conformance.test.ts packages/ingest/src/sqlite.test.ts
+
   e2e:
     # The Playwright image pins browsers *and fonts*, so the committed
     # `-linux` visual baselines match byte-for-byte what CI renders.

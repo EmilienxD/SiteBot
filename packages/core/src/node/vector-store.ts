@@ -56,6 +56,7 @@ export async function createNodeVectorStore(
             ? store.path
             : resolve(options.baseDir ?? process.cwd(), store.path),
         ...(options.model === undefined ? {} : { model: options.model }),
+        ...(options.baseDir === undefined ? {} : { baseDir: options.baseDir }),
       })
     }
     case 'pgvector':

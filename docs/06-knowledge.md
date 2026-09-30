@@ -180,6 +180,8 @@ interface VectorStore {
 
 The store the config names must be reachable at boot or `/health` reports `degraded` and knowledge tools are unregistered — the assistant keeps working without RAG rather than failing every request.
 
+SQLite knowledge indexes require **Node 22.13+** and `sqlite-vec@^0.1.9` (prebuilt binaries; Windows x64, Linux x64/arm64, macOS x64/arm64). `vec0` performs cosine nearest-neighbor search on float32 vectors; metadata filters are applied before selecting `topK`. Original embeddings remain in the chunk table for document expansion. Upserts and deletions update both tables transactionally, and older JSON-only corpora migrate on open. Embeddings must have 1–8192 dimensions and finite float32 values. A model/dimension change requires `ingest --force` to clear the existing corpus before rebuilding. Requests above vec0's 4096-result KNN limit use extension-calculated cosine distances ordered and limited by SQLite.
+
 ### 3.8 Retrieval
 
 ```yaml

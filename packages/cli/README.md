@@ -16,3 +16,4 @@ npx sitebot serve [--static dir]   # the chat API as a standalone server (a side
 from the sidecar. `--static` serves a directory of pages from the same process.
 
 Requires Node.js 22.5 or later (22.18 or later to load a `chatbot.config.ts` directly).
+SQLite knowledge indexes additionally require Node.js 22.13 or later and `sqlite-vec@^0.1.9`.

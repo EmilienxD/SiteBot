@@ -7,10 +7,9 @@ import { runVectorStoreConformance } from '../../test/vector-store-conformance.j
 /**
  * docs/06 §7: one conformance suite, every implementation this repo ships.
  *
- * pgvector, upstash and custom need live infrastructure or third-party code;
- * their suites *run* whenever a developer points the env vars at a real
- * endpoint (see the gated `live` project in `vitest.config.ts`) and are
- * reported as skipped here, which is the honest state of a CI box.
+ * SQLite uses the real Node database and installed sqlite-vec binary; missing
+ * native support fails this suite. Postgres and Upstash still use driver
+ * stand-ins here and need separate live infrastructure validation.
  */
 
 runVectorStoreConformance({
@@ -18,80 +17,15 @@ runVectorStoreConformance({
   create: async (model) => new MemoryVectorStore({ ...(model === undefined ? {} : { model }) }),
 })
 
-/** An in-memory SQL stand-in exercising the sqlite store's real code path. */
-function fakeSqlite(): { openDatabase: () => object } {
-  const rows = new Map<string, Record<string, unknown>>()
-  const meta = new Map<string, string>()
-  const db = {
-    exec: () => {},
-    prepare(sql: string) {
-      return {
-        run(...params: unknown[]) {
-          if (sql.startsWith('INSERT INTO chunks')) {
-            const [id, text, embedding, metadata, source_id, url, updated_at] = params
-            rows.set(String(id), {
-              id,
-              text,
-              embedding,
-              metadata,
-              source_id,
-              url,
-              updated_at,
-            })
-            return
-          }
-          if (sql.startsWith('INSERT INTO store_meta')) {
-            meta.set(String(params[0]), String(params[1]))
-            return
-          }
-          if (sql.startsWith('DELETE FROM chunks WHERE source_id')) {
-            for (const [id, row] of rows) if (row['source_id'] === params[0]) rows.delete(id)
-            return
-          }
-          if (sql.startsWith('DELETE FROM chunks WHERE id')) {
-            rows.delete(String(params[0]))
-            return
-          }
-        },
-        get(): unknown {
-          if (sql.includes("WHERE key = 'model'")) {
-            const value = meta.get('model')
-            return value === undefined ? undefined : { value }
-          }
-          if (sql.includes("WHERE key = 'lastIndexed'")) {
-            const value = meta.get('lastIndexed')
-            return value === undefined ? undefined : { value }
-          }
-          if (sql.startsWith('SELECT COUNT(*)')) return { n: rows.size }
-          if (sql.startsWith('SELECT COUNT(DISTINCT url)')) {
-            return { n: new Set([...rows.values()].map((row) => row['url'])).size }
-          }
-          return undefined
-        },
-        all(...params: unknown[]): unknown[] {
-          if (sql.includes('FROM chunks WHERE url')) {
-            return [...rows.values()].filter((row) => row['url'] === params[0])
-          }
-          if (sql.startsWith('SELECT * FROM chunks')) return [...rows.values()]
-          return []
-        },
-      }
-    },
-    close: () => {},
-  }
-  return { openDatabase: () => db }
-}
-
+// Required native coverage: sqlite-vec is a dev dependency, an optional peer for consumers.
 runVectorStoreConformance({
   name: 'sqlite',
   create: async (model) =>
     createSqliteVectorStore({
       path: ':memory:',
       ...(model === undefined ? {} : { model }),
-      openDatabase: fakeSqlite().openDatabase as never,
     }),
 })
-
 /**
  * pgvector with an in-memory driver stand-in. The fake understands exactly
  * the SQL the store emits — that is the point of a conformance suite: a store

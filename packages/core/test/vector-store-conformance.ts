@@ -78,7 +78,8 @@ async function buildStore(
 ): Promise<VectorStore | undefined> {
   try {
     return await factory.create(model)
-  } catch {
+  } catch (error) {
+    if (factory.skipReason === undefined) throw error
     return undefined
   }
 }
