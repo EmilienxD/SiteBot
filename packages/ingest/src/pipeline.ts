@@ -1,7 +1,7 @@
 import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import { createNodeVectorStore } from '@sitebot/core/node'
 import type { Chunk, VectorStore } from '@sitebot/core'
-import { chunkDocument, type DocumentInput, type RawChunk } from './chunk.js'
+import { chunkDocument, chunkSemanticDocument, type DocumentInput, type RawChunk } from './chunk.js'
 import { createEmbeddingModel, dollarsPerMillionTokens, embedChunks } from './embedding.js'
 import {
   assertModelCompatible,
@@ -46,7 +46,13 @@ export interface IngestRun {
     removed: number
   }[]
   chunksAffected: number
-  embedding: { chunks: number; batches: number; tokens: number; estimatedUsd: number }
+  embedding: {
+    chunks: number
+    batches: number
+    tokens: number
+    estimatedUsd: number
+    semanticUnits?: number
+  }
   index: { chunks: number; documents: number; lastIndexed: string }
   dryRun: boolean
 }
@@ -123,6 +129,36 @@ export async function runIngest(
     ? []
     : Object.keys(previousManifest?.sources ?? {}).filter((id) => !selectedIds.has(id))
 
+  let modelReady: ReturnType<typeof createEmbeddingModel> | undefined
+  let semanticTokens = 0
+  let semanticBatches = 0
+  let semanticUnits = 0
+  const embedBatch = async (texts: string[]) => {
+    if (options.embedder !== undefined) return options.embedder.embedBatch(texts)
+    modelReady ??= createEmbeddingModel(embedding)
+    const { model } = await modelReady
+    return embedChunks(model, texts, {
+      batchSize: embedding.batchSize,
+      concurrency: options.concurrency ?? 4,
+    })
+  }
+  const semanticEmbedder = {
+    async embedBatch(texts: string[]) {
+      // Dry runs estimate paragraph costs but do not call providers. Boundaries
+      // and final chunk counts are approximate until real vectors are available.
+      const result = options.dryRun
+        ? {
+            embeddings: texts.map(() => [1]),
+            tokens: texts.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0),
+          }
+        : await embedBatch(texts)
+      semanticTokens += result.tokens
+      semanticUnits += texts.length
+      semanticBatches += Math.ceil(texts.length / embedding.batchSize)
+      return result
+    },
+  }
+
   // ── 1. fetch ─────────────────────────────────────────────────────────────
   const planned: PlannedSource[] = []
   for (const source of sources) {
@@ -167,7 +203,12 @@ export async function runIngest(
           : before.contentHash === raw.contentHash
             ? 'unchanged'
             : 'changed'
-      const chunks = raw.notModified ? [] : chunkDocument(document, config.knowledge.chunk)
+      const chunks =
+        status === 'unchanged'
+          ? []
+          : config.knowledge.chunk.strategy === 'semantic'
+            ? await chunkSemanticDocument(document, config.knowledge.chunk, semanticEmbedder)
+            : chunkDocument(document, config.knowledge.chunk)
       const occurrences = new Map<string, number>()
       for (const chunk of chunks) {
         const content = JSON.stringify([chunk.headingPath, chunk.text])
@@ -185,7 +226,7 @@ export async function runIngest(
         document,
         chunks,
         status,
-        ...(raw.notModified && before ? { keptChunkHashes: before.chunkHashes } : {}),
+        ...(status === 'unchanged' && before ? { keptChunkHashes: before.chunkHashes } : {}),
         ...(raw.etag === undefined ? {} : { etag: raw.etag }),
         ...(raw.lastModified === undefined ? {} : { lastModified: raw.lastModified }),
       })
@@ -251,16 +292,7 @@ export async function runIngest(
           ? chunk.text
           : `${chunk.headingPath.join(' > ')}\n\n${chunk.text}`,
       )
-      const result =
-        options.embedder !== undefined
-          ? await options.embedder.embedBatch(texts)
-          : await (async () => {
-              const { model } = await createEmbeddingModel(embedding)
-              return embedChunks(model, texts, {
-                batchSize: embedding.batchSize,
-                concurrency: options.concurrency ?? 4,
-              })
-            })()
+      const result = await embedBatch(texts)
       embeddingTokens = result.tokens
       embeddingBatches = Math.ceil(texts.length / embedding.batchSize)
 
@@ -362,7 +394,7 @@ export async function runIngest(
 
     // ── 4. report ────────────────────────────────────────────────────────────
     const rate = dollarsPerMillionTokens(embedding.model)
-    const tokens = embeddingTokens > 0 ? embeddingTokens : estimatedTokens
+    const tokens = (options.dryRun ? estimatedTokens : embeddingTokens) + semanticTokens
     const batches =
       embeddingBatches > 0
         ? embeddingBatches
@@ -384,9 +416,10 @@ export async function runIngest(
       chunksAffected,
       embedding: {
         chunks: toEmbed.length,
-        batches,
+        batches: batches + semanticBatches,
         tokens,
         estimatedUsd: rate === undefined ? 0 : (tokens / 1_000_000) * rate,
+        ...(semanticUnits > 0 ? { semanticUnits } : {}),
       },
       index:
         stats === null

@@ -79,6 +79,7 @@ The others were correctness issues:
 | §3 r4 Fallback entries inherit the primary's settings              | `core/src/providers/fallback.test.ts` "resolveChain"                                          | 🔧     |
 | §3 r5–7 No hop after the first token; telemetry per hop; 502 when all fail | `core/src/engine.test.ts`                                                             | ✅     |
 | §4 Policy, stop conditions, `onMaxSteps`                           | `core/src/agent/policy.test.ts`                                                              | ✅     |
+| §5 Stable prompt prefix; Anthropic/Bedrock cache breakpoints; volatile blocks after stable groups | `core/src/prompt/cache.test.ts`, `core/src/prompt/compose.test.ts`, `e2e/knowledge.spec.ts` | ✅ |
 | §6 r1–2 Only the last user message is trusted                      | `core/src/engine.test.ts` "trusts only the last user message from the body"                   | ✅     |
 | §6 r3–4 Truncate to the budget at a clean boundary; tool pairs intact | `core/src/session/truncate.test.ts`                                                       | 🔧     |
 | §6 r5 Synthetic summary when more than 4 messages are dropped, cached, refreshed every 10 | `core/src/engine.test.ts` "history summary" | 🔧 |
@@ -126,6 +127,8 @@ The others were correctness issues:
 | §3.6 s5–6 Removed documents lose their chunks; atomic manifest      | `ingest/src/pipeline.test.ts`                                                        | ✅     |
 | §3.7 Unreachable store → degraded, chat continues                   | `core/src/engine-knowledge.test.ts`                                                  | ✅     |
 | §3.8 Retrieval: `minScore` note, neighbours, dedupe, recall          | `core/src/knowledge/golden-retrieval.test.ts`, `store-conformance.test.ts`            | ✅     |
+| §3.4 Semantic embedding-distance boundaries, token ceiling, short sections and both-pass accounting | `ingest/src/chunk.test.ts`, `ingest/src/pipeline.test.ts`, `e2e/knowledge.spec.ts` | ✅ |
+| §3.8 Cohere/custom reranking before threshold/dedupe, disabled path, invalid response handling | `core/src/knowledge/rerank.test.ts`, `e2e/knowledge.spec.ts` | ✅ |
 | §3.9 Numbered citations; chips show only cited sources; `citation-click` | `core/src/prompt/compose.test.ts`, `widget/src/citations.test.ts`, `widget/src/element-api.test.tsx` | 🔧 |
 
 ## 07 — Widget

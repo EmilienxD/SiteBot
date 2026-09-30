@@ -47,6 +47,8 @@ export interface ComposeInput {
 
 export interface ComposedPrompt {
   text: string
+  /** Stable prefix groups, followed by volatile page/retrieval content. */
+  segments: { text: string; cacheable: boolean }[]
   /** Present blocks, in order. Asserted by the ordering tests. */
   blocks: string[]
   delimiterId: string
@@ -78,25 +80,37 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   // 2 — <site_context>: trusted, hand-written by the developer.
   if (config.prompt.includeSiteContext) push('site_context', siteContextBlock(config))
 
-  // 3 — <page_context>: untrusted.
+  const baseEnd = parts.length
+  // Policy includes identity, so it is reusable only for the same identity.
+  push(
+    'tool_policy',
+    toolPolicyBlock(
+      config,
+      ctx.identity ?? null,
+      input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool'),
+    ),
+  )
+  push('guardrails', guardrailsBlock(config))
+  const stableEnd = parts.length
+
+  // <page_context>: untrusted, after the stable prefix.
   if (config.prompt.includePageContext) {
     push('page_context', pageContextBlock(ctx.pageContext ?? null, delimiterId))
   }
 
-  // 4 — <knowledge>: untrusted, inline only when retrieval is always | hybrid.
+  // <knowledge>: untrusted, inline only when retrieval is always | hybrid.
   const retrieval = input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool')
   if (retrieval !== 'tool') {
     push('knowledge', knowledgeBlock(input.documents ?? [], delimiterId, input.note))
   }
 
-  // 5 — <tool_policy>: generated from the tool set and the current identity.
-  push('tool_policy', toolPolicyBlock(config, ctx.identity ?? null, retrieval))
-
-  // 6 — <guardrails>.
-  push('guardrails', guardrailsBlock(config))
-
   return {
     text: parts.join('\n\n'),
+    segments: [
+      { text: parts.slice(0, baseEnd).join('\n\n'), cacheable: true },
+      { text: parts.slice(baseEnd, stableEnd).join('\n\n'), cacheable: true },
+      { text: parts.slice(stableEnd).join('\n\n'), cacheable: false },
+    ].filter((segment) => segment.text !== ''),
     blocks,
     delimiterId,
     missingVariables: system.missing,
@@ -257,7 +271,8 @@ function guardrailsBlock(config: SiteBotConfig): string | undefined {
 /**
  * Why the order is not cosmetic (docs/04 §5, "Caching"):
  *
- * Blocks 1, 2, 5 and 6 are stable for the whole session; blocks 3 and 4 change
+ * System, site context, tool policy and guardrails form the stable prefix;
+ * page context and knowledge change
  * on every request. Providers that support explicit prompt caching cache a
  * *prefix*, so putting the volatile blocks last is what makes the stable part
  * cacheable at all. Reordering these for readability would quietly multiply the

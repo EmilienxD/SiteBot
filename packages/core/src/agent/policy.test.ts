@@ -330,8 +330,16 @@ describe('summarizeAtStep consumption in the engine', () => {
     expect(last?.tools ?? []).toHaveLength(0)
     expect(last?.toolChoice).toEqual({ type: 'none' })
 
-    const system = last?.prompt.find((message) => message.role === 'system')
+    const system = last?.prompt.filter((message) => message.role === 'system')
     expect(JSON.stringify(system)).toContain('You have reached the final step.')
+    const prefixes = system?.filter((message) => message.providerOptions !== undefined)
+    expect(prefixes).toEqual(
+      first?.prompt.filter(
+        (message) => message.role === 'system' && message.providerOptions !== undefined,
+      ),
+    )
+    expect(prefixes?.length).toBeGreaterThan(0)
+    expect(system?.at(-1)?.providerOptions).toBeUndefined()
   })
 
   it('leaves the final step untouched when onMaxSteps is not summarize', async () => {

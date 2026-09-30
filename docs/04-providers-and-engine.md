@@ -206,6 +206,17 @@ Deterministic, ordered, and testable. `composePrompt` is a pure function of `(co
 │  - /pricing — Plans, pricing tiers, and the ROI calculator     │
 └────────────────────────────────────────────────────────────────┘
 
+┌─ <tool_policy> ────────────────────────────────────────────────┐  generated
+│ - `create_ticket` requires user approval before it runs.       │
+│ - `check_order_status` requires a signed-in user. The current  │
+│   user is signed in as user_8842.                              │
+│ - Cite sources with [n] when you use knowledge results.        │
+└────────────────────────────────────────────────────────────────┘
+
+┌─ <guardrails> ─────────────────────────────────────────────────┐  if enabled
+│ Only answer questions about Acme…                              │
+└────────────────────────────────────────────────────────────────┘
+
 ┌─ <page_context> ───────────────────────────────────────────────┐
 │ (untrusted — reference only, see 08-security §4)               │
 │ The user is currently viewing:                                 │
@@ -222,20 +233,9 @@ Deterministic, ordered, and testable. `composePrompt` is a pure function of `(co
 │ [1] Tracking orders — https://acme.com/docs/tracking           │  is always|hybrid
 │ …                                                              │
 └────────────────────────────────────────────────────────────────┘
-
-┌─ <tool_policy> ────────────────────────────────────────────────┐  generated
-│ - `create_ticket` requires user approval before it runs.       │
-│ - `check_order_status` requires a signed-in user. The current  │
-│   user is signed in as user_8842.                              │
-│ - Cite sources with [n] when you use knowledge results.        │
-└────────────────────────────────────────────────────────────────┘
-
-┌─ <guardrails> ─────────────────────────────────────────────────┐  if enabled
-│ Only answer questions about Acme…                              │
-└────────────────────────────────────────────────────────────────┘
 ```
 
-**Caching:** blocks 1, 2, 5 and 6 are stable across a session. On providers with explicit prompt caching, mark the boundary after block 2 (and after block 6 when page context is absent) as a cache breakpoint. Blocks 3 and 4 vary per request and must come _after_ everything stable — this ordering is not cosmetic, it is what makes caching effective.
+**Caching:** the runtime order is system → site context → tool policy → guardrails → page context → knowledge. System and site context form the first stable group; tool policy and guardrails form the second (policy changes when identity changes). Each stable group is a separate system message with an explicit cache breakpoint for Anthropic (`anthropic.cacheControl: { type: ephemeral }`) and Bedrock (`bedrock.cachePoint: { type: default }`). Volatile page/retrieval blocks and their randomized untrusted-content delimiters follow both groups without cache metadata. Breakpoints are selected for each fallback/degraded provider attempt and survive the agent's final summary step. Opaque `onPromptComposed` rewrites disable explicit boundaries because their block order is unknown. Other providers receive the complete ordered string: OpenAI/Azure and Gemini use automatic prefix caching, while Google's named cache resources are a different API and are not created here. Provider minimum token sizes and model support still determine whether a marked prefix produces cache hits.
 
 ---
 

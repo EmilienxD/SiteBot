@@ -112,6 +112,20 @@ chunk:
 | `semantic` (default) | Heading-aware, then merges adjacent paragraphs until `maxTokens`, breaking at the largest embedding-distance gap when a split is needed. |
 | `fixed`              | Token windows with overlap. Predictable, dumb, always works.                                                                             |
 
+Semantic ingestion embeds paragraph units only for changed, oversized heading
+sections, then splits recursively at the largest adjacent cosine-distance gap.
+Final chunks are embedded separately with their heading prefix. This can roughly
+double embedding input for oversized sections; the run summary includes both
+passes. Unchanged documents make no embedding calls. `minTokens` prefers viable
+boundaries, while the hard `maxTokens` ceiling and preserving all prose take
+priority. Giant paragraphs use bounded units. Overlap adds a trailing excerpt
+only when it fits the next chunk and stays within the same heading section.
+The exported `chunkSemanticDocument(document, options, embedder)` performs this
+asynchronous pass; synchronous `chunkDocument` requires it for oversized semantic
+sections. `heading` remains a cheaper alternative for well-structured docs.
+Rebuild an existing index with `sitebot ingest --force` to apply the new semantic
+boundaries; unchanged documents deliberately retain their stored chunks.
+
 Every chunk carries metadata that matters at query time:
 
 ```ts
@@ -228,8 +242,21 @@ Query-time refinements:
 - **`expandNeighbours: 1`** — after scoring, pull the adjacent chunks of each hit from the same document. Cheap fix for the classic "the answer was in the next paragraph" failure.
 - **`dedupeByUrl`** — at most one chunk per URL in the final set unless fewer than `topK` documents match; prevents one long page monopolising the context.
 - **`minScore`** — below-threshold results are dropped. If _everything_ is below threshold, the engine injects an explicit "no relevant documentation found" note rather than silently supplying nothing, which is what stops the model confabulating.
-- **`rerank`** — optional cross-encoder pass (Cohere Rerank or a local model). Off by default; measurable gain on large corpora, extra latency and cost.
+- **`rerank`** — optional cross-encoder pass (Cohere Rerank or a custom local model). Off by default; extra latency and cost. `true` uses Cohere `rerank-v3.5` and `COHERE_API_KEY`; an object configures `provider: cohere`, `model`, `apiKey`, `baseUrl`, and `timeoutMs` (default 10 seconds), or `provider: custom` and `module`. Candidates are overfetched to `4 × topK`, reranked before thresholding, neighbour expansion, URL deduplication and token budgeting. `minScore` uses cross-encoder relevance scores when enabled. Malformed scores or provider failures report retrieval unavailable through the existing degraded-chat path.
 - **`filter`** — metadata filters (`sourceType`, `lang`, custom tags) supported per query and settable per tool.
+
+Custom modules resolve relative to the config file and export an object or a
+factory returning this interface (the factory is reused per deployment config):
+
+```ts
+interface Reranker {
+  rerank(query: string, documents: string[]): Promise<{ index: number; score: number }[]>
+}
+```
+
+Return one finite score in `[0, 1]` for every document, using its original index.
+Documents include their heading prefix. A host can also inject a `reranker` in
+the engine's `KnowledgeDeps`, including for edge-hosted local models.
 
 ### 3.9 Citations
 
@@ -287,7 +314,7 @@ $ npx sitebot ingest
     Last indexed 2026-08-01T14:22:11Z
 ```
 
-`--dry-run` reports what would change and the estimated embedding cost without writing or spending. `sitebot doctor` runs a retrieval smoke test: three sample queries derived from `siteContext`, showing top hits and scores, so a developer can tell at a glance whether the index is any good.
+`--dry-run` reports what would change and the estimated embedding cost without writing or spending. Semantic dry runs count both paragraph and final-chunk embedding inputs, using neutral distances; boundaries and chunk counts are estimates until actual paragraph vectors are available. `sitebot doctor` runs a retrieval smoke test: three sample queries derived from `siteContext`, showing top hits and scores, so a developer can tell at a glance whether the index is any good.
 
 ---
 

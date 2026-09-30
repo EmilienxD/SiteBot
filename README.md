@@ -193,7 +193,9 @@ each and a smoke test against a scripted offline model, so none of them needs a 
 
 [Phase 10 — examples, docs, release](./docs/09-implementation-plan.md#phase-10--examples-docs-release):
 The examples, docs site and release workflow are implemented. SQLite, crawler
-robots compliance and optional JavaScript rendering are complete. Remaining
-retrieval refinements, live validation, accessibility acceptance and release
+robots compliance and optional JavaScript rendering are complete. Semantic
+embedding-distance splitting, Cohere/custom reranking and explicit Anthropic/Bedrock
+cache breakpoints are implemented and covered by a browser pipeline test. Live
+validation, accessibility acceptance and release
 work are tracked in the [project status audit](./docs/project-status-audit.md).
 For JavaScript sites, see the [renderer setup](./packages/ingest/README.md).

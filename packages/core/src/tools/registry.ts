@@ -272,7 +272,7 @@ function builtinExecutor(
           : ''
       if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
       const result = await retrieve(
-        { store: knowledge.store, embedder: knowledge.embedder },
+        { ...knowledge, store: knowledge.store, embedder: knowledge.embedder },
         query,
         options.config,
       )

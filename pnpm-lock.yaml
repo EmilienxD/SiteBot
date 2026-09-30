@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^3.0.104
+        version: 3.0.104(zod@4.4.3)
+      '@ai-sdk/openai-compatible':
+        specifier: ^2.0.78
+        version: 2.0.78(zod@4.4.3)
       '@arethetypeswrong/cli':
         specifier: ^0.18.5
         version: 0.18.5

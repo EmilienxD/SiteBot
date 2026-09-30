@@ -134,7 +134,11 @@ function printRun(ui: Ui, run: IngestRun): void {
   ui.detail('Chunking …', `${formatCount(run.chunksAffected)} chunks affected`)
   ui.detail(
     'Embedding …',
-    `${formatCount(chunks)} chunks (${batches} ${batches === 1 ? 'batch' : 'batches'}) · ` +
+    `${formatCount(chunks)} chunks` +
+      (run.embedding.semanticUnits
+        ? ` + ${formatCount(run.embedding.semanticUnits)} semantic units`
+        : '') +
+      ` (${batches} ${batches === 1 ? 'batch' : 'batches'}) · ` +
       `~${formatTokens(tokens)} tokens · ≈ $${estimatedUsd.toFixed(3)}`,
   )
   ui.detail('Writing …', run.dryRun ? 'skipped (dry run)' : 'done')

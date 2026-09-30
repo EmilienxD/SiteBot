@@ -116,6 +116,8 @@ export type {
   VectorStoreStats,
 } from './knowledge/store.js'
 export { finalize, retrieve } from './knowledge/retrieve.js'
+export { createReranker, rerankCandidates } from './knowledge/rerank.js'
+export type { Reranker, RerankScore } from './knowledge/rerank.js'
 export { knowledgeEnabled } from './knowledge/types.js'
 export type {
   Citation,

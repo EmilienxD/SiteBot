@@ -29,6 +29,8 @@
     "release": "changeset publish"
   },
   "devDependencies": {
+    "@ai-sdk/anthropic": "^3.0.104",
+    "@ai-sdk/openai-compatible": "^2.0.78",
     "@arethetypeswrong/cli": "^0.18.5",
     "@axe-core/playwright": "^4.13.0",
     "@changesets/cli": "^2.27.11",

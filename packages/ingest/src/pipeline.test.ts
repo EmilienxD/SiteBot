@@ -69,6 +69,48 @@ function configFor(content: string, model = 'text-embedding-3-small'): ResolvedC
 }
 
 describe('runIngest()', () => {
+  it('counts semantic paragraph spend, skips it on unchanged runs and estimates dry runs without spend', async () => {
+    const text = [
+      'shipping '.repeat(12),
+      'delivery '.repeat(12),
+      'refunds '.repeat(12),
+      'returns '.repeat(12),
+    ].join('\n\n')
+    const config = configFor(text)
+    config.knowledge.chunk = {
+      strategy: 'semantic',
+      maxTokens: 80,
+      minTokens: 10,
+      overlapTokens: 0,
+    }
+    const calls: string[][] = []
+    const embedder = {
+      embedBatch: async (texts: string[]) => {
+        calls.push(texts)
+        return {
+          embeddings: texts.map((text) => (/shipping|delivery/.test(text) ? [1, 0] : [0, 1])),
+          tokens: texts.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0),
+        }
+      },
+    }
+    const store = new MemoryVectorStore()
+    const dry = await runIngest(config, { store, embedder, manifestDir: dir, dryRun: true })
+    expect(calls).toHaveLength(0)
+    expect((await store.stats()).chunks).toBe(0)
+    expect(await readManifest({ dir })).toBeNull()
+    expect(dry.embedding.tokens).toBeGreaterThan(Math.ceil(text.length / 4))
+    const first = await runIngest(config, { store, embedder, manifestDir: dir })
+    expect(calls.map((batch) => batch.length)).toEqual([4, 2])
+    expect(first.embedding.batches).toBe(2)
+    expect(first.embedding.tokens).toBe(
+      calls.flat().reduce((sum, text) => sum + Math.ceil(text.length / 4), 0),
+    )
+    calls.length = 0
+    const second = await runIngest(config, { store, embedder, manifestDir: dir })
+    expect(calls).toHaveLength(0)
+    expect(second.embedding.tokens).toBe(0)
+    expect(second.index.chunks).toBe(2)
+  })
   it('populates the store and reports the first run as all-new', async () => {
     const embedder = countingEmbedder()
     const store = new MemoryVectorStore({ model: 'text-embedding-3-small' })

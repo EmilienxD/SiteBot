@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chunkDocument, type DocumentInput } from './chunk.js'
+import { chunkDocument, chunkSemanticDocument, type DocumentInput } from './chunk.js'
 import { extract } from './extract.js'
 
 /**
@@ -49,6 +49,64 @@ describe('extract()', () => {
     const html = `<html><body><main><p>Hi.</p></main></body></html>`
     expect(extract(html, { minChars: 200 }).skipped).toBe(true)
     expect(extract(html, { minChars: 3 }).skipped).toBe(false)
+  })
+})
+
+describe('embedding-distance semantic splits', () => {
+  const paragraphs = [
+    'shipping '.repeat(12),
+    'delivery '.repeat(12),
+    'refunds '.repeat(12),
+    'returns '.repeat(12),
+  ].map((text) => text.trim())
+  const document = doc({ text: paragraphs.join('\n\n') })
+  const options = { ...OPTIONS, maxTokens: 80, minTokens: 15, overlapTokens: 0 }
+  it('breaks at the largest topic gap even when a third paragraph would fit', async () => {
+    const chunks = await chunkSemanticDocument(document, options, {
+      embedBatch: async (texts) => ({
+        embeddings: texts.map((text) => (/shipping|delivery/.test(text) ? [1, 0] : [0, 1])),
+        tokens: 100,
+      }),
+    })
+    expect(chunks.map((chunk) => chunk.text)).toEqual([
+      paragraphs.slice(0, 2).join('\n\n'),
+      paragraphs.slice(2).join('\n\n'),
+    ])
+    expect(chunks.every((chunk) => chunk.tokens <= options.maxTokens)).toBe(true)
+    expect(chunks.flatMap((chunk) => chunk.text.split('\n\n'))).toEqual(paragraphs)
+  })
+  it('retains short sections and handles giant paragraphs within the ceiling', async () => {
+    const chunks = await chunkSemanticDocument(
+      doc({ text: 'tiny\n\n' + 'word '.repeat(1000) }),
+      options,
+      {
+        embedBatch: async (texts) => ({ embeddings: texts.map(() => [1, 0]), tokens: 100 }),
+      },
+    )
+    expect(chunks[0]?.text).toContain('tiny')
+    expect(chunks.every((chunk) => chunk.tokens <= options.maxTokens)).toBe(true)
+    expect(chunks.map((chunk) => chunk.ordinal)).toEqual(chunks.map((_, index) => index))
+  })
+  it('rejects missing paragraph vectors before emitting corrupt boundaries', async () => {
+    await expect(
+      chunkSemanticDocument(document, options, {
+        embedBatch: async () => ({ embeddings: [], tokens: 0 }),
+      }),
+    ).rejects.toThrow('invalid paragraph embeddings')
+  })
+  it('adds configured overlap while keeping the final token ceiling', async () => {
+    const chunks = await chunkSemanticDocument(
+      document,
+      { ...options, overlapTokens: 8 },
+      {
+        embedBatch: async (texts) => ({
+          embeddings: texts.map((text) => (/shipping|delivery/.test(text) ? [1, 0] : [0, 1])),
+          tokens: 100,
+        }),
+      },
+    )
+    expect(chunks[1]?.text.startsWith(chunks[0]!.text.slice(-32).trim())).toBe(true)
+    expect(chunks.every((chunk) => chunk.tokens <= options.maxTokens)).toBe(true)
   })
 })
 

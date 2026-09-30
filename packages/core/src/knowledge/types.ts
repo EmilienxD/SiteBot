@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from '@sitebot/config'
 import type { VectorStore } from './store.js'
+import type { Reranker } from './rerank.js'
 
 /**
  * Knowledge runtime — how the engine reaches the index at query time.
@@ -24,6 +25,7 @@ export interface QueryEmbedder {
 export interface KnowledgeDeps {
   store?: VectorStore
   embedder?: QueryEmbedder
+  reranker?: Reranker
 }
 
 export interface Citation {

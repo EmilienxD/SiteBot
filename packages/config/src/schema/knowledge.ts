@@ -178,7 +178,30 @@ export const RetrievalSchema = z.strictObject({
   minScore: z.number().min(0).max(1).default(0.3),
   maxContextTokens: z.number().int().positive().default(3000),
   includeCitations: z.boolean().default(true),
-  rerank: z.boolean().default(false),
+  rerank: z
+    .union([
+      z.boolean(),
+      z.discriminatedUnion('provider', [
+        z.strictObject({
+          provider: z.literal('cohere'),
+          model: z.string().min(1).default('rerank-v3.5'),
+          apiKey: z.string().optional(),
+          baseUrl: z.url().default('https://api.cohere.com'),
+          timeoutMs: z.number().int().positive().default(10000),
+        }),
+        z.strictObject({
+          provider: z.literal('custom'),
+          module: z
+            .string()
+            .min(1)
+            .describe('Module exporting a Reranker (or a factory returning one).'),
+        }),
+      ]),
+    ])
+    .default(false)
+    .describe(
+      'true uses Cohere rerank-v3.5 and COHERE_API_KEY; an object configures Cohere or a local custom cross-encoder.',
+    ),
   dedupeByUrl: z
     .boolean()
     .default(true)

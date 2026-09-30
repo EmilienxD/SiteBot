@@ -112,6 +112,129 @@ async function readAll(response: Response): Promise<{
 }
 
 describe('engine knowledge (docs/06)', () => {
+  it.each(['always', 'hybrid', 'tool'] as const)(
+    'uses injected reranking in %s mode and cites the rescored result',
+    async (mode) => {
+      const store = new MemoryVectorStore()
+      await store.upsert([
+        testChunk('shipping', 'https://acme.com/shipping', 'Ships within two days.', [1, 0, 0]),
+        testChunk(
+          'returns',
+          'https://acme.com/returns',
+          'Returns accepted for 30 days.',
+          [0, 1, 0],
+        ),
+      ])
+      const config = knowledgeConfig()
+      config.mode = 'agent'
+      config.knowledge.retrieval = {
+        ...config.knowledge.retrieval,
+        mode,
+        rerank: true,
+        topK: 1,
+        minScore: 0.8,
+        dedupeByUrl: false,
+      }
+      const answer = textModel(['Returns accepted for 30 days [1].'])
+      let searches = 0
+      const model = new MockLanguageModelV3({
+        doStream: async (options) => {
+          if (mode !== 'tool' || options.prompt.at(-1)?.role === 'tool')
+            return answer.doStream(options)
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: 'stream-start', warnings: [] },
+                { type: 'text-start', id: 'intro' },
+                { type: 'text-delta', id: 'intro', delta: 'I will check the policy. ' },
+                { type: 'text-end', id: 'intro' },
+                {
+                  type: 'tool-call',
+                  toolCallId: 'search1',
+                  toolName: 'search_knowledge_base',
+                  input: JSON.stringify({ query: 'returns policy' }),
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+                  usage: {
+                    inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+                    outputTokens: { total: 1, text: 1, reasoning: 0 },
+                  },
+                },
+              ] as LanguageModelV3StreamPart[],
+              chunkDelayInMs: null,
+              initialDelayInMs: null,
+            }),
+          }
+        },
+      })
+      const engine = createEngine(config, {
+        adapters: adapterFor(model),
+        knowledge: {
+          store,
+          embedder: needleEmbedder({ return: 0 }),
+          reranker: {
+            rerank: async (_query, documents) => {
+              searches++
+              return documents.map((text, index) => ({
+                index,
+                score: text.includes('30 days') ? 0.95 : 0.1,
+              }))
+            },
+          },
+        },
+      })
+      const response = await readAll(
+        await engine.handleChat(
+          { sessionId: SESSION, messages: [userMessage('returns policy')] },
+          testContext(),
+        ),
+      )
+      expect(searches).toBe(1)
+      expect(response.text).toContain('30 days')
+      expect(response.citations.map((citation) => citation.url)).toEqual([
+        'https://acme.com/returns',
+      ])
+    },
+  )
+
+  it('tells the model search is unavailable when reranking fails and emits no misleading citations', async () => {
+    const store = new MemoryVectorStore()
+    await store.upsert([testChunk('shipping', 'https://acme.com/shipping', 'Shipping', [1, 0, 0])])
+    const config = knowledgeConfig()
+    config.knowledge.retrieval.rerank = true
+    const answer = textModel(['I do not know.'])
+    let prompt = ''
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        prompt = JSON.stringify(options.prompt)
+        return answer.doStream(options)
+      },
+    })
+    const engine = createEngine(config, {
+      adapters: adapterFor(model),
+      knowledge: {
+        store,
+        embedder: needleEmbedder({ ship: 0 }),
+        reranker: {
+          rerank: async () => {
+            throw new Error('provider unavailable')
+          },
+        },
+      },
+    })
+    const response = await readAll(
+      await engine.handleChat(
+        { sessionId: SESSION, messages: [userMessage('shipping')] },
+        testContext(),
+      ),
+    )
+    expect(response.text).toBe('I do not know.')
+    expect(response.citations).toEqual([])
+    expect(prompt).toContain('Search is temporarily unavailable')
+    expect(prompt).not.toContain('provider unavailable')
+  })
   it('injects a <knowledge> block when retrieval scores a hit', async () => {
     const store = new MemoryVectorStore({ model: 'test-embed' })
     await store.upsert([
@@ -126,9 +249,10 @@ describe('engine knowledge (docs/06)', () => {
     let systemSeen = ''
     const model = new MockLanguageModelV3({
       doStream: async (options) => {
-        const first = options.prompt[0]
-        systemSeen =
-          first?.role === 'system' && typeof first.content === 'string' ? first.content : ''
+        systemSeen = options.prompt
+          .filter((message) => message.role === 'system')
+          .map((message) => message.content)
+          .join('\n\n')
         return {
           stream: simulateReadableStream({
             chunks: [

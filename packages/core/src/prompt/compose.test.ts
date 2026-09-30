@@ -101,10 +101,10 @@ describe('composePrompt — block ordering (docs/04 §5)', () => {
     expect(result.blocks).toEqual([
       'system',
       'site_context',
-      'page_context',
-      'knowledge',
       'tool_policy',
       'guardrails',
+      'page_context',
+      'knowledge',
     ])
   })
 
@@ -123,8 +123,8 @@ describe('composePrompt — block ordering (docs/04 §5)', () => {
     const at = (name: string): number => result.text.indexOf(name)
     expect(at('<site_context>')).toBeLessThan(at('<page_context>'))
     expect(at('<page_context>')).toBeLessThan(at('<knowledge>'))
-    expect(at('<knowledge>')).toBeLessThan(at('<tool_policy>'))
     expect(at('<tool_policy>')).toBeLessThan(at('<guardrails>'))
+    expect(at('<guardrails>')).toBeLessThan(at('<page_context>'))
   })
 
   it('is a pure function of its input', () => {

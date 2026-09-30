@@ -154,7 +154,7 @@ docs/02-configuration.md §9, docs/06-knowledge.md.
 | `knowledge.retrieval.minScore` | `number` | `0.3` | _≥ 0, ≤ 1._ |
 | `knowledge.retrieval.maxContextTokens` | `integer` | `3000` | _> 0._ |
 | `knowledge.retrieval.includeCitations` | `boolean` | `true` |  |
-| `knowledge.retrieval.rerank` | `boolean` | `false` |  |
+| `knowledge.retrieval.rerank` | `boolean \| object` | `false` | true uses Cohere rerank-v3.5 and COHERE_API_KEY; an object configures Cohere or a local custom cross-encoder. |
 | `knowledge.retrieval.dedupeByUrl` | `boolean` | `true` | At most one chunk per URL, so one long page cannot dominate. |
 | `knowledge.retrieval.expandNeighbours` | `integer` | `0` | Pull N adjacent chunks around each hit from the same document. _≥ 0._ |
 | `knowledge.retrieval.filter` | `Record<string, any>` |  |  |

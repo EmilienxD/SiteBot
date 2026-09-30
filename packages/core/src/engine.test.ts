@@ -424,6 +424,34 @@ describe('history (docs/04 §6, docs/08 §6)', () => {
 })
 
 describe('fallback (docs/04 §3)', () => {
+  it('selects explicit cache metadata for the actual fallback provider', async () => {
+    const primary = new MockLanguageModelV3({
+      doStream: async () => {
+        throw Object.assign(new Error('unavailable'), { statusCode: 503 })
+      },
+    })
+    const fallback = textModel(['fallback answer'])
+    const engine = createEngine(
+      testConfig({
+        backend: {
+          provider: 'anthropic',
+          model: 'primary',
+          maxRetries: 0,
+          fallback: [{ provider: 'bedrock', model: 'fallback' }],
+        },
+        siteContext: { company: 'Acme' },
+      }),
+      { adapters: { anthropic: async () => primary, bedrock: async () => fallback } },
+    )
+    expect(await streamedText(await engine.handleChat(chatRequest(), testContext()))).toBe(
+      'fallback answer',
+    )
+    const prefixes = fallback.doStreamCalls[0]?.prompt.filter(
+      (message) => message.role === 'system',
+    )
+    expect(prefixes?.[0]?.providerOptions).toEqual({ bedrock: { cachePoint: { type: 'default' } } })
+    expect(JSON.stringify(prefixes)).not.toContain('anthropic')
+  })
   it('hops to the next entry when the first fails before any token', async () => {
     const config = testConfig({
       backend: {

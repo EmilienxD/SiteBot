@@ -1,6 +1,6 @@
 # Project status audit — 2026-09-30
 
-The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **SQLite, robots enforcement and JavaScript rendering have since been completed**, as recorded below. The other gaps remain.
+The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **SQLite, robots enforcement, JavaScript rendering and the advertised retrieval refinements have since been completed**, as recorded below. The other gaps remain.
 
 ## Verified locally during the initial audit
 
@@ -70,11 +70,15 @@ Validation after the crawling changes: **955 unit/integration tests pass
 48 Chromium browser tests pass**. Build, typecheck, lint, formatting and all
 seven package checks pass. The existing Next.js tracing warning remains.
 
-### 4. Finish or explicitly defer the advertised retrieval refinements
+### 4. Advertised retrieval refinements — completed 2026-10-01
 
-- **Semantic splitting:** [`chunk.ts`](../packages/ingest/src/chunk.ts), lines 8–13 and 202, documents its fallback to fixed packing. It never computes the embedding-distance split specified in [knowledge §3.4](./06-knowledge.md). An oversized single-section probe produced five chunks identical to `fixed`. Measure/implement the refinement or revise the specification to match the accepted simpler algorithm.
-- **Reranking:** `knowledge.retrieval.rerank` validates and defaults to false, but [`retrieve.ts`](../packages/core/src/knowledge/retrieve.ts) never uses it. Implement the optional cross-encoder or reject/clearly mark `true` as unsupported.
-- **Explicit provider prompt caching:** [engine §5](./04-providers-and-engine.md) requires provider cache breakpoints. Stable prompt ordering exists, but the engine passes one `system` string to `streamText` with no provider cache metadata/breakpoints. Finish provider-specific handling or formally defer it in the spec.
+- **Semantic splitting:** [`chunk.ts`](../packages/ingest/src/chunk.ts) embeds paragraph units and splits oversized sections at the largest cosine-distance gap. Heading metadata, bounded overlap and token ceilings are preserved. Ingest reports both embedding passes; unchanged runs skip them and dry runs estimate without spending.
+- **Reranking:** [`rerank.ts`](../packages/core/src/knowledge/rerank.ts) implements Cohere HTTP and custom local cross-encoder modules. Retrieval overfetches and reranks before thresholding and final selection, including injected rerankers for host runtimes.
+- **Explicit provider prompt caching:** [`cache.ts`](../packages/core/src/prompt/cache.ts) emits Anthropic cache controls and Bedrock cache points after stable prompt groups. Volatile content follows without metadata; provider fallback and final summary steps retain correct boundaries.
+
+[`e2e/knowledge.spec.ts`](../e2e/knowledge.spec.ts) verifies real ingest, query embedding, reranking, Anthropic request serialization, streaming, source chips and citation navigation against deterministic local provider endpoints. Interactive Chrome also verifies both chat turns. These are offline contract checks; paid-provider cache hits and hosted reranker quality still belong to opt-in live validation.
+
+Validation on Windows / Node 24.12.0: **977 unit/integration tests pass (one optional-store test skipped), 56 security tests pass, and all 49 Chromium browser tests pass**. Build, typecheck, lint, formatting and all seven package checks pass. Reranking is tested in `always`, `hybrid` and `tool` modes; tool-search citations now read the current results at stream completion, including after introductory text. The pre-existing Next.js file-tracing warning remains.
 
 ### 5. Add real-provider and real-infrastructure validation
 
@@ -86,7 +90,7 @@ Add opt-in tests for actual provider streaming/tool calling and hosted store beh
 
 [`screen-reader-check.md`](./screen-reader-check.md) contains a test script, but no results/version matrix. Before release, record NVDA/Windows and VoiceOver/macOS/iOS outcomes, especially whole-answer streaming announcements and approval focus. axe passing does not verify speech behavior.
 
-The implementation plan still lists semantic quality/cost and provider caching as open questions; SQLite Windows packaging is resolved. Its Phase 9 onboarding acceptance records that inserting the script tag still requires one paste and that homepage drafting was not exercised in that recording. Resolve or explicitly accept these departures when updating the completion status.
+The implementation plan's semantic cost and provider caching questions are now resolved. Its Phase 9 onboarding acceptance records that inserting the script tag still requires one paste and that homepage drafting was not exercised in that recording. Resolve or explicitly accept those onboarding departures when updating the completion status.
 
 ### 7. Complete licensing and release
 
@@ -96,12 +100,12 @@ Verify npm scope ownership and publishing credentials/trusted-publishing setup, 
 
 ### 8. Update the completion claims and remaining build warning
 
-Update the README, implementation plan, and rule-to-test audit after fixing or accepting the gaps above. In particular, the rule audit omits robots, JS rendering, semantic refinement, reranking, and explicit cache breakpoints while claiming all normative rules are covered.
+The README, implementation plan and rule-to-test audit now cover robots, JS rendering, semantic refinement, reranking and explicit cache breakpoints. Keep these completion claims current as the remaining acceptance work lands.
 
 Scope the Next.js example's file tracing so production output does not unintentionally include the whole workspace. The fresh build succeeds, but emits this warning; inspect the deployment artifact size before treating it as release polish only.
 
 ## Suggested next milestone
 
-SQLite and crawling are complete. Resolve the remaining retrieval settings,
-add provider/hosted-store smoke tests and record manual accessibility results.
+SQLite, crawling and the advertised retrieval refinements are complete. Add
+provider/hosted-store smoke tests and record manual accessibility results.
 Then choose the license and release version and run the release gate.

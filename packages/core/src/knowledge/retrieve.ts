@@ -2,31 +2,50 @@ import type { ResolvedConfig } from '@sitebot/config'
 import { estimateTokens } from '../session/truncate.js'
 import type { ScoredChunk, VectorStore } from './store.js'
 import type { QueryEmbedder, RetrievalHit, RetrievalResult } from './types.js'
+import { createReranker, rerankCandidates, type Reranker } from './rerank.js'
+
+// A local cross-encoder factory may load model weights; reuse it per resolved
+// deployment config. Failed initialization remains retryable on a later request.
+const rerankers = new WeakMap<ResolvedConfig, Promise<Reranker | undefined>>()
+function configuredReranker(config: ResolvedConfig): Promise<Reranker | undefined> {
+  let ready = rerankers.get(config)
+  if (ready === undefined) {
+    ready = createReranker(config.knowledge.retrieval.rerank, { baseDir: config.$meta.baseDir })
+    rerankers.set(config, ready)
+    void ready.catch(() => rerankers.delete(config))
+  }
+  return ready
+}
 
 /**
  * Query-time retrieval — docs/06-knowledge.md §3.8.
  *
  * The store returns raw scored chunks; this module applies the query-time
- * refinements in order: `minScore` (with the all-below-threshold signal the
+ * refinements in order: optional cross-encoder reranking, then `minScore` (with the all-below-threshold signal the
  * prompt block turns into an explicit "no relevant documentation" note), then
  * `expandNeighbours`, `dedupeByUrl`, and finally the context-token budget.
  */
 export async function retrieve(
-  deps: { store: VectorStore; embedder: QueryEmbedder },
+  deps: { store: VectorStore; embedder: QueryEmbedder; reranker?: Reranker },
   query: string,
   config: ResolvedConfig,
 ): Promise<RetrievalResult> {
   const retrieval = config.knowledge.retrieval
   const embedded = await deps.embedder.embed(query)
-  const overfetch = retrieval.expandNeighbours > 0 || retrieval.dedupeByUrl
+  const overfetch =
+    retrieval.rerank !== false || retrieval.expandNeighbours > 0 || retrieval.dedupeByUrl
   const raw = await deps.store.query(embedded.embedding, {
     topK: overfetch ? retrieval.topK * 4 : retrieval.topK,
     minScore: 0,
     ...(retrieval.filter === undefined ? {} : { filter: retrieval.filter }),
   })
 
-  const above = raw.filter((hit) => hit.score >= retrieval.minScore)
-  const belowThreshold = raw.length > 0 && above.length === 0
+  const reranker =
+    retrieval.rerank === false ? undefined : (deps.reranker ?? (await configuredReranker(config)))
+  const ranked =
+    reranker !== undefined && raw.length > 0 ? await rerankCandidates(reranker, query, raw) : raw
+  const above = ranked.filter((hit) => hit.score >= retrieval.minScore)
+  const belowThreshold = ranked.length > 0 && above.length === 0
   const expanded = await expandNeighbours(deps.store, above, config)
   const hits = finalize(expanded, config)
   return { hits, belowThreshold, tokensEmbedded: embedded.tokens }

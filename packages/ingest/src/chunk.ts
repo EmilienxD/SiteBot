@@ -1,5 +1,6 @@
 import type { Knowledge } from '@sitebot/config'
 import { countTokens } from './tokens.js'
+import { cosineSimilarity } from '@sitebot/core'
 
 /**
  * Chunking — docs/06-knowledge.md §3.4.
@@ -7,10 +8,8 @@ import { countTokens } from './tokens.js'
  * Three strategies, one output shape. `heading` splits at h1–h3 boundaries.
  * `fixed` walks token windows with overlap. `semantic` (the default) is
  * heading-aware first and fills sections to `maxTokens` with adjacent
- * paragraphs; the embedding-distance split the doc describes as a refinement
- * needs embeddings *before* chunking (docs/09 open question 4) and ships only
- * if it measures better — today an oversized semantic section degrades to
- * `fixed`, the same escape `heading` uses.
+ * paragraphs. `chunkSemanticDocument` embeds paragraph units before choosing
+ * the largest adjacent cosine-distance gap in oversized sections.
  *
  * Every chunk carries `headingPath` — prepended to the text before embedding,
  * because a chunk's own prose usually does not name its section.
@@ -61,7 +60,8 @@ function sections(document: DocumentInput, maxLevel: number): Section[] {
     if (level > 1 && path[0] === undefined) path[0] = document.title
     current = { headingPath: [...path.filter(Boolean)], paragraphs: [] }
     out.push(current)
-    cursor = heading.offset + heading.text.length
+    const headingLine = document.text.slice(heading.offset).split('\n', 1)[0] ?? ''
+    cursor = heading.offset + headingLine.length
     // Skip markdown heading markers the extractor emitted, so the heading
     // text is not duplicated into the section body.
     const rest = document.text.slice(cursor)
@@ -183,23 +183,18 @@ function packSemantic(
   for (const section of sections(document, 3)) {
     const body = section.paragraphs.join('\n\n')
     const prefix = section.headingPath.join(' > ')
-    const prefixTokens = prefix === '' ? 0 : countTokens(prefix) + 2
-    if (countTokens(body) + prefixTokens <= options.maxTokens) {
-      if (countTokens(body) + prefixTokens >= options.minTokens) {
-        chunks.push({
-          id: '',
-          text: body,
-          headingPath: section.headingPath,
-          ordinal: ordinal.value++,
-          tokens: countTokens(body) + prefixTokens,
-        })
-      }
+    const tokens = countTokens(prefix === '' ? body : `${prefix}\n\n${body}`)
+    if (tokens <= options.maxTokens) {
+      chunks.push({
+        id: '',
+        text: body,
+        headingPath: section.headingPath,
+        ordinal: ordinal.value++,
+        tokens,
+      })
       continue
     }
-    // Semantic section too large: head-aware packing of its paragraphs; the
-    // hard character-level fallback inside packFixed covers a pathological
-    // single paragraph.
-    packFixed(chunks, body, section.headingPath, options, ordinal)
+    throw new Error('Oversized semantic sections require chunkSemanticDocument and an embedder.')
   }
 }
 
@@ -224,6 +219,123 @@ export function chunkDocument(document: DocumentInput, options: Knowledge['chunk
     case 'semantic':
       packSemantic(chunks, document, options, ordinal)
       break
+  }
+  return chunks
+}
+
+export interface SemanticEmbedder {
+  embedBatch(texts: string[]): Promise<{ embeddings: number[][]; tokens: number }>
+}
+
+/** Embedding-based semantic boundaries, without crossing heading sections. */
+export async function chunkSemanticDocument(
+  document: DocumentInput,
+  options: Knowledge['chunk'],
+  embedder: SemanticEmbedder,
+): Promise<RawChunk[]> {
+  const chunks: RawChunk[] = []
+  for (const section of sections(document, 3)) {
+    const prefix = section.headingPath.join(' > ')
+    const tokenCount = (text: string) => countTokens(prefix === '' ? text : `${prefix}\n\n${text}`)
+    const body = section.paragraphs.join('\n\n')
+    const emit = (text: string) =>
+      chunks.push({
+        id: '',
+        text,
+        headingPath: [...section.headingPath],
+        ordinal: chunks.length,
+        tokens: tokenCount(text),
+      })
+    // Keep short sections intact, including short headings/tails; never lose prose.
+    if (tokenCount(body) <= options.maxTokens) {
+      emit(body)
+      continue
+    }
+    const budget = options.maxTokens * 4 - (prefix === '' ? 0 : prefix.length + 2)
+    if (budget < 1) throw new Error('chunk.maxTokens is too small for the heading prefix.')
+    const units = [...paragraphs(body)].flatMap((paragraph) => {
+      const parts: string[] = []
+      // Pathological long paragraphs still need a hard upper bound.
+      for (let offset = 0; offset < paragraph.length; offset += budget) {
+        const part = paragraph.slice(offset, offset + budget).trim()
+        if (part !== '') parts.push(part)
+      }
+      return parts
+    })
+    if (units.length === 1) {
+      emit(units[0]!)
+      continue
+    }
+    const result = await embedder.embedBatch(
+      units.map((text) => (prefix === '' ? text : `${prefix}\n\n${text}`)),
+    )
+    const vectors = result.embeddings
+    const dimensions = vectors[0]?.length ?? 0
+    if (
+      vectors.length !== units.length ||
+      dimensions === 0 ||
+      vectors.some(
+        (vector) => vector.length !== dimensions || vector.some((value) => !Number.isFinite(value)),
+      )
+    ) {
+      throw new Error('Semantic embedder returned missing or invalid paragraph embeddings.')
+    }
+    const gaps = units
+      .slice(1)
+      .map((_, index) => 1 - cosineSimilarity(vectors[index]!, vectors[index + 1]!))
+    const cumulative = [0]
+    for (const unit of units) cumulative.push(cumulative[cumulative.length - 1]! + unit.length + 2)
+    const rangeTokens = (start: number, end: number) =>
+      Math.ceil(
+        (cumulative[end]! - cumulative[start]! - 2 + (prefix === '' ? 0 : prefix.length + 2)) / 4,
+      )
+    // Iterative subdivision preserves source order and handles very long documents.
+    const pending: [number, number][] = [[0, units.length]]
+    while (pending.length > 0) {
+      const [start, end] = pending.pop()!
+      const text = units.slice(start, end).join('\n\n')
+      if (tokenCount(text) <= options.maxTokens) {
+        emit(text)
+        continue
+      }
+      let split = -1
+      let largest = -Infinity
+      for (let index = start + 1; index < end; index++) {
+        if (
+          rangeTokens(start, index) < options.minTokens ||
+          rangeTokens(index, end) < options.minTokens
+        )
+          continue
+        const gap = gaps[index - 1]!
+        if (
+          gap > largest ||
+          (gap === largest &&
+            Math.abs(index - (start + end) / 2) < Math.abs(split - (start + end) / 2))
+        ) {
+          largest = gap
+          split = index
+        }
+      }
+      // minTokens is a preference; the hard maxTokens ceiling and no data loss win.
+      if (split < 0) split = start + Math.max(1, Math.floor((end - start) / 2))
+      pending.push([split, end], [start, split])
+    }
+  }
+  // Add a bounded tail as context without moving the selected semantic boundary
+  // or crossing a heading. Full chunks take precedence over overlap.
+  for (let index = chunks.length - 1; index > 0 && options.overlapTokens > 0; index--) {
+    const chunk = chunks[index]!
+    const previous = chunks[index - 1]!
+    if (JSON.stringify(chunk.headingPath) !== JSON.stringify(previous.headingPath)) continue
+    const prefix = chunk.headingPath.join(' > ')
+    const prefixChars = prefix === '' ? 0 : prefix.length + 2
+    const available = options.maxTokens * 4 - prefixChars - chunk.text.length - 2
+    const overlapChars = Math.min(options.overlapTokens * 4, available)
+    if (overlapChars <= 0) continue
+    const overlap = previous.text.slice(-overlapChars).trim()
+    if (overlap === '') continue
+    chunk.text = `${overlap}\n\n${chunk.text}`
+    chunk.tokens = countTokens(prefix === '' ? chunk.text : `${prefix}\n\n${chunk.text}`)
   }
   return chunks
 }

@@ -27,7 +27,8 @@ import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.j
 import { lastUserMessage, mergeHistory } from './session/history.js'
 import { retrieve } from './knowledge/retrieve.js'
 import type { KnowledgeDeps, Citation } from './knowledge/types.js'
-import { composePrompt, type KnowledgeSnippet } from './prompt/compose.js'
+import { composePrompt, type ComposedPrompt, type KnowledgeSnippet } from './prompt/compose.js'
+import { cachedSystem } from './prompt/cache.js'
 import type { ProviderFactory } from './providers/adapters.js'
 import { runChain } from './providers/fallback.js'
 import { resolveChain, resolveModel } from './providers/registry.js'
@@ -181,6 +182,7 @@ export function createEngine(
     resumeRunId?: string,
     activeChain = chain,
     knowledge?: { enabled: boolean; citations: Citation[] },
+    composed?: ComposedPrompt,
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
     const policy = resolvePolicy(config)
     const runId = resumeRunId ?? `r_${generateId()}`
@@ -238,7 +240,7 @@ export function createEngine(
           if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
           try {
             const result = await retrieve(
-              { store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
+              { ...knowledgeDeps, store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
               query,
               config,
             )
@@ -305,7 +307,7 @@ export function createEngine(
 
         const streamed = streamText({
           model: resolved.model,
-          system,
+          system: cachedSystem(entry.provider, system, composed),
           messages,
           tools,
           toolChoice: policy.toolChoice,
@@ -318,7 +320,14 @@ export function createEngine(
                     ? {
                         activeTools: [],
                         toolChoice: 'none' as const,
-                        system: `${system}\n\nYou have reached the final step. Summarize the useful results already gathered and answer without calling another tool.`,
+                        system: (() => {
+                          const cached = cachedSystem(entry.provider, system, composed)
+                          const instruction =
+                            'You have reached the final step. Summarize the useful results already gathered and answer without calling another tool.'
+                          return typeof cached === 'string'
+                            ? `${cached}\n\n${instruction}`
+                            : [...cached, { role: 'system' as const, content: instruction }]
+                        })(),
                       }
                     : undefined,
               }),
@@ -422,10 +431,10 @@ export function createEngine(
         })
 
         const withCitations =
-          knowledge === undefined || knowledge.citations.length === 0
+          knowledge === undefined
             ? annotated
             : appendCitations(annotated, {
-                items: knowledge.citations,
+                items: () => knowledge.citations,
                 include: config.knowledge.retrieval.includeCitations,
               })
 
@@ -510,7 +519,11 @@ export function createEngine(
               if (query !== undefined && query.trim() !== '') {
                 try {
                   const result = await retrieve(
-                    { store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
+                    {
+                      ...knowledgeDeps,
+                      store: knowledgeDeps.store,
+                      embedder: knowledgeDeps.embedder,
+                    },
                     query,
                     config,
                   )
@@ -531,6 +544,8 @@ export function createEngine(
                   }
                 } catch (error) {
                   ctx.logger.warn('knowledge retrieval failed', { error })
+                  knowledgeNote =
+                    'Search is temporarily unavailable. Answer from the page context or say you do not know.'
                 }
               }
             }
@@ -639,6 +654,7 @@ export function createEngine(
             resumeRunId,
             selectedChain,
             knowledgeRequest,
+            composed,
           )
           span.setAttribute('sitebot.model', modelId)
 
@@ -1124,30 +1140,27 @@ const CLIENT_RESULT_MAX_CHARS = 16_384
  */
 function appendCitations(
   stream: ReadableStream<UIMessageChunk>,
-  options: { items: Citation[]; include: boolean },
+  options: { items: () => Citation[]; include: boolean },
 ): ReadableStream<UIMessageChunk> {
-  if (!options.include || options.items.length === 0) return stream
-  let textDone = false
+  if (!options.include) return stream
+  let emitted = false
+  const emit = (controller: TransformStreamDefaultController<UIMessageChunk>) => {
+    const items = options.items()
+    if (items.length > 0)
+      controller.enqueue({ type: 'data-citations', data: { items } } as UIMessageChunk)
+    emitted = true
+  }
   return stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
       transform(chunk, controller) {
-        if (chunk.type === 'text-end' && !textDone) {
-          textDone = true
-          controller.enqueue({
-            type: 'data-citations',
-            data: { items: options.items },
-          } as UIMessageChunk)
-        }
+        // Tool retrieval can run after an introductory text-end. Read the
+        // current list only when the entire assistant run is finishing.
+        if (chunk.type === 'finish' && !emitted) emit(controller)
         controller.enqueue(chunk)
       },
       flush(controller) {
         // A response with no text part (tool-only) still cites what the tool found.
-        if (!textDone) {
-          controller.enqueue({
-            type: 'data-citations',
-            data: { items: options.items },
-          } as UIMessageChunk)
-        }
+        if (!emitted) emit(controller)
       },
     }),
   )

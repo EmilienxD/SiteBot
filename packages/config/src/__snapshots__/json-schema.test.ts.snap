@@ -489,8 +489,68 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
               "type": "string",
             },
             "rerank": {
+              "anyOf": [
+                {
+                  "type": "boolean",
+                },
+                {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "apiKey": {
+                          "type": "string",
+                        },
+                        "baseUrl": {
+                          "default": "https://api.cohere.com",
+                          "format": "uri",
+                          "type": "string",
+                        },
+                        "model": {
+                          "default": "rerank-v3.5",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "provider": {
+                          "const": "cohere",
+                          "type": "string",
+                        },
+                        "timeoutMs": {
+                          "default": 10000,
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer",
+                        },
+                      },
+                      "required": [
+                        "provider",
+                      ],
+                      "type": "object",
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "module": {
+                          "description": "Module exporting a Reranker (or a factory returning one).",
+                          "minLength": 1,
+                          "type": "string",
+                        },
+                        "provider": {
+                          "const": "custom",
+                          "type": "string",
+                        },
+                      },
+                      "required": [
+                        "provider",
+                        "module",
+                      ],
+                      "type": "object",
+                    },
+                  ],
+                },
+              ],
               "default": false,
-              "type": "boolean",
+              "description": "true uses Cohere rerank-v3.5 and COHERE_API_KEY; an object configures Cohere or a local custom cross-encoder.",
             },
             "topK": {
               "default": 6,
