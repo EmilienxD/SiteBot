@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures.js'
+import { expect, test, OPEN_SHADOW_ROOTS, Widget } from './fixtures.js'
 
 test.describe('rendering and streaming', () => {
   test('shows the greeting, then streams a markdown answer', async ({ page, widget }) => {
@@ -33,6 +33,42 @@ test.describe('rendering and streaming', () => {
   })
 })
 
+for (const scope of ['tab', 'browser'] as const) {
+  test(`a new tab restores history only with sessionScope: ${scope}`, async ({ page, widget }) => {
+    await page.context().route('**/api/chat/config*', async (route) => {
+      const response = await route.fetch()
+      const config = await response.json()
+      config.ui.behaviour.sessionScope = scope
+      await route.fulfill({ response, json: config })
+    })
+    await page.goto('/')
+    await widget.open()
+    const firstRequest = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/api/chat'),
+    )
+    await widget.send('first tab')
+    const firstSession = (await firstRequest).postDataJSON().sessionId
+    await expect(widget.lastAnswer()).toContainText('first tab')
+
+    const other = await page.context().newPage()
+    await other.addInitScript(OPEN_SHADOW_ROOTS)
+    await other.goto('/')
+    const second = new Widget(other)
+    await second.ensureOpen()
+    if (scope === 'tab') await expect(second.log).not.toContainText('first tab')
+    else await expect(second.log).toContainText('first tab')
+    const secondRequest = other.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/api/chat'),
+    )
+    await second.send('second tab')
+    expect((await secondRequest).postDataJSON().sessionId === firstSession).toBe(
+      scope === 'browser',
+    )
+    await expect(second.lastAnswer()).toContainText('second tab')
+    await other.close()
+  })
+}
+
 test.describe('client tools', () => {
   test('highlight scrolls to the element and outlines it', async ({ page, widget }) => {
     await page.goto('/')
@@ -61,6 +97,8 @@ test.describe('client tools', () => {
     await expect(page.locator('[name=business]')).toHaveValue('Bean Cafe')
     await expect(page.locator('[name=email]')).toHaveValue('owner@beancafe.com')
     await expect(page.locator('[name=volume]')).toHaveValue('5-20')
+    await expect(widget.input).toBeFocused()
+    await expect(widget.log.locator('.tool-chip')).toContainText('Done')
     expect(submitted).toBe(false)
   })
 
@@ -90,18 +128,29 @@ test.describe('client tools', () => {
     await expect(widget.lastAnswer()).toContainText('left the page as it is')
     await expect(widget.panel.getByRole('alert')).toHaveCount(0)
     await expect(page.locator('[name=business]')).toHaveValue('')
+    await expect(widget.log.locator('.tool-chip')).toContainText('Denied')
+    await expect(widget.input).toBeFocused()
   })
 
   test('a pending approval survives a reload', async ({ page, widget }) => {
     await page.goto('/wholesale')
     await widget.open()
+    for (let index = 0; index < 6; index += 1) {
+      await widget.send(`Earlier question ${index}`)
+      await expect(widget.lastAnswer()).toContainText(`Earlier question ${index}`)
+    }
     await widget.send('fill the form')
     await expect(widget.approval).toBeVisible()
     await page.reload()
     await widget.ensureOpen()
     await expect(widget.approval).toBeVisible()
+    await expect(widget.approval.getByRole('button', { name: 'Deny' })).toBeFocused()
+    const buttons = (await widget.approval.locator('.card-actions').boundingBox())!
+    const log = (await widget.log.boundingBox())!
+    expect(buttons.y + buttons.height).toBeLessThanOrEqual(log.y + log.height)
     await widget.approval.getByRole('button', { name: 'Approve' }).click()
     await expect(page.locator('[name=business]')).toHaveValue('Bean Cafe')
+    await expect(widget.lastAnswer()).toContainText('"filled":true')
   })
 
   test('navigate loads the page and the conversation carries over', async ({ page, widget }) => {

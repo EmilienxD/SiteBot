@@ -15,16 +15,18 @@ import { toPublicConfig, type ProviderId, type ResolvedConfig } from '@sitebot/c
 import { resolvePolicy } from './agent/policy.js'
 import {
   CHECKPOINT_TTL_MS,
+  abandonPendingRun,
   CheckpointError,
   clearPendingRun,
   grantApproval,
   hasApprovalGrant,
+  hasPendingRun,
   loadPendingRun,
   savePendingRun,
   type PendingRun,
 } from './agent/checkpoint.js'
 import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.js'
-import { lastUserMessage, mergeHistory } from './session/history.js'
+import { lastUserMessage, mergeHistory, settleDanglingToolCalls } from './session/history.js'
 import { retrieve } from './knowledge/retrieve.js'
 import type { KnowledgeDeps, Citation } from './knowledge/types.js'
 import { composePrompt, type ComposedPrompt, type KnowledgeSnippet } from './prompt/compose.js'
@@ -183,8 +185,10 @@ export function createEngine(
     activeChain = chain,
     knowledge?: { enabled: boolean; citations: Citation[] },
     composed?: ComposedPrompt,
+    progress: { stepsTaken?: number; tokensUsed?: number; activeMs?: number } = {},
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
-    const policy = resolvePolicy(config)
+    const startedAt = now()
+    const policy = resolvePolicy(config, { ...progress, now })
     const runId = resumeRunId ?? `r_${generateId()}`
     const clientTools = new Set(
       config.tools.flatMap((entry) =>
@@ -213,6 +217,8 @@ export function createEngine(
       transcript: originalMessages,
     }).build()
     let finalUsage: { inputTokens: number; outputTokens: number; costUsd: number } | undefined
+    let totalTokens = 0
+    let completedSteps = 0
 
     // `search_knowledge_base` — the engine-owned side of retrieval mode `tool`
     // and `hybrid`. It exists without a `tools` config entry because the model
@@ -351,6 +357,7 @@ export function createEngine(
             if (outputCommitted) reportError(hooks, error, ctx)
           },
           onStepFinish: (step) => {
+            completedSteps += 1
             void runHook(
               hooks,
               'onStep',
@@ -373,6 +380,7 @@ export function createEngine(
           // `totalUsage`, not `usage`: the latter is the last step only, and a
           // multi-step agent run would be billed — and budgeted — for one step.
           onFinish: ({ totalUsage: usage, finishReason }) => {
+            totalTokens = usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
             finalUsage = {
               inputTokens: usage.inputTokens ?? 0,
               outputTokens: usage.outputTokens ?? 0,
@@ -459,7 +467,14 @@ export function createEngine(
               if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
               else await sessionStore.set(next)
             } else {
-              await savePendingRun(sessionStore, next, pending)
+              await savePendingRun(sessionStore, next, {
+                ...pending,
+                expiresAt:
+                  now() + Math.max(CHECKPOINT_TTL_MS, config.agent.stopWhen.seconds * 10_000),
+                tokensUsed: (progress.tokensUsed ?? 0) + totalTokens,
+                activeMs: (progress.activeMs ?? 0) + Math.max(0, now() - startedAt),
+                stepsTaken: (progress.stepsTaken ?? 0) + completedSteps,
+              })
             }
           },
         }) as ReadableStream<UIMessageChunk>
@@ -569,6 +584,10 @@ export function createEngine(
           let history: UIMessage[]
           let session = await sessionStore.get(request.sessionId)
           let resumeRunId: string | undefined
+          let stepsTaken = 0
+          let tokensUsed = 0
+          let activeMs = 0
+          let abandonsRun = false
           if (request.trigger === 'resume') {
             if (request.resume === undefined) {
               throw new EngineError('invalid_request', { detail: 'resume payload is required' })
@@ -592,8 +611,25 @@ export function createEngine(
             }
             history = session.messages
             resumeRunId = request.resume.runId
+            // docs/04 §4: `maxSteps` bounds the run, not the request. Each
+            // client-tool round trip is a new request, and without this every
+            // one of them started a fresh step budget.
+            stepsTaken = loaded.pending.stepsTaken ?? stepCount(loaded.pending.responseMessage)
+            tokensUsed = loaded.pending.tokensUsed ?? 0
+            activeMs = loaded.pending.activeMs ?? 0
+            const resumedPolicy = resolvePolicy(config, { stepsTaken, tokensUsed, activeMs, now })
+            if (resumedPolicy.stepsExhausted || resumedPolicy.budgetExhausted) {
+              await clearPendingRun(sessionStore, session, resumeRunId)
+              return limitResponse(
+                ctx.requestId,
+                loaded.pending.responseMessage.id,
+                resumedPolicy.budgetExhausted,
+              )
+            }
           } else {
-            history = await buildHistory(request)
+            const settled = settleDanglingToolCalls(await buildHistory(request))
+            history = settled.messages
+            abandonsRun = settled.settled > 0 || hasPendingRun(session)
           }
           const budgetTokens = contextBudget({
             modelId: `${config.backend.provider}:${config.backend.model}`,
@@ -655,8 +691,20 @@ export function createEngine(
             selectedChain,
             knowledgeRequest,
             composed,
+            { stepsTaken, tokensUsed, activeMs },
           )
           span.setAttribute('sitebot.model', modelId)
+
+          if (abandonsRun && config.storage.type !== 'none') {
+            const current = await sessionStore.get(request.sessionId)
+            if (current !== null) {
+              await abandonPendingRun(
+                sessionStore,
+                current,
+                settleDanglingToolCalls(current.messages).messages,
+              )
+            }
+          }
 
           // Persist the user turn only once the model has committed to
           // answering. Storing it before the call would leave an unanswered
@@ -968,7 +1016,10 @@ export function createEngine(
       // docs/03 §5 rule 3: a deny reaches the model as a tool result
       // (`execution-denied`) that says the visitor declined, so it can answer
       // gracefully instead of retrying or failing.
-      part.approval = { ...part.approval, approved, ...(approved ? {} : { reason: 'user_denied' }) }
+      // The reason is the whole tool result some providers show the model, so
+      // it says in words that nothing happened: a bare code was read as
+      // success often enough for the model to claim it had acted.
+      part.approval = { ...part.approval, approved, ...(approved ? {} : { reason: USER_DENIED }) }
       // An approved client tool has no server executor for the model run to
       // call: it goes back to the page, which answers with `clientToolResults`.
       if (approved && isClientTool(toolName(part)) && part.toolCallId !== undefined) {
@@ -1030,6 +1081,34 @@ export function createEngine(
           } as UIMessageChunk)
         }
         writer.write({ type: 'finish', finishReason: 'tool-calls' } as UIMessageChunk)
+      },
+    })
+    return createUIMessageStreamResponse({
+      stream,
+      headers: { 'x-sitebot-request-id': requestId },
+    })
+  }
+
+  /**
+   * Ends a resumed run whose step, token, or active-time budget is spent,
+   * without calling the model. The final summary belongs inside the ceiling.
+   * The client tool's result is already in the stored transcript.
+   */
+  function limitResponse(requestId: string, messageId: string, budgetExhausted = false): Response {
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: 'start', messageId })
+        if (budgetExhausted || config.agent.onMaxSteps !== 'silent') {
+          const mapped = mapError(
+            new EngineError(budgetExhausted ? 'budget_exceeded' : 'max_steps_exceeded'),
+            errorOptions,
+          )
+          writer.write({
+            type: 'data-error',
+            data: { code: mapped.code, message: mapped.message, retryable: false },
+          } as UIMessageChunk)
+        }
+        writer.write({ type: 'finish', finishReason: 'stop' } as UIMessageChunk)
       },
     })
     return createUIMessageStreamResponse({
@@ -1128,6 +1207,10 @@ export function createEngine(
 /** docs/04 §6 step 5: refresh a cached summary every this many newly dropped messages. */
 const SUMMARY_REFRESH = 10
 
+/** docs/03 §5 rule 3: the `execution-denied` reason. */
+const USER_DENIED =
+  'user_denied: the visitor declined this action, so it was NOT performed. Do not say or imply that it was done.'
+
 /** Same bound as the widget's (docs/05 §5 rule 5). */
 const CLIENT_RESULT_MAX_CHARS = 16_384
 
@@ -1196,6 +1279,14 @@ function replaceOrAppend(messages: UIMessage[], response: UIMessage): UIMessage[
   const next = [...messages]
   next[index] = response
   return next
+}
+
+/**
+ * Model steps a run has taken so far. A resumed run continues the same
+ * assistant message, and every step opens with a `step-start` part.
+ */
+function stepCount(message: UIMessage): number {
+  return message.parts.filter((part) => part.type === 'step-start').length
 }
 
 function pendingRun(message: UIMessage, runId: string, now: number): PendingRun | null {

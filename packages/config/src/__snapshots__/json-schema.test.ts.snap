@@ -40,7 +40,7 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
         },
         "onMaxSteps": {
           "default": "summarize",
-          "description": "summarize asks the model for a final answer with tools disabled — one extra call, always a usable reply.",
+          "description": "summarize reserves the final permitted call for an answer with tools disabled.",
           "enum": [
             "summarize",
             "error",
@@ -58,7 +58,7 @@ exports[`emitJsonSchema > matches the committed snapshot 1`] = `
           "properties": {
             "seconds": {
               "default": 120,
-              "description": "Wall clock.",
+              "description": "Cumulative active server time across the run; excludes approval and client-tool waits.",
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer",

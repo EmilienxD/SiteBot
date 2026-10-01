@@ -166,6 +166,8 @@ That function is the entire difference between "simple chatbot" and "AI agent". 
 
 Three conditions, OR'd. Custom `tokenBudgetIs` and `wallClockIs` are ours (the AI SDK ships `stepCountIs`):
 
+All three apply to the **whole run**, across approval and client-tool round trips. Resumes subtract the server-computed steps, tokens, and active server time already consumed. The step ceiling is the smaller of `agent.maxSteps` and `agent.stopWhen.steps`. Waiting for the visitor or page is excluded from active server time. A spent token or time budget ends the run without another model call; a new user turn starts with fresh run limits. Session and daily security budgets still apply independently.
+
 ```ts
 const tokenBudgetIs =
   (max: number): StopCondition =>
@@ -182,7 +184,7 @@ const wallClockIs = (seconds: number): StopCondition => {
 
 | Value                 | Effect when the loop hits its ceiling                                                                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `summarize` (default) | One extra call with `toolChoice: 'none'` and an injected instruction to answer from what it has. Costs one call, always produces a usable reply. |
+| `summarize` (default) | Reserves the final permitted call for `toolChoice: 'none'` and an injected instruction to answer from what it has. The summary counts toward the run's step ceiling. |
 | `error`               | Terminal `data-error` part, `code: max_steps_exceeded`.                                                                                          |
 | `silent`              | Stream ends with whatever text was produced.                                                                                                     |
 

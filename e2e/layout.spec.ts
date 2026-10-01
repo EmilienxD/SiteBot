@@ -46,6 +46,16 @@ test.describe('desktop', () => {
     await page.mouse.wheel(0, -300)
     await expect.poll(() => list.evaluate((node) => node.scrollTop)).toBeLessThan(before)
     expect(await page.evaluate(() => window.scrollY)).toBe(scrollY)
+    const jump = widget.panel.getByRole('button', { name: 'Jump to latest' })
+    await expect(jump).toBeVisible()
+    const listBox = (await list.boundingBox())!
+    const jumpBox = (await jump.boundingBox())!
+    expect(jumpBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height)
+    await jump.click()
+    await expect(jump).toBeHidden()
+    await expect
+      .poll(() => list.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight))
+      .toBeLessThanOrEqual(1)
   })
 
   test('follows the OS dark theme in auto mode', async ({ page, widget }) => {

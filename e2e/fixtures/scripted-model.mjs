@@ -18,7 +18,10 @@ const usage = {
   outputTokens: { total: 10, text: 10, reasoning: 0 },
 }
 
+let modelInstances = 0
+
 export function createModel(entry) {
+  const instance = ++modelInstances
   let calls = 0
   return {
     specificationVersion: 'v3',
@@ -30,13 +33,18 @@ export function createModel(entry) {
     },
     async doStream(options) {
       calls += 1
-      const { parts, delayMs } = script(options.prompt, calls)
+      const { parts, delayMs } = script(options.prompt, `${instance}_${calls}`, options.toolChoice)
       return { stream: toStream(parts, delayMs) }
     },
   }
 }
 
-function script(prompt, call) {
+function script(prompt, call, toolChoice) {
+  if (lastUserText(prompt).toLowerCase().includes('loop highlights')) {
+    return toolChoice?.type === 'none'
+      ? reply('Finished highlighting within the run limit.')
+      : toolCall('highlight_section', { selector: '#subscriptions' }, call)
+  }
   const last = prompt.at(-1)
   if (last?.role === 'tool') return reply(describeToolResult(last.content))
 

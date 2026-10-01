@@ -59,7 +59,7 @@ export function createController(
   const listeners = new Set<() => void>()
   const status = signal<Status>('ready')
   const messages = signal<UIMessage[]>(
-    config.ui.behaviour.persistHistory ? readMessages(historyKey) : [],
+    config.ui.behaviour.persistHistory ? readMessages(historyKey, scope) : [],
   )
   const error = signal<WidgetError | undefined>(undefined)
   const retryAfter = signal<number | undefined>(undefined)
@@ -84,7 +84,7 @@ export function createController(
     // Persisting on every token would serialise the whole history per delta;
     // the cache is a paint optimisation (docs/07 §9), so settle first.
     if (config.ui.behaviour.persistHistory && status.value !== 'streaming')
-      writeMessages(historyKey, messages.value)
+      writeMessages(historyKey, messages.value, scope)
     notify()
     listeners.forEach((listener) => listener())
   }
@@ -215,6 +215,9 @@ export function createController(
         return
       }
       const normalized = normalizeError(cause, config.ui.messages.errorMessage)
+      // docs/03 §5 rule 2: the server refused the resume, so the card it
+      // answered and any chip still spinning on it are over.
+      if (normalized.code === 'run_expired') settleDangling('expired')
       if (normalized.code === 'network' && !autoRetried) {
         // A dropped connection gets one silent retry. The server dedupes the
         // user turn by message id, so re-sending it cannot double it.
@@ -284,22 +287,60 @@ export function createController(
     // The call arrives on the stream's `finish`; let that response close
     // before the result goes back, so the resume continues a settled message.
     await inFlight
-    updateToolPart(toolCallId, (part) => ({
-      ...part,
-      state: 'output-available',
-      output,
-      ...(failed ? { isError: true } : {}),
-    }))
+    // A send while the tool ran settled the call as skipped; its run is gone,
+    // so the result has nowhere to go.
+    const stillWaiting = messages.value
+      .at(-1)
+      ?.parts.some(
+        (part) =>
+          isTool(part) &&
+          part.toolCallId === toolCallId &&
+          (part.state === 'input-available' ||
+            (part.state === 'approval-responded' &&
+              (part.approval as { approved?: boolean } | undefined)?.approved === true)),
+      )
+    if (stillWaiting)
+      updateToolPart(toolCallId, (part) => ({
+        ...part,
+        state: 'output-available',
+        output,
+        ...(failed ? { isError: true } : {}),
+      }))
     clientToolsRunning.value -= 1
     changed()
-    if (clientToolsRunning.value === 0 && lastStepSettled(messages.value.at(-1)))
+    if (stillWaiting && clientToolsRunning.value === 0 && lastStepSettled(messages.value.at(-1)))
       await track(request('submit-message'))
   }
 
-  function updateToolPart(toolCallId: string, update: (part: UIPart) => UIPart): void {
+  /**
+   * Close every tool call still waiting on the visitor or the page: the run
+   * behind it has expired, or a new message moved past it. The server settles
+   * its own copy the same way, so a stale card cannot be answered and no chip
+   * spins forever. `reason` becomes the chip's label.
+   */
+  function settleDangling(reason: 'expired' | 'skipped'): void {
+    announcedRunId = undefined
+    let changedAny = false
+    const next = messages.value.map((message) => {
+      if (message.role !== 'assistant') return message
+      let touched = false
+      const parts = message.parts.map((part) => {
+        if (!isTool(part) || !DANGLING.has(String(part.state))) return part
+        touched = true
+        const { approval: _approval, ...rest } = part
+        return { ...rest, state: 'output-error', errorText: reason }
+      })
+      if (!touched) return message
+      changedAny = true
+      return { ...message, parts }
+    })
+    if (changedAny) setMessages(next)
+  }
+
+  function updateToolPart(toolCallId: string, update: (part: UIPart) => UIPart): boolean {
     const current = messages.value
     const last = current.at(-1)
-    if (!last) return
+    if (!last?.parts.some((part) => isTool(part) && part.toolCallId === toolCallId)) return false
     setMessages([
       ...current.slice(0, -1),
       {
@@ -309,6 +350,7 @@ export function createController(
         ),
       },
     ])
+    return true
   }
 
   function setRetryAfter(seconds: number | undefined): void {
@@ -380,6 +422,9 @@ export function createController(
       autoRetried = false
       lastSend = { text: value, hidden: sendOptions?.hidden }
       pageContext = await extractPageContext(config.ui, pageHash, customContext)
+      // A new message abandons whatever run was waiting (docs/03 §2: resume
+      // and a new message are mutually exclusive).
+      settleDangling('skipped')
       const id = `m_${createSessionId().replace(/-/g, '')}`
       emit('message', { role: 'user', text: value, messageId: id })
       setMessages([
@@ -399,8 +444,13 @@ export function createController(
     async retry() {
       if ((retryAfter.value ?? 0) > 0) return
       await settle()
+      const expired = error.value?.code === 'run_expired'
       clearError()
       autoRetried = false
+      // docs/05 §7 rule 4: an expired run's Retry starts a fresh turn. The
+      // timed-out call stays in view; the server settles it the same way and
+      // the model picks up from there.
+      if (expired) return track(request('regenerate'))
       const current = messages.value
       const lastUser = lastIndex(current, (message) => message.role === 'user')
       if (lastUser < 0) {
@@ -470,6 +520,11 @@ export function createController(
           },
         ])
       else changed()
+    },
+    expireStale() {
+      // The server's session probe reported nothing pending, so a card the
+      // history cache still shows has expired or been abandoned server-side.
+      settleDangling('expired')
     },
     async refreshPageContext() {
       pageContext = await extractPageContext(config.ui, pageHash, customContext)
@@ -571,7 +626,7 @@ export function normalizeError(cause: unknown, fallback: string): WidgetError {
       }
     if (cause.status === 402 || code === 'budget_exceeded')
       return { code: 'budget_exceeded', message: fallback, retryable: false }
-    if (cause.status === 410) return { code: 'run_expired', message: fallback, retryable: false }
+    if (cause.status === 410) return { code: 'run_expired', message: fallback, retryable: true }
     if (code && CLIENT_CODES.has(code))
       return {
         code,
@@ -691,13 +746,19 @@ function textOf(message: UIMessage): string {
 }
 
 function runIdFromMessage(message: UIMessage): string | undefined {
-  for (const part of message.parts) {
+  // A Retry can continue an assistant message with a fresh run. Its latest
+  // data part wins over the timed-out run still visible earlier in the turn.
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    const part = message.parts[index]!
     if (part.type !== 'data-approval-request' && part.type !== 'data-client-tool-call') continue
     const runId = (part.data as { runId?: unknown } | undefined)?.runId
     if (typeof runId === 'string' && runId) return runId
   }
   return undefined
 }
+
+/** Tool states that wait on the visitor, the page, or a resume. */
+const DANGLING = new Set(['approval-requested', 'approval-responded', 'input-available'])
 
 function hasPendingApproval(message: UIMessage): boolean {
   return message.parts.some((part) => isTool(part) && part.state === 'approval-requested')

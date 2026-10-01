@@ -68,7 +68,10 @@ export const panelStyles =
   '.error{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--sb-danger-bg);color:var(--sb-danger-fg);font-size:14px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;max-width:var(--sb-bubble-max-w)}' +
   '.error .button{padding:3px 10px;font-size:13px;border-color:currentColor;background:transparent}' +
   '.usage{margin-top:8px;font-size:11px;color:var(--sb-muted)}' +
-  '.jump{position:absolute;left:50%;transform:translateX(-50%);bottom:132px;border:1px solid var(--sb-border);background:var(--sb-surface);border-radius:999px;padding:6px 12px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer}' +
+  // A zero-height anchor on the list's bottom edge: the chip rises from there,
+  // whatever height the suggestions, composer and footer below it take.
+  '.jump-anchor{display:flex;justify-content:center;padding:4px var(--sb-pad) 8px;flex:0 0 auto}' +
+  '.jump{white-space:nowrap;color:var(--sb-text);border:1px solid var(--sb-border);background:var(--sb-surface);border-radius:999px;padding:6px 12px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer}' +
   // ── suggestions: right-aligned column, docs/07 §5 ──────────────────────────
   '.suggestions{display:flex;flex-direction:column;align-items:flex-end;gap:10px;padding:4px var(--sb-pad) 12px;flex:0 0 auto}' +
   '.suggestion{border:1px solid var(--sb-pill-border);border-radius:var(--sb-pill-radius);background:var(--sb-pill-bg);color:var(--sb-pill-fg);padding:var(--sb-pill-pad);cursor:pointer;max-width:100%;text-align:right;font-weight:500}' +
@@ -91,4 +94,4 @@ export const panelStyles =
   '@media(max-width:639px){.panel,.panel.left,.panel-frame,.panel-frame.left{inset:0;width:100vw;height:var(--sb-vh,100dvh);border:0;border-radius:0}' +
   '.panel.framed{height:100vh}.back{display:grid}.close{display:none}' +
   '.header{padding-top:env(safe-area-inset-top);height:calc(64px + env(safe-area-inset-top))}' +
-  '.composer textarea{font-size:16px}.footer{padding-bottom:max(14px,env(safe-area-inset-bottom))}.jump{bottom:150px}}'
+  '.composer textarea{font-size:16px}.footer{padding-bottom:max(14px,env(safe-area-inset-bottom))}}'

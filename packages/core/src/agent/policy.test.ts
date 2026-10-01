@@ -141,6 +141,43 @@ describe('resolvePolicy — agent mode (docs/04 §4)', () => {
     expect(await stops(byStep!, [step(0)])).toBe(false)
     expect(await stops(byStep!, [step(0), step(0)])).toBe(true)
   })
+
+  it('keeps maxSteps a hard ceiling when stopWhen.steps is larger', async () => {
+    const policy = resolvePolicy(agentConfig({ maxSteps: 2, stopWhen: { steps: 8 } }))
+    expect(policy.summarizeAtStep).toBe(1)
+    expect(await stops(policy.stopWhen[0]!, [step(0), step(0)])).toBe(true)
+  })
+
+  it('subtracts usage from earlier requests in the run', async () => {
+    let clock = 1000
+    const policy = resolvePolicy(agentConfig({ stopWhen: { tokens: 100, seconds: 10 } }), {
+      stepsTaken: 2,
+      tokensUsed: 60,
+      activeMs: 6000,
+      now: () => clock,
+    })
+    expect(policy.summarizeAtStep).toBe(2)
+    expect(await stops(policy.stopWhen[1]!, [step(39)])).toBe(false)
+    expect(await stops(policy.stopWhen[1]!, [step(40)])).toBe(true)
+    clock = 4999
+    expect(await stops(policy.stopWhen[2]!, [])).toBe(false)
+    clock = 5000
+    expect(await stops(policy.stopWhen[2]!, [])).toBe(true)
+  })
+
+  it.each(['summarize', 'error', 'silent'] as const)(
+    'refuses a spent budget with %s',
+    (onMaxSteps) => {
+      const config = agentConfig({ onMaxSteps })
+      expect(resolvePolicy(config, { stepsTaken: 5 }).stepsExhausted).toBe(true)
+      expect(
+        resolvePolicy(config, { tokensUsed: config.agent.stopWhen.tokens }).budgetExhausted,
+      ).toBe(true)
+      expect(
+        resolvePolicy(config, { activeMs: config.agent.stopWhen.seconds * 1000 }).budgetExhausted,
+      ).toBe(true)
+    },
+  )
 })
 
 describe('summarizeAtStep (docs/02 §7 onMaxSteps)', () => {

@@ -9,7 +9,14 @@ export const TOOL_CHOICES = ['auto', 'required', 'none'] as const
 export const StopWhenSchema = z.strictObject({
   steps: z.number().int().positive().optional().describe('Defaults to agent.maxSteps.'),
   tokens: z.number().int().positive().default(20_000).describe('Cumulative across the loop.'),
-  seconds: z.number().int().positive().default(120).describe('Wall clock.'),
+  seconds: z
+    .number()
+    .int()
+    .positive()
+    .default(120)
+    .describe(
+      'Cumulative active server time across the run; excludes approval and client-tool waits.',
+    ),
 })
 
 const AgentBaseSchema = z.strictObject({
@@ -25,9 +32,7 @@ const AgentBaseSchema = z.strictObject({
   onMaxSteps: z
     .enum(ON_MAX_STEPS)
     .default('summarize')
-    .describe(
-      'summarize asks the model for a final answer with tools disabled — one extra call, always a usable reply.',
-    ),
+    .describe('summarize reserves the final permitted call for an answer with tools disabled.'),
   parallelToolCalls: z.boolean().default(true),
   toolChoice: z.enum(TOOL_CHOICES).default('auto'),
 })

@@ -70,6 +70,22 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
   useEffect(() => {
     if (follow && list.current?.scrollTo) list.current.scrollTo({ top: list.current.scrollHeight })
   }, [controller.messages, controller.state, follow])
+  // A message change is not the only thing that moves the bottom: the panel
+  // settling after open, an avatar or font arriving, the suggestions row going
+  // away. Without this, a reload with a pending approval could land short of
+  // the bottom with the card's buttons cut off.
+  const following = useRef(follow)
+  following.current = follow
+  useEffect(() => {
+    const node = list.current
+    if (!node || typeof ResizeObserver !== 'function') return
+    const observer = new ResizeObserver(() => {
+      if (following.current) node.scrollTo?.({ top: node.scrollHeight })
+    })
+    observer.observe(node)
+    for (const child of Array.from(node.children)) observer.observe(child)
+    return () => observer.disconnect()
+  }, [controller.messages.length, controller.state])
   // docs/07 §6/§8: the mobile sheet is modal — body scroll locked, focus held.
   useLayoutEffect(() => {
     if (!mobile) return
@@ -110,6 +126,20 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
       message.role !== 'system' &&
       (message.metadata as { hidden?: boolean } | undefined)?.hidden !== true,
   )
+  const approvalCount = visible.reduce(
+    (count, message) => count + message.parts.filter(isApprovalPart).length,
+    0,
+  )
+  const previousApprovalCount = useRef(approvalCount)
+  useLayoutEffect(() => {
+    if (approvalCount < previousApprovalCount.current) {
+      // Answering or expiring a card removes its focused button. Keep the
+      // keyboard in the remaining approval, or return it to the composer.
+      const next = panel.current?.querySelector<HTMLButtonElement>('.approval-card button.deny')
+      ;(next ?? textarea.current)?.focus()
+    }
+    previousApprovalCount.current = approvalCount
+  }, [approvalCount])
   const lastUserText = [...visible]
     .reverse()
     .find((message) => message.role === 'user')
@@ -271,16 +301,18 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
         )}
       </div>
       {!follow && (
-        <button
-          type="button"
-          class="jump"
-          onClick={() => {
-            setFollow(true)
-            list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
-          }}
-        >
-          ↓ {t('jumpToLatest')}
-        </button>
+        <div class="jump-anchor">
+          <button
+            type="button"
+            class="jump"
+            onClick={() => {
+              setFollow(true)
+              list.current?.scrollTo({ top: list.current.scrollHeight, behavior: 'smooth' })
+            }}
+          >
+            ↓ {t('jumpToLatest')}
+          </button>
+        </div>
       )}
       {suggestions.length > 0 && !offline && (
         <div class="suggestions">
@@ -623,6 +655,7 @@ type ToolPart = {
   toolName?: string
   toolCallId?: string
   errorText?: string
+  approval?: { id?: string; approved?: boolean }
 }
 type ApprovalPart = ToolPart & { toolCallId: string; approval: { id: string }; input?: unknown }
 interface ApprovalRequest {
@@ -661,13 +694,30 @@ function approvalRequests(message: UIMessage): Map<string, ApprovalRequest> {
 }
 
 function ToolChip({ part, t }: { part: ToolPart; t: Translate }) {
-  const failed = part.state === 'output-error'
-  const done = part.state === 'output-available' || part.state === 'output-denied'
+  // A denial is settled the moment the visitor clicks Deny, before the server
+  // answers — and it is never "Done": the tool did not run.
+  const denied =
+    part.state === 'output-denied' ||
+    (part.state === 'approval-responded' && part.approval?.approved === false)
+  // `expired`/`skipped`: a call the run abandoned (see chat.ts settleDangling).
+  const abandoned =
+    part.state === 'output-error' && (part.errorText === 'expired' || part.errorText === 'skipped')
+  const failed = part.state === 'output-error' && !abandoned
+  const done = part.state === 'output-available'
+  const label = denied
+    ? t('toolDenied')
+    : abandoned
+      ? t(part.errorText === 'expired' ? 'toolExpired' : 'toolSkipped')
+      : failed
+        ? t('toolFailed')
+        : done
+          ? t('toolDone')
+          : t('toolRunning')
   return (
     <div class={`tool-chip${failed ? ' error' : ''}`} role="status">
-      {!done && !failed && <span class="spinner" aria-hidden="true" />}
+      {!done && !failed && !denied && !abandoned && <span class="spinner" aria-hidden="true" />}
       <strong>{humanize(toolName(part))}</strong>
-      <span>{failed ? t('toolFailed') : done ? t('toolDone') : t('toolRunning')}</span>
+      <span>{label}</span>
     </div>
   )
 }

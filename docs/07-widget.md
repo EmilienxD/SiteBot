@@ -344,7 +344,7 @@ Non-negotiable, and cheap to get right at build time rather than retrofit.
 ## 9. Persistence and identity
 
 - `sessionId`: ULID in `sessionStorage` (per tab). Configurable to `localStorage` for cross-tab continuity via `ui.behaviour.sessionScope`.
-- History: when `ui.behaviour.persistHistory: true`, the last 50 messages are cached in `localStorage` under a key namespaced by `publicKey`, for instant restore on reload. **Server-side history remains authoritative** — the cache is a paint optimisation, never a source of truth for the model.
+- History: when `ui.behaviour.persistHistory: true`, the last 50 messages are cached under a key namespaced by `publicKey`, in the same storage scope as the session ID: `sessionStorage` for the default per-tab session, `localStorage` for `sessionScope: browser`. Reloads restore the matching transcript; a fresh per-tab session never displays another tab's history. **Server-side history remains authoritative** — the cache is a paint optimisation, never a source of truth for the model.
 - Open/closed state persisted when `ui.panel.rememberOpenState`.
 - `SiteBot.identify(jwt)` stores the token in memory only, never in storage.
 - `SiteBot.reset()` clears the session ID, local cache, and identity, and starts fresh.

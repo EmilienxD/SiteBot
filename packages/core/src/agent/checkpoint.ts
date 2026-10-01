@@ -8,6 +8,10 @@ export interface PendingRun {
   runId: string
   responseMessage: UIMessage
   expiresAt: number
+  /** Server-computed consumption, retained across browser round trips. */
+  tokensUsed?: number
+  activeMs?: number
+  stepsTaken?: number
 }
 
 interface AgentSessionState extends Record<string, unknown> {
@@ -74,6 +78,27 @@ export async function clearPendingRun(
   const { pendingRun: _pendingRun, ...rest } = state
   await store.set({ ...session, state: rest })
   await store.delete(ownerKey(runId))
+}
+
+/**
+ * A new turn supersedes whatever run was suspended, expired or not: the
+ * checkpoint is dropped so its approval can no longer be resumed, and the
+ * stored transcript gets its dangling calls settled (see
+ * `settleDanglingToolCalls`). The run's owner record stays, so a late resume
+ * from another tab reads as 410 "no longer available" rather than as a
+ * cross-session replay; it expires with the session store's TTL.
+ */
+export async function abandonPendingRun(
+  store: SessionStore,
+  session: StoredSession,
+  messages: UIMessage[],
+): Promise<void> {
+  const { pendingRun: _pendingRun, ...rest } = asAgentState(session.state)
+  await store.set({ ...session, messages, state: rest })
+}
+
+export function hasPendingRun(session: StoredSession | null): boolean {
+  return asAgentState(session?.state).pendingRun !== undefined
 }
 
 export async function grantApproval(

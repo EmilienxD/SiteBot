@@ -272,9 +272,9 @@ agent:
 | `maxSteps`          | `integer` 1–32 | `8`         | Hard ceiling on loop iterations.                                      |
 | `approvalRequired`  | `string[]`     | `[]`        | Tool names. Also settable per-tool. Union of both applies.            |
 | `approvalPolicy`    | enum           | `always`    | `once-per-session` remembers a granted approval per tool per session. |
-| `stopWhen.steps`    | `integer`      | `maxSteps`  |                                                                       |
-| `stopWhen.tokens`   | `integer`      | `20000`     | Cumulative across the loop.                                           |
-| `stopWhen.seconds`  | `integer`      | `120`       | Wall clock.                                                           |
+| `stopWhen.steps`    | `integer`      | `maxSteps`  | Across the whole run; never exceeds the `maxSteps` ceiling.            |
+| `stopWhen.tokens`   | `integer`      | `20000`     | Cumulative across the run, including resumes.                          |
+| `stopWhen.seconds`  | `integer`      | `120`       | Active server time across the run; excludes approval/browser waits.    |
 | `onMaxSteps`        | enum           | `summarize` | `summarize` asks the model for a final answer with tools disabled.    |
 | `parallelToolCalls` | `boolean`      | `true`      |                                                                       |
 | `toolChoice`        | enum           | `auto`      |                                                                       |

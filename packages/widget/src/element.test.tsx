@@ -41,6 +41,7 @@ vi.mock('./panel-chunk.js', async () => {
         setContext() {},
         setSuggestions() {},
         rehydratePending: (pending: unknown) => chunk.pending.push(pending),
+        expireStale() {},
         refreshPageContext: async () => null,
         registerTool() {},
         unregisterTool() {},

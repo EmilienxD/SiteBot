@@ -189,11 +189,15 @@ function tapStream(
   onFrame: (frame: { type: string; raw: string }) => void,
 ): void {
   const original = response.write.bind(response)
+  // The server pipes the web stream's chunks straight through, so they arrive
+  // as plain `Uint8Array`s, not Buffers. Decoding in streaming mode keeps a
+  // multi-byte character split across two chunks intact.
+  const decoder = new TextDecoder()
   let buffer = ''
 
   response.write = ((chunk: unknown, ...rest: unknown[]) => {
-    if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
-      buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    if (typeof chunk === 'string' || chunk instanceof Uint8Array) {
+      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
 
       // Frames are separated by a blank line. Anything after the last one is a
       // partial frame and stays in the buffer.

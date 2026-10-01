@@ -30,6 +30,8 @@ export class SiteChatElement extends HTMLElement {
   #chunk?: PanelChunk
   #config?: PublicConfig
   #configFailed = false
+  /** Boot's /config carried this session's pending-run probe (docs/03 §6). */
+  #probedSession = false
   #navigated = false
   #resolved?: ResolvedOptions
   #booting?: Promise<void>
@@ -163,6 +165,7 @@ export class SiteChatElement extends HTMLElement {
     const storedSessionId = readValue(sessionKey, 'session') ?? readValue(sessionKey, 'local')
     const remote = await fetchConfig(endpoint, publicKey, storedSessionId ?? undefined)
     this.#configFailed = remote === undefined
+    this.#probedSession = remote !== undefined && storedSessionId !== null
     const config = mergeConfig(remote)
     if (options.position) config.ui.position = options.position
     if (options.theme) config.ui.theme.mode = options.theme
@@ -256,6 +259,7 @@ export class SiteChatElement extends HTMLElement {
       const controller = this.buildController(chunk)
       if (this.#config.ui.behaviour.resetOnNavigate && this.#navigated) controller.reset()
       if (this.#config.pending) controller.rehydratePending(this.#config.pending)
+      else if (this.#probedSession) controller.expireStale()
       for (const action of this.#queue.splice(0)) action(controller)
       this.render()
     } catch (error) {

@@ -16,13 +16,14 @@ function safeStorage(kind: 'local' | 'session'): Storage | null {
 }
 export function readValue(key: string, kind: 'local' | 'session'): string | null {
   try {
-    return safeStorage(kind)?.getItem(key) ?? memory.get(key) ?? null
+    const storage = safeStorage(kind)
+    return storage ? storage.getItem(key) : (memory.get(`${kind}:${key}`) ?? null)
   } catch {
-    return memory.get(key) ?? null
+    return memory.get(`${kind}:${key}`) ?? null
   }
 }
 export function writeValue(key: string, value: string, kind: 'local' | 'session'): void {
-  memory.set(key, value)
+  memory.set(`${kind}:${key}`, value)
   try {
     safeStorage(kind)?.setItem(key, value)
   } catch {
@@ -30,7 +31,8 @@ export function writeValue(key: string, value: string, kind: 'local' | 'session'
   }
 }
 export function removeValue(key: string): void {
-  memory.delete(key)
+  memory.delete(`local:${key}`)
+  memory.delete(`session:${key}`)
   try {
     localStorage.removeItem(key)
   } catch {
@@ -42,16 +44,20 @@ export function removeValue(key: string): void {
     /* unavailable */
   }
 }
-export function readMessages(key: string): UIMessage[] {
+export function readMessages(key: string, kind: 'local' | 'session' = 'local'): UIMessage[] {
   try {
-    const parsed = JSON.parse(readValue(key, 'local') ?? '[]')
+    const parsed = JSON.parse(readValue(key, kind) ?? '[]')
     return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }
 }
-export function writeMessages(key: string, messages: UIMessage[]): void {
-  writeValue(key, JSON.stringify(messages.slice(-50)), 'local')
+export function writeMessages(
+  key: string,
+  messages: UIMessage[],
+  kind: 'local' | 'session' = 'local',
+): void {
+  writeValue(key, JSON.stringify(messages.slice(-50)), kind)
 }
 export function createSessionId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()

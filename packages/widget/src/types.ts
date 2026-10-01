@@ -133,6 +133,8 @@ export interface WidgetController {
   setContext(data: Record<string, unknown>): void
   setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void
   rehydratePending(pending: NonNullable<PublicConfig['pending']>): void
+  /** The session probe found nothing pending: settle cached cards and chips. */
+  expireStale(): void
   refreshPageContext(): Promise<PageContext | null>
   registerTool(name: string, handler: (input: unknown) => unknown | Promise<unknown>): void
   unregisterTool(name: string): void

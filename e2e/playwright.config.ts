@@ -30,6 +30,13 @@ export default defineConfig({
   webServer: [
     {
       cwd: '..',
+      command: 'node e2e/fixtures/approval-server.mjs',
+      url: 'http://127.0.0.1:4320/api/chat/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      cwd: '..',
       command: 'node e2e/fixtures/knowledge-server.mjs',
       url: 'http://127.0.0.1:4319/api/chat/health',
       reuseExistingServer: !process.env.CI,
@@ -43,12 +50,16 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },
-    // examples/express-sidecar, on the ports its pages hard-code: the chat
-    // server on 8787 and the site (the no-Python fallback) on 8000.
+    // The sidecar pages point at :8787. Give the static site its own test
+    // port: :8000 is commonly used by other local apps.
     {
       cwd: '../examples/express-sidecar',
       command: 'node server.mjs',
-      env: { SITEBOT_CONFIG: '../../test/smoke/express-sidecar.config.mjs', PORT: '8787' },
+      env: {
+        SITEBOT_CONFIG: '../../test/smoke/express-sidecar.config.mjs',
+        SITE_ORIGIN: 'http://localhost:4318',
+        PORT: '8787',
+      },
       url: 'http://localhost:8787/api/chat/health',
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
@@ -56,8 +67,8 @@ export default defineConfig({
     {
       cwd: '../examples/express-sidecar',
       command: 'node site/serve-static.mjs',
-      env: { PORT: '8000' },
-      url: 'http://localhost:8000/',
+      env: { PORT: '4318' },
+      url: 'http://localhost:4318/',
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
     },

@@ -165,7 +165,7 @@ describe('resetOnNavigate (docs/02 §11)', () => {
     stubServer(serverConfig((config) => (config.ui.behaviour.resetOnNavigate = true)))
     sessionStorage.setItem('sitebot:anonymous:path', '/previous-page')
     const history = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'old question' }] }]
-    localStorage.setItem('sitebot:anonymous:history', JSON.stringify(history))
+    sessionStorage.setItem('sitebot:anonymous:history', JSON.stringify(history))
     const element = await mount()
     element.open()
     await element.load()
@@ -182,7 +182,7 @@ describe('resetOnNavigate (docs/02 §11)', () => {
     )
     sessionStorage.setItem('sitebot:anonymous:path', location.pathname)
     const history = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'old question' }] }]
-    localStorage.setItem('sitebot:anonymous:history', JSON.stringify(history))
+    sessionStorage.setItem('sitebot:anonymous:history', JSON.stringify(history))
     const element = await mount()
     element.open()
     await element.load()

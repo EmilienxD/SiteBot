@@ -396,7 +396,7 @@ The stream carries:
 }
 ```
 
-The widget renders a card showing the tool's human title, the summary, and — behind a "Show details" disclosure — the exact arguments. Approve / Deny buttons. Deny resumes the loop with `{ error: 'user_denied' }` so the model can respond gracefully.
+The widget renders a card showing the tool's human title, the summary, and — behind a "Show details" disclosure — the exact arguments. Approve / Deny buttons. Deny resumes the loop with an `execution-denied` tool result whose reason begins `user_denied:` and explicitly says the action was not performed. The tool chip reads "Denied". When a card is resolved, focus returns to another pending approval or to the composer.
 
 ### Rules
 

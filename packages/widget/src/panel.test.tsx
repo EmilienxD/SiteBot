@@ -22,6 +22,7 @@ function controller(messages: WidgetController['messages']): WidgetController {
     setContext() {},
     setSuggestions() {},
     rehydratePending() {},
+    expireStale() {},
     refreshPageContext: async () => null,
     registerTool() {},
     unregisterTool() {},
@@ -239,7 +240,7 @@ describe('Panel behaviour', () => {
     ['rate_limited', 7, 'Retry in 7s', false],
     ['budget_exceeded', undefined, 'usage limit', false],
     ['provider_error', undefined, 'having trouble', true],
-    ['run_expired', undefined, 'timed out', false],
+    ['run_expired', undefined, 'timed out', true],
   ] as const)('error bubble for %s', (code, retryAfter, copy, retry) => {
     const value = controller([user('u1', 'Hi')])
     Object.defineProperties(value, {
@@ -248,7 +249,7 @@ describe('Panel behaviour', () => {
         value: {
           code,
           message: 'x',
-          retryable: code !== 'budget_exceeded' && code !== 'run_expired',
+          retryable: code !== 'budget_exceeded',
         },
       },
       retryAfter: { value: retryAfter },
@@ -455,5 +456,33 @@ describe('Panel part ordering', () => {
       ...root.querySelectorAll('.message.assistant > .bubble, .message.assistant > .tool-chip'),
     ].map((node) => (node.classList.contains('tool-chip') ? 'chip' : node.textContent?.trim()))
     expect(order).toEqual(['Let me check.', 'chip', 'It is highlighted.'])
+  })
+})
+
+describe('Tool chip labels', () => {
+  const chip = (part: Record<string, unknown>) => {
+    const root = mount(
+      controller([
+        assistant('a1', [{ type: 'tool-fill_wholesale_form', toolCallId: 't1', ...part }]),
+      ]),
+    )
+    const node = root.querySelector('.tool-chip')
+    return { text: node?.textContent ?? '', spinning: node?.querySelector('.spinner') !== null }
+  }
+
+  it.each([
+    [{ state: 'output-available' }, 'Done', false],
+    // A denied tool did not run: never "Done", and not left spinning while
+    // the server answers the deny.
+    [{ state: 'output-denied', approval: { id: 'a', approved: false } }, 'Denied', false],
+    [{ state: 'approval-responded', approval: { id: 'a', approved: false } }, 'Denied', false],
+    [{ state: 'approval-responded', approval: { id: 'a', approved: true } }, 'Running', true],
+    [{ state: 'output-error', errorText: 'expired' }, 'Timed out', false],
+    [{ state: 'output-error', errorText: 'skipped' }, 'Skipped', false],
+    [{ state: 'output-error', errorText: 'boom' }, 'Failed', false],
+  ] as const)('%o → %s', (part, label, spinning) => {
+    const rendered = chip(part)
+    expect(rendered.text).toContain(label)
+    expect(rendered.spinning).toBe(spinning)
   })
 })

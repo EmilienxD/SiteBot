@@ -393,6 +393,56 @@ describe('suspend / resume (docs/03 §5)', () => {
     expect((body(1).resume as Json).approvals).toEqual([{ approvalId: 'ap1', decision: 'deny' }])
   })
 
+  const toolPart = (controller: WidgetController) =>
+    controller.messages
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === 'tool-create_ticket')
+
+  it('410 on resume: the card and its chip settle as expired, and Retry starts a fresh turn', async () => {
+    fetchMock.mockResolvedValueOnce(sse(approvalStream('r_x')))
+    fetchMock.mockResolvedValueOnce(errorResponse(410, { code: 'invalid_request' }))
+    fetchMock.mockResolvedValueOnce(
+      sse(answer('That request timed out — shall I try again?', 'a1')),
+    )
+    const controller = setup()
+    await controller.send('Open a ticket')
+    await controller.approve('ap1', true)
+
+    expect(controller.error?.code).toBe('run_expired')
+    // Not left on a spinning "Running", and no live Approve/Deny.
+    expect(toolPart(controller)).toMatchObject({ state: 'output-error', errorText: 'expired' })
+    expect(toolPart(controller)?.approval).toBeUndefined()
+    expect(controller.state).toBe('error')
+
+    await controller.retry()
+    // A fresh turn, not another resume of the dead run.
+    expect(body(2).trigger).toBe('regenerate')
+    expect(body(2).resume).toBeUndefined()
+    expect(controller.state).toBe('idle')
+    expect(controller.messages.at(-1)?.parts.some((part) => part.type === 'text')).toBe(true)
+  })
+
+  it('a new message moves past a pending approval and settles it as skipped', async () => {
+    fetchMock.mockResolvedValueOnce(sse(approvalStream('r_s')))
+    fetchMock.mockResolvedValueOnce(sse(answer('Sure, here are the hours.', 'a2')))
+    const controller = setup()
+    await controller.send('Open a ticket')
+    await controller.send('Never mind — opening hours?')
+    expect(toolPart(controller)).toMatchObject({ state: 'output-error', errorText: 'skipped' })
+    expect(body(1).trigger).toBe('submit-message')
+    expect(body(1).resume).toBeUndefined()
+  })
+
+  it('expireStale(): a cached card the session probe no longer reports is settled', async () => {
+    fetchMock.mockResolvedValueOnce(sse(approvalStream('r_old')))
+    const controller = setup()
+    await controller.send('Open a ticket')
+    expect(controller.state).toBe('awaiting-approval')
+    controller.expireStale()
+    expect(controller.state).toBe('idle')
+    expect(toolPart(controller)).toMatchObject({ state: 'output-error', errorText: 'expired' })
+  })
+
   it('rehydrates a pending approval from the /config probe', async () => {
     fetchMock.mockResolvedValueOnce(sse(answer('Created.', 'pending-r_9')))
     const controller = setup()
@@ -444,6 +494,47 @@ describe('suspend / resume (docs/03 §5)', () => {
     expect(
       events.filter((event) => event.type === 'tool').map((event) => (event.detail as Json).phase),
     ).toEqual(['call', 'result'])
+  })
+
+  it('posts an approved client tool result after the approval-only handoff', async () => {
+    fetchMock.mockResolvedValueOnce(sse(approvalStream('r_approved')))
+    // The real server returns only the handoff: it does not echo a new
+    // tool-input-available chunk or call the model until the result arrives.
+    fetchMock.mockResolvedValueOnce(
+      sse([
+        { type: 'start', messageId: 'a1' },
+        {
+          type: 'data-client-tool-call',
+          transient: true,
+          data: {
+            runId: 'r_approved',
+            toolCallId: 'tc1',
+            toolName: 'create_ticket',
+            input: { title: 'Help' },
+          },
+        },
+        { type: 'finish' },
+      ]),
+    )
+    fetchMock.mockResolvedValueOnce(sse(answer('Created T-1.', 'a1')))
+    const controller = setup((config) => {
+      config.capabilities.clientTools = ['create_ticket']
+    })
+    const tool = vi.fn(() => ({ id: 'T-1' }))
+    controller.registerTool('create_ticket', tool)
+    await controller.send('Open a ticket')
+    await controller.approve('ap1', true)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(tool).toHaveBeenCalledExactlyOnceWith({ title: 'Help' })
+    expect(body(2).resume).toEqual({
+      runId: 'r_approved',
+      clientToolResults: [{ toolCallId: 'tc1', output: { id: 'T-1' } }],
+    })
+    await vi.waitFor(() => expect(controller.state).toBe('idle'))
+    expect(toolPart(controller)?.state).toBe('output-available')
+    expect(controller.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({ type: 'text', text: 'Created T-1.' }),
+    )
   })
 
   it('refuses a client tool the server did not allowlist', async () => {
@@ -604,6 +695,28 @@ describe('session and persistence (docs/07 §9)', () => {
       detail: { messageId: 'a_srv', rating: 'up' },
     })
   })
+
+  it.each(['tab', 'browser'] as const)(
+    'stores history with its %s-scoped session',
+    async (scope) => {
+      fetchMock.mockResolvedValue(sse(answer('Remembered')))
+      const make = () => {
+        const config = structuredClone(defaultConfig)
+        config.ui.behaviour.sessionScope = scope
+        return createController({ endpoint: '/api/chat', publicKey: 'pk_scope' }, config, () => {})
+      }
+      await make().send('Hello')
+      const firstSession = body(0).sessionId
+      const storage = scope === 'tab' ? sessionStorage : localStorage
+      expect(storage.getItem('sitebot:pk_scope:history')).toContain('Remembered')
+      // A new tab shares localStorage, but starts with empty sessionStorage.
+      sessionStorage.clear()
+      const second = make()
+      expect(second.messages.length > 0).toBe(scope === 'browser')
+      await second.send('Again')
+      expect(body(1).sessionId === firstSession).toBe(scope === 'browser')
+    },
+  )
 })
 
 describe('resumePayload', () => {
@@ -611,6 +724,24 @@ describe('resumePayload', () => {
     id: 'a',
     role: 'assistant',
     parts: parts as never,
+  })
+
+  it('uses the newest run when Retry continues an assistant message after expiry', () => {
+    const message = assistant([
+      { type: 'data-approval-request', data: { runId: 'r_expired' } },
+      { type: 'step-start' },
+      { type: 'data-approval-request', data: { runId: 'r_fresh' } },
+      {
+        type: 'tool-fill_form',
+        toolCallId: 'tc_new',
+        state: 'approval-responded',
+        approval: { id: 'ap_new', approved: true },
+      },
+    ])
+    expect(resumePayload([message], 'r_expired', ['fill_form'])).toEqual({
+      runId: 'r_fresh',
+      approvals: [{ approvalId: 'ap_new', decision: 'approve' }],
+    })
   })
 
   it('reads approvals and client-tool results from the last step only', () => {
@@ -673,7 +804,7 @@ describe('normalizeError', () => {
     [new HttpError(429, { code: 'rate_limited' }, 12), { code: 'rate_limited', retryAfter: 12 }],
     [new HttpError(429, {}), { code: 'rate_limited', retryAfter: 30 }],
     [new HttpError(402, {}), { code: 'budget_exceeded', retryable: false }],
-    [new HttpError(410, { code: 'invalid_request' }), { code: 'run_expired', retryable: false }],
+    [new HttpError(410, { code: 'invalid_request' }), { code: 'run_expired', retryable: true }],
     [
       new HttpError(403, { code: 'origin_denied', message: 'Not allowed here.' }),
       { code: 'origin_denied', message: 'Not allowed here.' },

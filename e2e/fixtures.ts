@@ -5,7 +5,7 @@ import { test as base, expect, type Locator, type Page } from '@playwright/test'
  * pierce. Forcing it open before any page script runs changes nothing a
  * visitor can observe, and lets locators reach inside `<site-chat>`.
  */
-const OPEN_SHADOW_ROOTS = `
+export const OPEN_SHADOW_ROOTS = `
   const attach = Element.prototype.attachShadow
   Element.prototype.attachShadow = function (init) {
     return attach.call(this, { ...init, mode: 'open' })

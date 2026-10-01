@@ -45,3 +45,53 @@ export function mergeHistory(input: MergeHistoryInput): UIMessage[] {
 
   return [...input.stored, latest]
 }
+
+/** Shown to the model in place of the result a dangling tool call never got. */
+export const UNANSWERED_APPROVAL =
+  'not_performed: the approval request was never answered (it expired, or the visitor moved on), so this action did not run.'
+export const MISSING_RESULT =
+  'no_result: the run ended before this tool returned a result, so it may not have completed.'
+
+/**
+ * Close every tool call that a new turn leaves behind — docs/03 §5.
+ *
+ * A suspended run's assistant message ends on a call waiting for an approval
+ * or a client tool result. Once the visitor sends a new message instead (or
+ * the checkpoint expires and the resume is refused), that call never gets a
+ * result, and a provider rejects any transcript holding a call without one:
+ * every later turn in the session would fail. Each such call is settled as an
+ * error that says what happened, so the model can still tell the visitor.
+ *
+ * The `approval` record goes too: an unanswered request has no response for
+ * the SDK to pair it with.
+ */
+export function settleDanglingToolCalls(messages: readonly UIMessage[]): {
+  messages: UIMessage[]
+  settled: number
+} {
+  let settled = 0
+  const next = messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    let changed = false
+    const parts = message.parts.map((part) => {
+      const tool = part as { type: string; state?: string; approval?: unknown }
+      if (!tool.type.startsWith('tool-') && tool.type !== 'dynamic-tool') return part
+      if (
+        tool.state !== 'approval-requested' &&
+        tool.state !== 'approval-responded' &&
+        tool.state !== 'input-available'
+      )
+        return part
+      changed = true
+      settled += 1
+      const { approval: _approval, ...rest } = tool
+      return {
+        ...rest,
+        state: 'output-error',
+        errorText: tool.state === 'approval-requested' ? UNANSWERED_APPROVAL : MISSING_RESULT,
+      } as unknown as typeof part
+    })
+    return changed ? { ...message, parts } : message
+  })
+  return { messages: next, settled }
+}

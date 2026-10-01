@@ -120,8 +120,8 @@ docs/02-configuration.md §7.
 | `agent.approvalPolicy` | `"always" \| "once-per-session" \| "never"` | `"always"` |  |
 | `agent.stopWhen.steps` | `integer` |  | Defaults to agent.maxSteps. _> 0._ |
 | `agent.stopWhen.tokens` | `integer` | `20000` | Cumulative across the loop. _> 0._ |
-| `agent.stopWhen.seconds` | `integer` | `120` | Wall clock. _> 0._ |
-| `agent.onMaxSteps` | `"summarize" \| "error" \| "silent"` | `"summarize"` | summarize asks the model for a final answer with tools disabled — one extra call, always a usable reply. |
+| `agent.stopWhen.seconds` | `integer` | `120` | Cumulative active server time across the run; excludes approval and client-tool waits. _> 0._ |
+| `agent.onMaxSteps` | `"summarize" \| "error" \| "silent"` | `"summarize"` | summarize reserves the final permitted call for an answer with tools disabled. |
 | `agent.parallelToolCalls` | `boolean` | `true` |  |
 | `agent.toolChoice` | `"auto" \| "required" \| "none"` | `"auto"` |  |
 
