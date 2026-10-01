@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/widget",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The <site-chat> custom element: launcher + overlay panel, Preact in a closed shadow root. Layer 3, browser.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/widget#readme",
   "repository": {

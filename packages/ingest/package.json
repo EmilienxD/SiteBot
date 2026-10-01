@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/ingest",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Crawler, extractor, chunker, embedder and store writer for the SiteBot knowledge index. Layer 3; Node only, except the edge-safe ./query entry.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/ingest#readme",
   "repository": {

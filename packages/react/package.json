@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/react",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Optional <ChatWidget /> wrapper around the SiteBot custom element for React sites. Layer 3, browser.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/react#readme",
   "repository": {

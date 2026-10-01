@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The sitebot CLI: init, validate, ingest, dev, serve, doctor. Layer 4.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/cli#readme",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/config",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Schema, loader and types for the SiteBot configuration file. Layer 1 — importable from the browser.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/config#readme",
   "repository": {

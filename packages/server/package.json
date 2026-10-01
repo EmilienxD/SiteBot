@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Thin framework adapters that mount the SiteBot engine on Next.js, Express, Fastify, Hono, Node or any fetch runtime. Layer 3.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/server#readme",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@sitebot/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The SiteBot engine: providers, prompt composition, tools, agent loop, guards, streaming. Layer 2.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/core#readme",
   "repository": {
