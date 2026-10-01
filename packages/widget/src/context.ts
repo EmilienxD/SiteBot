@@ -53,9 +53,12 @@ function toStructuredText(root: HTMLElement): string {
     if (node.nodeType === Node.TEXT_NODE) {
       const value = node.textContent?.replace(/\s+/g, ' ').trim()
       if (value) lines.push(value)
-    } else if (node instanceof HTMLElement && /^H[1-6]$/.test(node.tagName))
-      lines.push(`${'#'.repeat(Number(node.tagName[1]))} `)
-    else if (node instanceof HTMLElement && node.tagName === 'LI') lines.push('• ')
+    } else if (node instanceof HTMLElement && /^H[1-6]$/.test(node.tagName)) {
+      // A heading's id is the selector highlight_section needs; without it
+      // the model guesses one from the heading text and misses.
+      const anchor = /^[A-Za-z][\w-]*$/.test(node.id) ? `[#${node.id}] ` : ''
+      lines.push(`${'#'.repeat(Number(node.tagName[1]))} ${anchor}`)
+    } else if (node instanceof HTMLElement && node.tagName === 'LI') lines.push('• ')
   }
   return lines
     .join(' ')

@@ -1,9 +1,11 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UIMessage } from 'ai'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { validateConfig } from '@sitebot/config'
-import { MemorySessionStore, type SessionStore } from '../session/store.js'
+import type * as OptionalImport from '../providers/optional-import.js'
+import { MemorySessionStore } from '../session/store.js'
+import { runSessionStoreConformance } from '../../test/session-store-conformance.js'
 import { createNodeSessionStore } from './index.js'
 import {
   createPostgresSessionStore,
@@ -17,8 +19,24 @@ import { createSqliteSessionStore } from './sqlite-store.js'
  * One conformance suite for every `storage.type` — docs/02 §10, docs/01 §6.
  * Redis and Postgres run against in-memory fakes of exactly the client surface
  * the stores use, so the suite needs no server; the SQL the Postgres store
- * sends is asserted to be the SQL the fake understands.
+ * sends is asserted to be the SQL the fake understands. `pnpm test:live` runs
+ * the same cases against real servers (`stores.live.test.ts`).
  */
+
+// pg is a dev dependency for the live suite; a consumer without it must still
+// get the install command, so its absence is simulated here.
+vi.mock('../providers/optional-import.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof OptionalImport>()
+  return {
+    ...actual,
+    importOptional: async (specifier: string, options?: { from?: string[] }) => {
+      if (specifier === 'pg') {
+        throw Object.assign(new Error("Cannot find package 'pg'"), { code: 'ERR_MODULE_NOT_FOUND' })
+      }
+      return actual.importOptional(specifier, options)
+    },
+  }
+})
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../test/fixtures')
 
@@ -70,133 +88,37 @@ const message = (id: string, text = id): UIMessage => ({
   parts: [{ type: 'text', text }],
 })
 
-type Factory = (options: {
-  now: () => number
-  ttlSeconds: number
-  max: number
-}) => Promise<SessionStore>
-
-const STORES: Array<[string, Factory]> = [
-  [
-    'memory',
-    async (o) =>
-      new MemorySessionStore({
-        now: o.now,
-        ttlSeconds: o.ttlSeconds,
-        maxMessagesPerSession: o.max,
-      }),
-  ],
-  [
-    'sqlite',
-    (o) =>
-      createSqliteSessionStore({
-        path: ':memory:',
-        now: o.now,
-        ttlSeconds: o.ttlSeconds,
-        maxMessagesPerSession: o.max,
-      }),
-  ],
-  [
-    'redis',
-    async (o) =>
-      createRedisSessionStore({
-        url: 'redis://unused',
-        client: fakeRedis(),
-        now: o.now,
-        ttlSeconds: o.ttlSeconds,
-        maxMessagesPerSession: o.max,
-      }),
-  ],
-  [
-    'postgres',
-    (o) =>
-      createPostgresSessionStore({
-        url: 'postgres://unused',
-        pool: fakePg(),
-        now: o.now,
-        ttlSeconds: o.ttlSeconds,
-        maxMessagesPerSession: o.max,
-      }),
-  ],
-]
-
-describe.each(STORES)('%s session store conformance', (_name, make) => {
-  const setup = async (max = 100) => {
-    let time = 1_000_000
-    const store = await make({ now: () => time, ttlSeconds: 60, max })
-    return { store, advance: (ms: number) => (time += ms) }
-  }
-
-  it('returns null for an unknown session', async () => {
-    const { store } = await setup()
-    expect(await store.get('missing')).toBeNull()
-  })
-
-  it('round-trips a session, including checkpoint state and fingerprint', async () => {
-    const { store } = await setup()
-    await store.set({
-      id: 's1',
-      messages: [message('m1')],
-      createdAt: 1,
-      updatedAt: 1,
-      fingerprint: '203.0.113|https://acme.com|abcd',
-      state: { pending: { runId: 'r1' } },
-    })
-    const session = await store.get('s1')
-    expect(session).toMatchObject({
-      id: 's1',
-      messages: [message('m1')],
-      createdAt: 1,
-      fingerprint: '203.0.113|https://acme.com|abcd',
-      state: { pending: { runId: 'r1' } },
-    })
-  })
-
-  it('append creates the session, then extends it in order', async () => {
-    const { store } = await setup()
-    await store.append('s1', [message('m1')])
-    const after = await store.append('s1', [message('m2'), message('m3')])
-    expect(after.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
-    expect((await store.get('s1'))?.messages.map((m) => m.id)).toEqual(['m1', 'm2', 'm3'])
-  })
-
-  it('keeps only the newest maxMessagesPerSession messages', async () => {
-    const { store } = await setup(3)
-    await store.append(
-      's1',
-      ['a', 'b', 'c', 'd', 'e'].map((id) => message(id)),
-    )
-    expect((await store.get('s1'))?.messages.map((m) => m.id)).toEqual(['c', 'd', 'e'])
-  })
-
-  it('expires a session after ttlSeconds of inactivity, and activity renews it', async () => {
-    const { store, advance } = await setup()
-    await store.append('s1', [message('m1')])
-    advance(50_000)
-    await store.append('s1', [message('m2')])
-    advance(50_000)
-    expect(await store.get('s1')).not.toBeNull()
-    advance(61_000)
-    expect(await store.get('s1')).toBeNull()
-  })
-
-  it('isolates sessions and deletes one without touching another', async () => {
-    const { store } = await setup()
-    await store.append('s1', [message('one')])
-    await store.append('s2', [message('two')])
-    await store.delete('s1')
-    expect(await store.get('s1')).toBeNull()
-    expect((await store.get('s2'))?.messages[0]?.id).toBe('two')
-  })
-
-  it('does not share mutable state with the caller', async () => {
-    const { store } = await setup()
-    await store.append('s1', [message('m1')])
-    const read = await store.get('s1')
-    read!.messages.push(message('injected'))
-    expect((await store.get('s1'))?.messages).toHaveLength(1)
-  })
-})
+runSessionStoreConformance(
+  'memory',
+  async (o) =>
+    new MemorySessionStore({ now: o.now, ttlSeconds: o.ttlSeconds, maxMessagesPerSession: o.max }),
+)
+runSessionStoreConformance('sqlite', (o) =>
+  createSqliteSessionStore({
+    path: ':memory:',
+    now: o.now,
+    ttlSeconds: o.ttlSeconds,
+    maxMessagesPerSession: o.max,
+  }),
+)
+runSessionStoreConformance('redis', async (o) =>
+  createRedisSessionStore({
+    url: 'redis://unused',
+    client: fakeRedis(),
+    now: o.now,
+    ttlSeconds: o.ttlSeconds,
+    maxMessagesPerSession: o.max,
+  }),
+)
+runSessionStoreConformance('postgres', (o) =>
+  createPostgresSessionStore({
+    url: 'postgres://unused',
+    pool: fakePg(),
+    now: o.now,
+    ttlSeconds: o.ttlSeconds,
+    maxMessagesPerSession: o.max,
+  }),
+)
 
 describe('createNodeSessionStore (every storage.type)', () => {
   const storage = (value: Record<string, unknown>) => {

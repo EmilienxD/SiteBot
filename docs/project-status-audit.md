@@ -1,6 +1,6 @@
 # Project status audit — 2026-09-30
 
-The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **SQLite, robots enforcement, JavaScript rendering and the advertised retrieval refinements have since been completed**, as recorded below. The other gaps remain.
+The main chat/widget/agent implementation works, but the project is not ready to call fully done. The audit found knowledge-ingestion gaps, a native SQLite setup defect, missing live validation, and unfinished release work. **SQLite, robots enforcement, JavaScript rendering, the advertised retrieval refinements and live provider/infrastructure validation have since been completed**, as recorded below. The other gaps remain.
 
 ## Verified locally during the initial audit
 
@@ -17,7 +17,7 @@ Windows, Node 24.12.0, pnpm 10.26.1, current checkout.
 | `pnpm format:check` | Pass before adding this report |
 | `pnpm check:packages` | Pass: publint and are-the-types-wrong for all seven packages |
 | `pnpm size` | Pass: launcher 13.51 kB / 14, panel 22.36 kB / 24, total 35.86 kB / 38 gzip |
-| `pnpm test:live` | Fails: “No test files found”; this advertised suite is empty |
+| `pnpm test:live` | Initially failed: “No test files found”. Now populated; see §5 |
 
 Interactive Chrome checks used the shipped plain-HTML example on `http://localhost:4317`, the real CLI/server/widget, and the repository's **scripted offline model**. Verified launcher/greeting, message/response, tool navigation to `/shop`, conversation persistence across pages, approval focus on Deny, Enter denying the action, pending approval surviving reload, and Approve filling the wholesale form without submitting it. At 375 × 812 the panel fills the viewport and the composer remains visible. No real model response or retrieval quality was assessed by these interactions.
 
@@ -80,15 +80,64 @@ seven package checks pass. The existing Next.js tracing warning remains.
 
 Validation on Windows / Node 24.12.0: **977 unit/integration tests pass (one optional-store test skipped), 56 security tests pass, and all 49 Chromium browser tests pass**. Build, typecheck, lint, formatting and all seven package checks pass. Reranking is tested in `always`, `hybrid` and `tool` modes; tool-search citations now read the current results at stream completion, including after introductory text. The pre-existing Next.js file-tracing warning remains.
 
-### 5. Add real-provider and real-infrastructure validation
+### 5. Real-provider and real-infrastructure validation — resolved 2026-10-01
 
-[`vitest.config.ts`](../vitest.config.ts) declares a `live` project, but there are no `*.live.test.ts` files. `pnpm test:live` exits 1 even before credentials would be relevant. Postgres and Upstash conformance still uses fake drivers; SQLite conformance now runs against the real native extension.
+`pnpm test:live` now has suites, each part gated on its own variable and
+skipped without it (README → Development lists them). It exits 0 with no
+credentials.
 
-Add opt-in tests for actual provider streaming/tool calling and hosted store behavior. Native SQLite on Windows is now verified by required offline tests. Keep paid provider calls outside default CI. The passing offline suites do not establish that real provider credentials, model IDs, hosted services, or deployed Workers work.
+- **Providers** ([`chat.live.test.ts`](../packages/server/src/chat.live.test.ts)):
+  through the real fetch handler, SSE streaming arrives over several network
+  chunks; an agent-mode server tool is called and its output used; an
+  approval-gated tool suspends, then runs on resume. Anthropic, OpenAI and
+  Ollama.
+- **Embeddings** ([`ingest.live.test.ts`](../packages/ingest/src/ingest.live.test.ts)):
+  real ingest into SQLite and pgvector, keyword-free paraphrases retrieve the
+  right source, and an unchanged rerun embeds nothing.
+- **Stores** ([`stores.live.test.ts`](../packages/core/src/node/stores.live.test.ts)):
+  the vector and session-store conformance suites, previously fakes only, run
+  against real Postgres/pgvector, Redis and a scratch Upstash index, plus
+  pool exhaustion, column width, Redis TTL expiry, cross-instance rate limits
+  and concurrent usage accounting.
 
-### 6. Record the remaining manual acceptance checks
+`pnpm e2e:live` ([`e2e/live/`](../e2e/live/widget.live.ts)) runs the
+plain-html example in Chromium with a real model: page-context answer,
+navigation with conversation carry-over, highlight, approval-gated form fill
+that never submits, and Enter denying.
 
-[`screen-reader-check.md`](./screen-reader-check.md) contains a test script, but no results/version matrix. Before release, record NVDA/Windows and VoiceOver/macOS/iOS outcomes, especially whole-answer streaming announcements and approval focus. axe passing does not verify speech behavior.
+Real infrastructure found three pgvector defects that the fake driver hid; all fixed:
+
+1. `upsert` called `end()` on pooled clients instead of `release()`, so
+   `close()` hung after any write and the eleventh upsert waited forever.
+2. The column was fixed at `vector(1536)`; every other embedding width
+   (nomic-embed-text, voyage-3, text-embedding-3-large) failed. It is now an
+   unsized `vector` unless `dimensions` is given.
+3. Queries without `minScore` bound an unreferenced parameter, which Postgres
+   rejects.
+
+The fake pool now requires released clients and referenced parameters, so the
+offline suite catches all three. The real-model browser run also found that
+`highlight_section` guessed selectors from heading text (`#storing-beans`
+for `#storage`). The page-context extract now carries heading ids
+(`## [#storage] Storing beans`, docs/03 §10).
+
+Run on Windows / Node 24.12.0 with Ollama `qwen2.5:14b` and
+`nomic-embed-text`, pgvector/pgvector:pg17 and redis:7 in Docker: **35 live
+tests pass** (stores, providers and ingest, each run separately). The other
+17 skip because no Anthropic, OpenAI or Upstash credentials were available.
+Without any credentials, `pnpm test:live` skips all 52 and exits 0. The
+real-model browser tests passed **6/6, including the screen-reader live-region
+check that has since been removed**. A final combined rerun did not happen,
+because Docker and Ollama had stopped by then. Not verified:
+paid providers, a hosted Upstash index, Bedrock/Vertex/Azure, prompt-cache
+hits and deployed Workers. Run those suites when credentials exist.
+
+One design limit was observed. `mode: chat` is one step (docs/04 §4), so a
+server tool called there executes, but the visitor gets no answer text after
+it. Chat mode suits client tools; tools whose output must be answered from
+need `mode: agent`.
+
+### 6. Resolve the onboarding departures
 
 The implementation plan's semantic cost and provider caching questions are now resolved. Its Phase 9 onboarding acceptance records that inserting the script tag still requires one paste and that homepage drafting was not exercised in that recording. Resolve or explicitly accept those onboarding departures when updating the completion status.
 
@@ -106,6 +155,6 @@ Scope the Next.js example's file tracing so production output does not unintenti
 
 ## Suggested next milestone
 
-SQLite, crawling and the advertised retrieval refinements are complete. Add
-provider/hosted-store smoke tests and record manual accessibility results.
-Then choose the license and release version and run the release gate.
+SQLite, crawling, the advertised retrieval refinements and live validation are
+complete. Run the credential-gated live suites against the release providers,
+choose the license and release version, and run the release gate.

@@ -17,10 +17,11 @@ import type {
  * here, once, at the one place a raw identifier crosses the boundary.
  */
 
+/** A client checked out of a `pg` pool; it goes back with `release()`, never `end()`. */
 interface PgClient {
-  connect(): Promise<void>
   query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>
-  end(): Promise<void>
+  /** An error argument destroys the connection instead of returning it to the pool. */
+  release(error?: Error | boolean): void
 }
 
 interface PgPool {
@@ -33,6 +34,10 @@ export interface PgVectorStoreOptions {
   url: string
   table: string
   model?: string
+  /**
+   * Fixes the column width. Without it the column is an unsized `vector`, so
+   * whatever width the configured embedding model produces is accepted.
+   */
   dimensions?: number
   /** Injected by tests. */
   pool?: PgPool
@@ -55,7 +60,7 @@ export async function createPgVectorStore(options: PgVectorStoreOptions): Promis
     if (pg.Pool === undefined) throw new Error('pg did not expose Pool')
     pool = new pg.Pool({ connectionString: options.url })
   }
-  const store = new PgVectorStore(pool, table, options.model ?? '', options.dimensions ?? 1536)
+  const store = new PgVectorStore(pool, table, options.model ?? '', options.dimensions)
   await store.init()
   return store
 }
@@ -85,9 +90,9 @@ class PgVectorStore implements VectorStore {
   #pool: PgPool
   #table: string
   #model: string
-  #dimensions: number
+  #dimensions: number | undefined
 
-  constructor(pool: PgPool, table: string, model: string, dimensions: number) {
+  constructor(pool: PgPool, table: string, model: string, dimensions: number | undefined) {
     this.#pool = pool
     this.#table = table
     this.#model = model
@@ -95,13 +100,15 @@ class PgVectorStore implements VectorStore {
   }
 
   async init(): Promise<void> {
+    // No fixed width by default: a hard-coded vector(1536) rejected every
+    // model that is not 1536-wide (nomic-embed-text, voyage-3, text-embedding-3-large).
     await this.#pool.query(`CREATE EXTENSION IF NOT EXISTS vector`)
     await this.#pool.query(`
       CREATE TABLE IF NOT EXISTS ${this.#table} (
         id TEXT PRIMARY KEY,
         text TEXT NOT NULL,
         metadata JSONB NOT NULL,
-        embedding vector(${this.#dimensions}) NOT NULL,
+        embedding ${this.#dimensions === undefined ? 'vector' : `vector(${this.#dimensions})`} NOT NULL,
         source_id TEXT NOT NULL,
         url TEXT NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -124,6 +131,7 @@ class PgVectorStore implements VectorStore {
   async upsert(chunks: Chunk[]): Promise<void> {
     if (chunks.length === 0) return
     const client = await this.#pool.connect()
+    let failure: Error | undefined
     try {
       await client.query('BEGIN')
       const statement = `
@@ -155,10 +163,15 @@ class PgVectorStore implements VectorStore {
       )
       await client.query('COMMIT')
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {})
+      // A connection whose ROLLBACK also fails is in an unknown state: destroy it.
+      await client.query('ROLLBACK').catch((cause: unknown) => {
+        failure = cause instanceof Error ? cause : new Error(String(cause))
+      })
       throw error
     } finally {
-      client.end().catch(() => {})
+      // Without the release the pool never gets the connection back: the
+      // eleventh upsert waits forever, and so does close().
+      client.release(failure)
     }
   }
 
@@ -176,22 +189,21 @@ class PgVectorStore implements VectorStore {
     })
     const where = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : ''
 
-    const maxDistance = 1 - (opts.minScore ?? 0)
-    const limit = Math.max(opts.topK * 2, 10)
-    params.push(maxDistance, limit)
-    const distanceIndex = params.length - 1
-    const limitIndex = params.length
-    const scoreClause =
-      (opts.minScore ?? 0) > 0
-        ? `${filters.length > 0 ? 'AND' : 'WHERE'} (embedding <=> $1::vector) <= $${distanceIndex}`
-        : ''
+    // Bind the distance only when the clause uses it: Postgres cannot type a
+    // parameter no statement references, and rejects the whole query.
+    let scoreClause = ''
+    if ((opts.minScore ?? 0) > 0) {
+      params.push(1 - (opts.minScore ?? 0))
+      scoreClause = `${filters.length > 0 ? 'AND' : 'WHERE'} (embedding <=> $1::vector) <= $${params.length}::float8`
+    }
+    params.push(Math.max(opts.topK * 2, 10))
     const { rows } = await this.#pool.query(
       `SELECT id, text, metadata, 1 - (embedding <=> $1::vector) AS score
        FROM ${this.#table}
        ${where}
        ${scoreClause}
        ORDER BY embedding <=> $1::vector
-       LIMIT $${limitIndex}`,
+       LIMIT $${params.length}`,
       params,
     )
     const minScore = opts.minScore ?? 0

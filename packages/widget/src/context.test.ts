@@ -24,6 +24,15 @@ describe('extractPageContext', () => {
     expect(context?.meta).toEqual({ 'og:type': 'article' })
   })
 
+  it('marks headings with their id, so a highlight can target them', async () => {
+    document.body.innerHTML =
+      '<main><h2 id="storage">Storing beans</h2><p>Keep them dry.</p><h2 id="1bad">Odd</h2></main>'
+    const context = await extractPageContext(structuredClone(defaultConfig.ui))
+    expect(context?.extract).toContain('## [#storage] Storing beans')
+    // Not a selector a model can pass verbatim: no anchor rather than a broken one.
+    expect(context?.extract).toContain('## Odd')
+  })
+
   it('outlines forms with their select and radio options but never their values', async () => {
     document.body.innerHTML = `<main><p>${'Long text. '.repeat(600)}</p>
       <form id="wholesale-form">

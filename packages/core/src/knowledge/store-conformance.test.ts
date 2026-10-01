@@ -63,6 +63,12 @@ function fakePg(rows: PgRows = { chunks: new Map(), meta: new Map() }) {
   const pool = {
     query: async (rawText: string, params: unknown[] = []) => {
       const text = rawText.trimStart()
+      // Postgres rejects a bound parameter the statement never references.
+      for (let index = 1; index <= params.length; index++) {
+        if (!new RegExp(`\\$${index}(?!\\d)`).test(text)) {
+          throw new Error(`could not determine data type of parameter $${index}`)
+        }
+      }
       if (/^(CREATE|BEGIN|COMMIT|ROLLBACK)/i.test(text)) return { rows: [] }
       if (text.startsWith('SELECT value') && text.includes('_meta')) {
         const key = String(params[0]).replace(/^['"]|['"]$/g, '')
@@ -122,9 +128,16 @@ function fakePg(rows: PgRows = { chunks: new Map(), meta: new Map() }) {
       }
       return { rows: [] }
     },
-    connect: async () => pool,
-    end: async () => {},
+    // Like pg: a checked-out client must be released, or the pool cannot end.
+    connect: async () => {
+      checkedOut++
+      return { query: pool.query, release: () => void checkedOut-- }
+    },
+    end: async () => {
+      if (checkedOut !== 0) throw new Error(`pool ended with ${checkedOut} client(s) not released`)
+    },
   }
+  let checkedOut = 0
   return pool
 }
 

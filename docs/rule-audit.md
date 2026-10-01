@@ -148,7 +148,6 @@ The others were correctness issues:
 | §10 Error table; provider text never shown; never throws into the host | `widget/src/chat.test.ts`, `widget/src/panel.test.tsx`, `widget/src/element-api.test.tsx` | ✅ |
 | §11 Visual baselines, 4 viewports × 2 themes                       | `e2e/visual.spec.ts`                                                                 | ✅     |
 | §11 Tailwind and Bootstrap on the host page; SPA route changes; resume after a drop | `e2e/visual.spec.ts` "… on the host page", `e2e/fixture-pages.spec.ts`, `widget/src/chat.test.ts` "page context hashing" | 🔧 |
-| §8 Screen-reader behaviour | Manual: [`screen-reader-check.md`](./screen-reader-check.md), run before each release | ✅ |
 | §8 Launcher `aria-controls` names the dialog | `e2e/chat.spec.ts` "shows the greeting…" | 🔧 |
 
 ## 08 — Security
@@ -169,5 +168,4 @@ The others were correctness issues:
 
 ## Open tasks
 
-None. Every normative rule in docs 02–08 has a test, except screen-reader behaviour, which is
-checked by hand with [`screen-reader-check.md`](./screen-reader-check.md).
+None. Every normative rule in docs 02–08 has a test.

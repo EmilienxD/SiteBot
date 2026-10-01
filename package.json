@@ -11,11 +11,12 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck && tsc -p e2e",
-    "test": "vitest run --project=!live --project=!security-*",
+    "test": "vitest run --project=config --project=core --project=server --project=ingest --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
     "test:security": "vitest run --project=security-*",
-    "test:watch": "vitest --project=!live --project=!security-*",
+    "test:watch": "vitest --project=config --project=core --project=server --project=ingest --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
     "test:live": "vitest run --project=live",
     "e2e": "playwright test -c e2e/playwright.config.ts",
+    "e2e:live": "playwright test -c e2e/live.config.ts",
     "e2e:update-snapshots": "playwright test -c e2e/playwright.config.ts --update-snapshots",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "^3.0.104",
+    "@ai-sdk/openai": "^3.0.117",
     "@ai-sdk/openai-compatible": "^2.0.78",
     "@arethetypeswrong/cli": "^0.18.5",
     "@axe-core/playwright": "^4.13.0",

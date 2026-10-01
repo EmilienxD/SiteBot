@@ -137,7 +137,25 @@ pnpm typecheck
 pnpm size         # widget bundle budgets (gzip): 14 KB launcher, 24 KB launcher + panel, 38 KB total
 ```
 
-`pnpm test:live` is a separate, opt-in suite. No test in the default pipeline makes a real provider call.
+No test in the default pipeline makes a real provider call or needs a server. Two opt-in suites do,
+each part gated on its own variable and skipped without it:
+
+| Suite            | Variable                                                           | Exercises                                                                  |
+| ---------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `pnpm test:live` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `SITEBOT_LIVE_OLLAMA_MODEL` | Streaming, server tool calls, approval and resume through the real handler |
+|                  | `SITEBOT_LIVE_OLLAMA_EMBED_MODEL` (or `OPENAI_API_KEY`)            | Real-embedding ingest into SQLite (and pgvector), retrieval by paraphrase  |
+|                  | `SITEBOT_LIVE_PG_URL`, `SITEBOT_LIVE_REDIS_URL`                    | Vector, session and rate-limit store conformance against real servers      |
+|                  | `SITEBOT_LIVE_UPSTASH_URL`, `SITEBOT_LIVE_UPSTASH_TOKEN`           | Vector conformance against a **scratch** index — it is reset               |
+| `pnpm e2e:live`  | `ANTHROPIC_API_KEY` or `SITEBOT_LIVE_OLLAMA_MODEL`                 | The plain-html example in Chromium with a real model (after `pnpm build`)  |
+
+Postgres (with pgvector) and Redis for local runs:
+
+```bash
+docker run -d -p 55432:5432 -e POSTGRES_PASSWORD=sitebot pgvector/pgvector:pg17
+docker run -d -p 56379:6379 redis:7-alpine
+SITEBOT_LIVE_PG_URL=postgres://postgres:sitebot@127.0.0.1:55432/postgres \
+SITEBOT_LIVE_REDIS_URL=redis://127.0.0.1:56379 pnpm test:live
+```
 
 ---
 

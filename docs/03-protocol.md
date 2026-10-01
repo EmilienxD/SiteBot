@@ -364,7 +364,7 @@ Performed by the widget, on open and on `refreshPageContext()`. Deterministic al
 1. Collect `location.href`, `document.title`, `<meta name="description">`, `<meta property="og:*">`, `document.documentElement.lang`, `document.referrer`.
 2. Select the content root: first match of `ui.extract.selector` (default `main, article, [role="main"]`), else `document.body`.
 3. Clone it, remove `script`, `style`, `noscript`, `nav`, `footer`, `aside`, `svg`, `[aria-hidden="true"]`, and any `ui.extract.strip` selectors, plus the widget's own host element.
-4. Convert to text preserving heading hierarchy (`# `, `## `) and list markers; collapse whitespace.
+4. Convert to text preserving heading hierarchy (`# `, `## `) and list markers; collapse whitespace. A heading with a simple `id` carries it as a selector, `## [#storage] Storing beans`, so a highlight tool targets the real element instead of guessing one from the heading text.
 5. Outline up to 5 forms that have a usable selector (a simple `id`, or `name`), one line each: `[Form #wholesale-form: email (email), volume (select: 5-20 "5–20 kg" | 50+ "Over 50 kg")]`. Field names, types and select/radio options only — never current values, and never hidden, password or file inputs. The outline is capped at 1200 characters and appended after the text, which gets the rest of the budget, so `fill_form` sees valid options instead of guessing.
 6. Truncate the text to 4000 characters, less the outline's length, at a sentence boundary, appending `…[truncated]`.
 7. Capture `window.getSelection().toString()` if non-empty and ≤ 1000 chars.
