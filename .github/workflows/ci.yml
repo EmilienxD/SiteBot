@@ -134,6 +134,9 @@ jobs:
       # Builds the packages and examples/nextjs.
       - run: pnpm build
 
+      - name: Inspect Next.js production artifact
+        run: pnpm check:nextjs-artifact
+
       - name: Doctor
         run: |
           for example in plain-html nextjs express-sidecar cloudflare-worker; do
@@ -144,14 +147,7 @@ jobs:
 
       - name: Smoke — nextjs
         working-directory: examples/nextjs
-        env:
-          SITEBOT_CONFIG: ../../test/smoke/nextjs.config.mjs
-          SITE_URL: http://localhost:3100
-        run: |
-          npx next start --port 3100 > next.log 2>&1 &
-          node ../../test/smoke/smoke.mjs --endpoint http://localhost:3100/api/chat \
-            --tool 'find_service_slots {"date":"2026-09-28"}' --expect '"slots"' \
-            || (cat next.log; exit 1)
+        run: node ../../test/smoke/nextjs-standalone.mjs
 
       - name: Smoke — express-sidecar
         working-directory: examples/express-sidecar

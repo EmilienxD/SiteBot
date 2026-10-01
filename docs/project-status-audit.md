@@ -151,7 +151,36 @@ Verify npm scope ownership and publishing credentials/trusted-publishing setup, 
 
 The README, implementation plan and rule-to-test audit now cover robots, JS rendering, semantic refinement, reranking and explicit cache breakpoints. Keep these completion claims current as the remaining acceptance work lands.
 
-Scope the Next.js example's file tracing so production output does not unintentionally include the whole workspace. The fresh build succeeds, but emits this warning; inspect the deployment artifact size before treating it as release polish only.
+**Resolved (2026-10-01):** the filesystem-backed memory knowledge store now
+marks its runtime index read as opaque to Turbopack. Previously, tracing its
+configurable path swept application sources and build configuration into the
+chat route. A clean Next.js production build now emits no file-tracing warning;
+the chat dependency trace contains 163 files rather than 178, with only its
+YAML config and package manifest outside bundled code and dependencies.
+
+The example now produces standalone output and explicitly includes the YAML
+config plus `.sitebot/index.json` when an index exists at build time. An indexed
+build was also verified. Other configured runtime files (extended configs,
+prompt files, custom modules) require explicit includes; mutable sessions are
+not shipped. On Windows, a build helper rebases pnpm's absolute dependency
+links into the bundle and includes destinations omitted by Next's tracing.
+
+Uncompressed sizes on Windows / Node 24 / Next.js 16.2.12, without an index:
+
+| Artifact | Size |
+| --- | --- |
+| Chat route traced dependencies | 4,059,528 bytes (3.87 MiB) |
+| Unique traced server dependencies | 19,275,353 bytes (18.38 MiB) |
+| Standalone server, excluding static assets | 19,483,119 bytes (18.58 MiB) |
+| Static browser assets | 718,713 bytes (0.69 MiB) |
+
+`pnpm check:nextjs-artifact` guards traced contents and verifies dependency
+links remain inside the artifact. `node test/smoke/nextjs-standalone.mjs` copies
+the bundle outside the checkout and verifies health, public config, streamed
+chat, the server tool, four site routes and their JS/CSS assets against the
+offline model. Both checks are in CI. Local verification also passed 137
+relevant store/adapter tests (one optional-store test skipped), typechecks,
+lint and formatting. Hosted deployment and remote CI remain pending.
 
 ## Suggested next milestone
 

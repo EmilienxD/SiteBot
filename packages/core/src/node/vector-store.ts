@@ -26,10 +26,15 @@ export async function createNodeVectorStore(
       if (store.path === undefined) return createVectorStore(store, options)
       const { readFile, writeFile, rename, mkdir } = await import('node:fs/promises')
       const { dirname, resolve } = await import('node:path')
+      // This is runtime data selected by the config, not an application
+      // dependency. Hosts must include a prebuilt index explicitly when needed;
+      // tracing this dynamic path would otherwise sweep in the entire app.
       const file = resolve(options.baseDir ?? process.cwd(), store.path)
       let initial: { model?: string; chunks?: Chunk[] } = {}
       try {
-        initial = JSON.parse(await readFile(file, 'utf8')) as typeof initial
+        initial = JSON.parse(
+          await readFile(/* turbopackIgnore: true */ file, 'utf8'),
+        ) as typeof initial
       } catch {
         // A missing file is a fresh index, not an error.
       }

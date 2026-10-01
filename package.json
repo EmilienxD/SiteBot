@@ -24,6 +24,7 @@
     "format:check": "prettier --check .",
     "size": "turbo run size",
     "check:packages": "node scripts/check-packages.mjs",
+    "check:nextjs-artifact": "node scripts/check-nextjs-artifact.mjs",
     "clean": "turbo run clean",
     "changeset": "changeset",
     "version-packages": "changeset version",

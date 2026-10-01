@@ -67,9 +67,36 @@ Copy `lib/sitebot.ts`, the `app/api/chat` route and `app/sitebot.tsx`, then writ
 `outputFileTracingIncludes`: the config file is read at runtime, so the tracer can't find it by following
 imports.
 
+Prebuilt knowledge indexes also need an explicit tracing include. This example
+includes `.sitebot/index.json` when it exists at build time; run ingestion before
+the production build to ship an index. Session databases are runtime state and
+are not included. If your config extends other files, loads a custom module, or
+uses a prompt file, include those runtime inputs explicitly too.
+
 ## Deploying
 
 Any Node host that runs Next.js works. The route uses `runtime = 'nodejs'` because it reads the config
 file and stores sessions in SQLite. On a serverless host where the filesystem doesn't persist, switch
 `storage` to `redis` or `postgres` and the knowledge store to `pgvector` or `upstash`. Before going live,
 run `pnpm doctor --production` and read [`docs/deployment-checklist.md`](../../docs/deployment-checklist.md).
+
+`pnpm build` produces standalone output and prepares its dependency links for
+copying out of the monorepo (including pnpm's absolute Windows links). Copy
+`.next/standalone` as the deployment root, preserving relative links, then copy
+`.next/static` into `examples/nextjs/.next/static` beneath that root. If you add a
+`public` directory, copy it to `examples/nextjs/public` there as well. Start with:
+
+```bash
+node examples/nextjs/server.js
+```
+
+Set `PORT`, `HOSTNAME`, provider secrets and production storage configuration on
+the host. On Windows, enable Developer Mode or grant symbolic-link permissions
+to produce portable dependency links. Use a copy/archive tool that preserves
+directory symlinks, or build on Linux for a Linux deployment.
+
+From the repository root, `pnpm check:nextjs-artifact` checks the actual traced
+files and dependency links and reports uncompressed artifact sizes. Run
+`node test/smoke/nextjs-standalone.mjs` to copy the bundle into a temporary directory
+and verify pages, static assets, config, streamed chat and a server tool against
+the offline model. CI runs both checks.
