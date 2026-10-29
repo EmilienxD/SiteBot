@@ -30,10 +30,13 @@ export interface KnowledgeDeps {
 
 export interface Citation {
   id: string
+  /** Indexed chunk identity, retained for conversation-level provenance. */
+  chunkId?: string
   title: string
   url: string
   snippet: string
   score: number
+  lang?: string
 }
 
 /** The `data-citations` payload — docs/03-protocol.md. */
@@ -47,6 +50,7 @@ export interface RetrievalHit {
   title: string
   text: string
   score: number
+  lang?: string
 }
 
 export interface RetrievalResult {

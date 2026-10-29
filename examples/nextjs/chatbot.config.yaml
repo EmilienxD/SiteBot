@@ -10,6 +10,9 @@ mode: agent
 backend:
   provider: openai
   model: ${env.SITEBOT_MODEL:-gpt-5-mini}
+  # Before enabling security.budget.maxUsdPerDay, add backend.pricing entries
+  # for any model absent from packages/core/pricing.json, including this default.
+  # Use provider:model keys and inputUsdPerMillion/outputUsdPerMillion rates.
   apiKey: ${env.OPENAI_API_KEY}
   maxOutputTokens: 800
 

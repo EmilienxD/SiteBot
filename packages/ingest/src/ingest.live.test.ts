@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { validateConfig } from '@sitebot/config'
 import { createNodeVectorStore } from '@sitebot/core/node'
 import { runIngest } from './pipeline.js'
 import { createQueryEmbedder } from './query-embedder.js'
+import { readManifest } from './manifest.js'
 
 /**
  * Real-embedding ingestion — `pnpm test:live` only (docs/04 §10).
@@ -22,6 +23,17 @@ import { createQueryEmbedder } from './query-embedder.js'
  */
 
 const env = process.env
+
+async function removeSyntheticDirectory(directory: string): Promise<void> {
+  const target = resolve(directory)
+  if (
+    dirname(target) !== resolve(tmpdir()) ||
+    !basename(target).startsWith('sitebot-pg-fixture-')
+  ) {
+    throw new Error('Unsafe fixture cleanup target')
+  }
+  await rm(target, { recursive: true, force: true })
+}
 
 const EMBEDDERS = [
   {
@@ -76,6 +88,138 @@ const SOURCES = [
       'For pour-over use 15 grams of medium-fine grounds to 250 grams of water at 94 degrees Celsius, poured in three stages over three minutes.',
   },
 ]
+
+describe.skipIf(env['SITEBOT_LIVE_PG_URL'] === undefined)(
+  'live pgvector ingestion with synthetic vectors (no model quality claim)',
+  () => {
+    it('persists language/citation metadata, skips unchanged inputs and enforces model/dimension/prefix rebuilds', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'sitebot-pg-fixture-'))
+      const table = `sitebot_fixture_${randomUUID().replaceAll('-', '')}`
+      const url = env['SITEBOT_LIVE_PG_URL']!
+      const admin = new pg.Pool({ connectionString: url })
+      const calls: string[][] = []
+      let width = 3
+      const embedder = {
+        embedBatch: async (texts: string[]) => {
+          calls.push(texts)
+          return {
+            embeddings: texts.map(() => Array.from({ length: width }, (_, i) => (i === 0 ? 1 : 0))),
+            tokens: texts.length,
+          }
+        },
+      }
+      const result = validateConfig(
+        {
+          version: 1,
+          name: 'Synthetic ingestion',
+          backend: { provider: 'ollama', model: 'unused' },
+          prompt: { system: 'fixture' },
+          knowledge: {
+            sources: [
+              {
+                type: 'text',
+                id: 'english',
+                lang: 'en',
+                content: 'The synthetic trial lasts seven days.',
+              },
+              {
+                type: 'text',
+                id: 'french',
+                lang: 'fr-CA',
+                content: 'La période d’essai synthétique dure sept jours.',
+              },
+            ],
+            store: { type: 'pgvector', url, table },
+            embedding: {
+              provider: 'ollama',
+              model: 'fixture-a',
+              dimensions: 3,
+              documentPrefix: 'document: ',
+            },
+            chunk: { minTokens: 0 },
+          },
+        },
+        { env: {}, baseDir: directory },
+      )
+      if (!result.ok) throw new Error('Invalid synthetic ingestion fixture')
+      const config = result.value
+      let observer: Awaited<ReturnType<typeof createNodeVectorStore>> | undefined
+      const options = { embedder, manifestDir: directory }
+      const inspect = async () => {
+        const store = await createNodeVectorStore(config.knowledge.store)
+        try {
+          const french = (await store.documentChunks!('sitebot:french'))[0]!
+          expect(french.metadata).toMatchObject({
+            lang: 'fr-CA',
+            language: 'fr',
+            sourceId: 'french',
+            url: 'sitebot:french',
+            ordinal: 0,
+          })
+          expect(french.text).not.toMatch(/^document:/)
+          return await store.stats()
+        } finally {
+          await store.close()
+        }
+      }
+      try {
+        expect((await runIngest(config, options)).index.chunks).toBe(2)
+        expect(calls.flat().every((text) => text.startsWith('document: '))).toBe(true)
+        expect((await inspect()).model).toBe('fixture-a')
+        observer = await createNodeVectorStore(config.knowledge.store)
+        expect((await observer.stats()).model).toBe('fixture-a')
+        expect((await runIngest(config, options)).embedding.chunks).toBe(0)
+        expect(calls).toHaveLength(1)
+        for (const change of [
+          { documentPrefix: 'new-document: ' },
+          { model: 'fixture-b' },
+          { dimensions: 4 },
+        ]) {
+          const original = { ...config.knowledge.embedding! }
+          Object.assign(config.knowledge.embedding!, change)
+          await expect(runIngest(config, options)).rejects.toThrow('ingest --force')
+          await expect(
+            runIngest(config, { ...options, force: true, sourceIds: ['english'] }),
+          ).rejects.toThrow('rebuilding every source')
+          config.knowledge.embedding = original
+        }
+        config.knowledge.embedding = {
+          ...config.knowledge.embedding!,
+          model: 'fixture-b',
+          dimensions: 4,
+          documentPrefix: 'new-document: ',
+        }
+        width = 4
+        await runIngest(config, { ...options, force: true })
+        expect((await inspect()).model).toBe('fixture-b')
+        expect((await observer.stats()).model).toBe('fixture-b')
+        expect(await readManifest({ dir: directory })).toMatchObject({
+          model: 'fixture-b',
+          dimensions: 4,
+          documentPrefix: 'new-document: ',
+        })
+        // A failed embedding run must release the automatically opened pool.
+        await expect(
+          runIngest(config, {
+            ...options,
+            force: true,
+            embedder: {
+              embedBatch: async () => {
+                throw new Error('synthetic embedding failure')
+              },
+            },
+          }),
+        ).rejects.toThrow('synthetic embedding failure')
+        expect((await inspect()).chunks).toBe(2)
+      } finally {
+        await observer?.close()
+        await admin.query(`DROP TABLE IF EXISTS ${table}, ${table}_meta`)
+        await admin.end()
+        await removeSyntheticDirectory(directory)
+      }
+    })
+  },
+)
 
 for (const embedder of EMBEDDERS) {
   for (const target of STORES) {

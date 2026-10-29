@@ -69,6 +69,27 @@ function configFor(content: string, model = 'text-embedding-3-small'): ResolvedC
 }
 
 describe('runIngest()', () => {
+  it('embeds document prefixes, keeps source text intact and requires a full rebuild when prefixes change', async () => {
+    const config = configFor('A public documentation page about shipping and returns.')
+    config.knowledge.sources.push({ type: 'text', id: 'other', content: 'Another public source.' })
+    config.knowledge.embedding!.documentPrefix = 'search_document: '
+    const store = new MemoryVectorStore()
+    const embedder = countingEmbedder()
+    const options = { store, embedder, manifestDir: dir }
+    await runIngest(config, options)
+    expect(embedder.calls.flat().every((text) => text.startsWith('search_document: '))).toBe(true)
+    expect((await readManifest({ dir }))?.documentPrefix).toBe('search_document: ')
+    const storedChunks = await store.documentChunks!('sitebot:docs')
+    expect(storedChunks.length).toBeGreaterThan(0)
+    expect(storedChunks.every((chunk) => !chunk.text.startsWith('search_document: '))).toBe(true)
+    config.knowledge.embedding!.documentPrefix = 'document: '
+    await expect(runIngest(config, options)).rejects.toThrow('ingest --force')
+    await expect(
+      runIngest(config, { ...options, force: true, sourceIds: ['docs'] }),
+    ).rejects.toThrow('rebuilding every source')
+    await runIngest(config, { ...options, force: true })
+    expect(embedder.calls.at(-1)?.[0]).toMatch(/^document: /)
+  })
   it('counts semantic paragraph spend, skips it on unchanged runs and estimates dry runs without spend', async () => {
     const text = [
       'shipping '.repeat(12),

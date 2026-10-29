@@ -210,6 +210,12 @@ budget:
 ```
 
 - Checked before the call, recorded after.
+- Shared checks refresh completed usage and successful stream completion awaits recording. Redis
+  increments are atomic per counter key; admission does not reserve tokens or dollars. Concurrent
+  calls, later steps and actual output can overshoot the estimate. Session/daily writes are separate,
+  and interrupted or failed accounting is not an exactly-once billing ledger. USD budgets are
+  admission thresholds, not strict spend caps; see the [deployment guide](/deploy/in-app#shared-state-and-limits).
+- A USD cap requires pricing for the primary, fallback, and summary/degradation models. Missing prices fail validation at engine creation and in `sitebot validate` and are reported by doctor; configure `backend.pricing` overrides for unlisted models. Token-only budgets remain valid without a USD cap.
 - `degrade` switches model; `message` returns a friendly refusal; `error` returns `402`.
 - Daily counters are stored with the rate-limit store and reset on a configurable UTC boundary.
 - A budget breach emits a high-severity telemetry event — the developer should find out from their alerting, not their invoice.

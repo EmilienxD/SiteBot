@@ -38,7 +38,8 @@ const AgentBaseSchema = z.strictObject({
 })
 
 /**
- * docs/02-configuration.md §7. Ignored entirely when `mode: chat`.
+ * docs/02-configuration.md §7. Loop limits and onMaxSteps also apply to chat.
+ * Approval settings apply to agent mode only. toolChoice also applies to chat.
  *
  * `stopWhen.steps` defaults to `maxSteps`, which Zod cannot express as a field
  * default because it reads a sibling — hence the transform. Resolving it here

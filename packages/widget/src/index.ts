@@ -63,6 +63,7 @@ export const SiteBot: SiteBotApi = {
   send: (text, options) => withElement((element) => element.send(text, options)),
   identify: (jwt) => withElement((element) => element.identify(jwt)),
   clearIdentity: () => withElement((element) => element.clearIdentity()),
+  setLocale: (locale) => withElement((element) => element.setLocale(locale)),
   setContext: (data) => withElement((element) => element.setContext(data)),
   setSuggestions: (items) => withElement((element) => element.setSuggestions(items)),
   reset: () => withElement((element) => element.reset()),
@@ -100,6 +101,7 @@ export function scriptOptions(script: HTMLScriptElement | null): SiteBotOptions 
   const options: SiteBotOptions = {}
   if (data.endpoint) options.endpoint = data.endpoint
   if (data.key) options.publicKey = data.key
+  if (data.locale) options.locale = data.locale
   if (data.position === 'bottom-right' || data.position === 'bottom-left')
     options.position = data.position
   if (data.theme === 'auto' || data.theme === 'light' || data.theme === 'dark')

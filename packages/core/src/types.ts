@@ -35,6 +35,8 @@ export interface PageContext {
 /** The body of `POST /api/chat` — docs/03-protocol.md §2. */
 export interface ChatRequest {
   sessionId: string
+  /** Selected host locale, validated against deployment configuration. */
+  locale?: string
   messages: UIMessage[]
   pageContext?: PageContext | null
   auth?: string

@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { readSse, streamedText, testConfig, testContext, userMessage } from '../test/helpers.js'
 import { createEngine } from './engine.js'
 import { MemorySessionStore } from './session/store.js'
+import { MemoryVectorStore } from './knowledge/memory-store.js'
+import { MemoryRateLimitStore } from './guards/rate-limit.js'
+import { McpClientPool } from './tools/mcp.js'
 import { silentLogger } from './telemetry/logger.js'
 import type { ProviderFactory } from './providers/adapters.js'
 import type { ChatRequest } from './types.js'
@@ -18,6 +21,75 @@ import type { ChatRequest } from './types.js'
  */
 
 const SESSION = 's_01J9X8Y7Z6ABCDEFGHJKMNPQRS'
+
+describe('engine resource cleanup', () => {
+  it('closes the other resources even if session and counter disposal fail', async () => {
+    const sessionFailure = new Error('session disposal failed')
+    const counterFailure = new Error('counter disposal failed')
+    const sessions = Object.assign(new MemorySessionStore(), {
+      dispose: vi.fn(async () => {
+        throw sessionFailure
+      }),
+    })
+    const counters = new MemoryRateLimitStore()
+    const disposeCounters = vi.spyOn(counters, 'dispose').mockRejectedValue(counterFailure)
+    const knowledge = new MemoryVectorStore()
+    const closeKnowledge = vi.spyOn(knowledge, 'close')
+    const mcp = new McpClientPool()
+    const disposeMcp = vi.spyOn(mcp, 'dispose')
+    const engine = createEngine(testConfig(), {
+      sessionStore: sessions,
+      rateLimitStore: counters,
+      knowledge: { store: knowledge },
+      mcpPool: mcp,
+    })
+    await expect(engine.dispose()).rejects.toMatchObject({
+      errors: [sessionFailure, counterFailure],
+    })
+    expect(sessions.dispose).toHaveBeenCalledOnce()
+    expect(disposeCounters).toHaveBeenCalledOnce()
+    expect(closeKnowledge).toHaveBeenCalledOnce()
+    expect(disposeMcp).toHaveBeenCalledOnce()
+  })
+})
+
+describe('durable usage before stream completion', () => {
+  it('waits for backing-store accounting before completing the response', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const recording = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const ctx = testContext()
+    ctx.budget.record = async () => {
+      entered()
+      await gate
+    }
+    const engine = createEngine(testConfig(), {
+      adapters: { anthropic: async () => textModel(['Hello.']) },
+    })
+    let completed = false
+    const response = await engine.handleChat(
+      { sessionId: SESSION, messages: [userMessage('Hello')] },
+      ctx,
+    )
+    const consumption = response.text().then(() => {
+      completed = true
+    })
+    try {
+      await recording
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(completed).toBe(false)
+    } finally {
+      release()
+      await consumption
+      await engine.dispose()
+    }
+  })
+})
 
 /** A model that streams `chunks` as text deltas. */
 function textModel(chunks: string[]): MockLanguageModelV3 {
@@ -225,14 +297,17 @@ describe('createEngine().handleChat', () => {
     expect(chunks).toContainEqual(
       expect.objectContaining({
         type: 'data-suggestions',
-        data: { items: [{ label: 'Pricing', action: { type: 'navigate', path: '/pricing' } }] },
+        data: {
+          items: [{ label: 'Pricing', action: { type: 'navigate', path: '/pricing' } }],
+          locale: 'en',
+        },
       }),
     )
     expect(chunks).toContainEqual(
       expect.objectContaining({
         type: 'data-status',
         transient: true,
-        data: { text: 'Searching documentation…' },
+        data: { text: 'Searching documentation…', messageKey: 'searching' },
       }),
     )
     expect(chunks).toContainEqual(
@@ -311,7 +386,7 @@ describe('createEngine().handleChat', () => {
     const call = model.doStreamCalls[0]
     const system = call?.prompt.find((message) => message.role === 'system')
     expect(JSON.stringify(system)).toContain('Acme Inc')
-    // Chat mode is one step with no tools — docs/04 §4. (The SDK omits
+    // With no tools, chat answers in one step — docs/04 §4. (The SDK omits
     // `toolChoice` entirely when no tools are offered, which is the same thing
     // said more economically.)
     expect(call?.tools ?? []).toHaveLength(0)

@@ -14,8 +14,8 @@
  * developer who pasted a literal, but they are the backstop, not the rule.
  */
 
-import { isEnvSourced, type ResolvedConfig } from '@sitebot/config'
-import { lintTools } from '@sitebot/core'
+import { ConfigValidationError, isEnvSourced, type ResolvedConfig } from '@sitebot/config'
+import { lintTools, validateBudgetPricing } from '@sitebot/core'
 import type { FlagSpecs } from '../args.js'
 import type { Ui } from '../terminal.js'
 import {
@@ -42,6 +42,8 @@ export async function runValidate(context: CommandContext): Promise<CommandResul
   let loaded
   try {
     loaded = await loadForCommand(context)
+    const pricingErrors = validateBudgetPricing(loaded.config)
+    if (pricingErrors.length > 0) throw new ConfigValidationError(pricingErrors)
   } catch (error) {
     return { exitCode: reportConfigError(ui, error) }
   }

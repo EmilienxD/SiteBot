@@ -36,7 +36,7 @@ Unknown keys are errors, not warnings. Any string value can use `${env.NAME}` or
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `mode` | `"chat" \| "agent"` | `"chat"` | The policy switch. chat: one step, readOnly tools only. agent: multi-step with approval gates. |
+| `mode` | `"chat" \| "agent"` | `"chat"` | The policy switch. Both use bounded steps. chat: readOnly tools only. agent: all tools with approval gates. |
 
 ## `backend` <Badge type="warning" text="required" />
 
@@ -148,12 +148,15 @@ docs/02-configuration.md §9, docs/06-knowledge.md.
 | `knowledge.embedding.baseUrl` | `string` |  |  |
 | `knowledge.embedding.dimensions` | `integer` |  | _> 0._ |
 | `knowledge.embedding.batchSize` | `integer` | `96` | _> 0._ |
+| `knowledge.embedding.documentPrefix` | `string` |  | Model-specific text prefix for indexed documents. Changing it requires ingest --force. |
+| `knowledge.embedding.queryPrefix` | `string` |  | Model-specific text prefix for retrieval queries. |
 | `knowledge.store` | `object` | `{"type":"memory"}` |  |
 | `knowledge.retrieval.mode` | `"tool" \| "always" \| "hybrid"` |  | Defaults to `always` in chat mode and `tool` in agent mode. |
 | `knowledge.retrieval.topK` | `integer` | `6` | _> 0._ |
 | `knowledge.retrieval.minScore` | `number` | `0.3` | _≥ 0, ≤ 1._ |
 | `knowledge.retrieval.maxContextTokens` | `integer` | `3000` | _> 0._ |
 | `knowledge.retrieval.includeCitations` | `boolean` | `true` |  |
+| `knowledge.retrieval.languagePreference` | `"relevance" \| "locale-first"` | `"relevance"` | Rank all languages by relevance (locale breaks ties), or prefer suitable locale results before falling back. |
 | `knowledge.retrieval.rerank` | `boolean \| object` | `false` | true uses Cohere rerank-v3.5 and COHERE_API_KEY; an object configures Cohere or a local custom cross-encoder. |
 | `knowledge.retrieval.dedupeByUrl` | `boolean` | `true` | At most one chunk per URL, so one long page cannot dominate. |
 | `knowledge.retrieval.expandNeighbours` | `integer` | `0` | Pull N adjacent chunks around each hit from the same document. _≥ 0._ |
@@ -167,6 +170,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"sitemap"` |  |  |
 | `knowledge.sources[].id` | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
 | `knowledge.sources[].url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 | `knowledge.sources[].include` | `string[]` | `[]` |  |
 | `knowledge.sources[].exclude` | `string[]` | `[]` |  |
@@ -178,6 +182,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"crawl"` |  |  |
 | `knowledge.sources[].id` | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
 | `knowledge.sources[].url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 | `knowledge.sources[].maxDepth` | `integer` | `3` | _≥ 0._ |
 | `knowledge.sources[].maxPages` | `integer` |  | _> 0._ |
@@ -191,6 +196,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"files"` |  |  |
 | `knowledge.sources[].id` | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
 | `knowledge.sources[].glob` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 | `knowledge.sources[].baseUrl` | `string` |  | Maps file paths to public URLs so citations link somewhere. |
 
@@ -200,6 +206,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"openapi"` |  |  |
 | `knowledge.sources[].id` | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
 | `knowledge.sources[].url` | `string` |  | _non-empty._ |
 | `knowledge.sources[].path` | `string` |  | _non-empty._ |
 
@@ -209,6 +216,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"text"` |  |  |
 | `knowledge.sources[].id` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  |  |
 | `knowledge.sources[].content` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 
 ### `knowledge.sources[]` — `type: json`
@@ -217,6 +225,7 @@ One of 6 shapes, chosen by `type`.
 | --- | --- | --- | --- |
 | `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"json"` |  |  |
 | `knowledge.sources[].id` | `string` |  | _non-empty._ |
+| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
 | `knowledge.sources[].path` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 | `knowledge.sources[].jsonPath` | `string` |  | _non-empty._ |
 | `knowledge.sources[].template` <Badge type="warning" text="required" /> | `string` |  | Renders each record into text, e.g. "{name} — {description}". _non-empty._ |
@@ -394,7 +403,9 @@ Fully public — everything here is served by GET /api/chat/config. Never put a 
 | `ui.extract.strip` | `string[]` | `[]` |  |
 | `ui.a11y.launcherAriaLabel` | `string` | `"Open chat assistant"` |  |
 | `ui.a11y.panelAriaLabel` | `string` | `"Chat assistant"` |  |
-| `ui.locale` | `string` | `"auto"` |  |
+| `ui.locale` | `"auto" \| string` | `"auto"` | Fallback locale after host and browser preferences; auto falls back to English. |
+| `ui.supportedLocales` | `string[]` | `["en","fr"]` | Deployment allowlist, applied by both widget and server. _at least 1 items._ |
+| `ui.translations` | `Record<string, object>` | `{}` | Public deployment-owned copy, keyed by locale. |
 | `ui.strings` | `Record<string, Record<string, string>>` | `{}` | Per-locale overrides, keyed by BCP-47 tag. |
 
 One of 4 shapes, chosen by `type`.

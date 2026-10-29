@@ -1,3 +1,7 @@
+import 'server-only'
+// Declare the selected lazy SDK to Next's tracer. Keep this server-side and
+// update it with serverExternalPackages when selecting a different provider.
+import '@ai-sdk/openai'
 import { loadConfig } from '@sitebot/config/node'
 import { createRouteHandlers, type NextRouteHandlers } from '@sitebot/server/next'
 
@@ -18,8 +22,12 @@ type Cache = { [KEY]?: Promise<NextRouteHandlers> }
 
 export function handlers(): Promise<NextRouteHandlers> {
   const cache = globalThis as Cache
-  cache[KEY] ??= loadConfig(process.env.SITEBOT_CONFIG, { dotenv: true }).then((config) =>
-    createRouteHandlers(config),
-  )
+  cache[KEY] ??= loadConfig(process.env.SITEBOT_CONFIG, { dotenv: true })
+    .then((config) => createRouteHandlers(config))
+    .catch((error: unknown) => {
+      // Share an in-flight attempt, but let a repaired runtime input recover.
+      delete cache[KEY]
+      throw error
+    })
   return cache[KEY]
 }

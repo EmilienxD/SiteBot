@@ -43,7 +43,7 @@ const CommonShape = {
     .enum(MODES)
     .default('chat')
     .describe(
-      'The policy switch. chat: one step, readOnly tools only. agent: multi-step with approval gates.',
+      'The policy switch. Both use bounded steps. chat: readOnly tools only. agent: all tools with approval gates.',
     ),
   backend: BackendSchema,
   prompt: PromptSchema,

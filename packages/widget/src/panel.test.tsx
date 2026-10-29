@@ -1,14 +1,20 @@
+import { hostLocale } from './strings.js'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Panel, PanelBoundary } from './panel.js'
 import { defaultConfig } from './defaults.js'
+import { applyChunk, startMessage } from './ui-stream.js'
 import type { WidgetController } from './types.js'
 
 function controller(messages: WidgetController['messages']): WidgetController {
   return {
     options: { endpoint: '/api/chat', publicKey: '' },
     config: structuredClone(defaultConfig),
+    get locale() {
+      return hostLocale(this.config.ui, this.options.locale)
+    },
+    setLocale() {},
     messages,
     state: 'idle',
     open() {},
@@ -42,6 +48,30 @@ afterEach(() => {
 })
 
 describe('Panel fidelity', () => {
+  it('keeps sparse source numbers and click provenance after wire assembly and history persistence', () => {
+    const source = {
+      id: 'c27',
+      title: 'Trial',
+      url: 'https://example.com/en/trial',
+      lang: 'en',
+      snippet: 'Seven days.',
+      score: 0.9,
+    }
+    const streamed = startMessage(undefined, 'followup')
+    for (const chunk of [
+      { type: 'text-delta', id: 't', delta: 'Sept jours [27].' },
+      { type: 'data-citations', id: 'knowledge-citations', data: { items: [source] } },
+    ])
+      applyChunk(streamed, chunk)
+    const value = controller(JSON.parse(JSON.stringify([streamed.message])))
+    value.clickCitation = vi.fn()
+    const root = document.createElement('div')
+    document.body.append(root)
+    render(<Panel controller={value} close={() => {}} />, root)
+    expect(root.querySelector('.citation-n')?.textContent).toBe('27')
+    ;(root.querySelector('.citation-chip') as HTMLButtonElement).click()
+    expect(value.clickCitation).toHaveBeenCalledWith(source)
+  })
   it('keeps tools and approvals inside their message and attributes only the last assistant in a run', () => {
     const messages = [
       {
@@ -398,7 +428,7 @@ describe('Panel honours ui.* config keys (review Fix 8)', () => {
 
   it('strings: per-locale overrides replace UI copy, config values included', () => {
     const value = controller([])
-    value.config.ui.locale = 'fr-FR'
+    value.options.locale = 'fr-FR'
     value.config.ui.strings = { fr: { placeholder: 'Écrivez…', send: 'Envoyer', close: 'Fermer' } }
     const root = mount(value)
     expect(root.querySelector('textarea')?.placeholder).toBe('Écrivez…')

@@ -1,3 +1,4 @@
+import { normalizeLocale } from '@sitebot/config/i18n'
 import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import { sha256 } from './hash.js'
 import { globToRegExp, normalizeUrl, sameHost } from './url.js'
@@ -69,6 +70,7 @@ export async function loadText(
       contentHash: sha256(source.content),
       updatedAt: new Date().toISOString(),
       sourceType: 'text',
+      ...(source.lang ? { lang: normalizeLocale(source.lang) } : {}),
       headings: [],
     },
   ]
@@ -111,6 +113,7 @@ export async function loadJson(
       contentHash: sha256(text),
       updatedAt: new Date().toISOString(),
       sourceType: 'json',
+      ...(source.lang ? { lang: normalizeLocale(source.lang) } : {}),
       headings: [],
     })
   }
@@ -201,6 +204,7 @@ export async function loadOpenApi(
         contentHash: sha256(textDocument),
         updatedAt: new Date().toISOString(),
         sourceType: 'openapi',
+        ...(source.lang ? { lang: normalizeLocale(source.lang) } : {}),
         headings: [{ level: 2, text: `${method.toUpperCase()} ${path}`, offset: 0 }],
       })
     }
@@ -335,6 +339,7 @@ export async function loadFiles(
         source.baseUrl === undefined
           ? `file://${relative}`
           : `${source.baseUrl.replace(/\/$/, '')}/${relative}`
+      let lang = normalizeLocale(source.lang)
       let text = body
       let title = path.basename(relative, path.extname(relative))
       let headings: RawDocument['headings'] = []
@@ -344,6 +349,7 @@ export async function loadFiles(
         text = extracted.text
         title = extracted.title
         headings = extracted.headings
+        lang ??= extracted.lang
       } else if (/\.(mdx?)$/i.test(entry.name)) {
         headings = markdownHeadings(body)
       }
@@ -354,6 +360,7 @@ export async function loadFiles(
         contentHash: sha256(text),
         updatedAt: (await fs.stat(full)).mtime.toISOString(),
         sourceType: 'files',
+        ...(lang ? { lang } : {}),
         headings,
       })
     }
@@ -379,7 +386,10 @@ export async function loadSitemap(
   source: Extract<KnowledgeSource, { type: 'sitemap' }>,
   config: ResolvedConfig,
   options: HttpFetchOptions & {
-    previous?: Map<string, { contentHash: string; etag?: string; lastModified?: string }>
+    previous?: Map<
+      string,
+      { contentHash: string; lang?: string; etag?: string; lastModified?: string }
+    >
     onProgress?: (message: string) => void
   } = {},
 ): Promise<RawDocument[]> {
@@ -429,6 +439,9 @@ export async function loadSitemap(
             updatedAt: new Date().toISOString(),
             sourceType: 'sitemap',
             headings: extracted.headings,
+            ...((normalizeLocale(source.lang) ?? extracted.lang)
+              ? { lang: normalizeLocale(source.lang) ?? extracted.lang }
+              : {}),
             ...(page.etag === undefined ? {} : { etag: page.etag }),
             ...(page.lastModified === undefined ? {} : { lastModified: page.lastModified }),
           })
@@ -444,13 +457,14 @@ export async function loadSitemap(
 
 function placeholder(
   url: string,
-  previous: { contentHash: string; etag?: string; lastModified?: string },
+  previous: { contentHash: string; lang?: string; etag?: string; lastModified?: string },
 ): RawDocument {
   return {
     url: normalizeUrl(url),
     title: '',
     text: '',
     contentHash: previous.contentHash,
+    ...(previous.lang === undefined ? {} : { lang: previous.lang }),
     updatedAt: '',
     sourceType: 'sitemap',
     headings: [],
@@ -505,6 +519,9 @@ export async function loadCrawl(
           updatedAt: new Date().toISOString(),
           sourceType: 'crawl',
           headings: extracted.headings,
+          ...((normalizeLocale(source.lang) ?? extracted.lang)
+            ? { lang: normalizeLocale(source.lang) ?? extracted.lang }
+            : {}),
         })
       } else {
         options.onProgress?.(`skipped short page ${url}`)

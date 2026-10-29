@@ -1,3 +1,4 @@
+import { createTranslator } from '@sitebot/config/i18n'
 import type { Knowledge, ResolvedConfig } from '@sitebot/config'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import {
@@ -23,6 +24,7 @@ import {
   type EngineDeps,
   type EventDispatcher,
   type Logger,
+  type KnowledgeDeps,
   type RateLimitStore,
   type RequestContext,
   type TokenVerifier,
@@ -112,6 +114,12 @@ export interface SiteBotHandler {
 }
 
 const MAX_COMMENT_CHARS = 1000
+// Every chat stream, including a pre-provider budget message, needs the same
+// privacy and proxy-buffering policy. None may enter a browser/shared cache.
+const CHAT_RESPONSE_HEADERS = {
+  'cache-control': 'private, no-cache, no-store, no-transform',
+  'x-accel-buffering': 'no',
+}
 
 export function createSiteBotHandler(
   config: ResolvedConfig,
@@ -150,14 +158,22 @@ export function createSiteBotHandler(
       ? createEventDispatcher({ telemetry: config.telemetry, logger })
       : noopDispatcher
 
-  // `engineDeps` is assembled here so the knowledge block below can attach
-  // itself post-hoc when it resolves. Callers who passed `options.engine`
-  // supplied their own deps and manage knowledge themselves.
+  // Supply one knowledge object before creating the engine, then fill its
+  // fields after initialization. The engine captures it for retrieval, health,
+  // and disposal. Injected engines/dependencies keep their initialization path.
+  const managedKnowledge: KnowledgeDeps | undefined =
+    options.engine === undefined &&
+    options.deps?.knowledge === undefined &&
+    config.knowledge.sources.length > 0 &&
+    config.knowledge.embedding !== undefined
+      ? {}
+      : undefined
   const engineDeps: EngineDeps = {
     logger,
     rateLimitStore,
     dispatcher,
     ...options.deps,
+    ...(managedKnowledge === undefined ? {} : { knowledge: managedKnowledge }),
   }
   const engine =
     options.engine ??
@@ -171,39 +187,51 @@ export function createSiteBotHandler(
   // knowledge is not configured at all. A store that fails to open degrades
   // knowledge; chat keeps working, per docs/06 §3.7.
   let knowledgeReady: Promise<void> | undefined
+  let disposed = false
   function ensureKnowledge(): Promise<void> {
-    knowledgeReady ??= (async () => {
-      if (options.engine !== undefined) return // external engine, external deps
-      // A caller that built its own store and embedder (a Workers host, which
-      // must import its provider SDK statically) keeps them.
-      if (options.deps?.knowledge !== undefined) return
-      if (config.knowledge.sources.length === 0 || config.knowledge.embedding === undefined) return
-      try {
-        // `memory` and `upstash` need only `fetch`, so a Workers host (docs/00
-        // T3) builds them here without ever importing the Node entry.
-        const storeConfig = config.knowledge.store
-        const model = config.knowledge.embedding.model
-        let store: VectorStore
-        if (isEdgeVectorStore(storeConfig)) store = await createVectorStore(storeConfig, { model })
-        else if (options.vectorStoreFactory !== undefined)
-          store = await options.vectorStoreFactory(storeConfig, {
-            model,
-            baseDir: config.$meta.baseDir ?? null,
-          })
-        else
-          throw new EngineError('not_ready', {
-            message: `knowledge.store "${storeConfig.type}" needs a Node runtime.`,
-            detail:
-              'use a Node adapter (next, express, fastify, node); on the edge use upstash, or memory without a path',
-          })
-        const { createQueryEmbedder } = await import('@sitebot/ingest/query')
-        const embedder = await createQueryEmbedder(config.knowledge.embedding)
-        engineDeps.knowledge = { store, embedder }
-      } catch (error) {
-        logger.warn('knowledge store unreachable; chat continues without RAG', { error })
-      }
-    })()
+    if (managedKnowledge === undefined || disposed) return Promise.resolve()
+    // Share one attempt across chat and health requests. The rejection handler
+    // runs after assignment, even if initialization fails synchronously.
+    knowledgeReady ??= initializeKnowledge().catch((error: unknown) => {
+      knowledgeReady = undefined
+      logger.warn('knowledge store unreachable; chat continues without RAG', { error })
+    })
     return knowledgeReady
+  }
+
+  async function initializeKnowledge(): Promise<void> {
+    let store: VectorStore | undefined
+    try {
+      const embedding = config.knowledge.embedding!
+      // `memory` and `upstash` need only `fetch`, so a Workers host (docs/00
+      // T3) builds them here without ever importing the Node entry.
+      const storeConfig = config.knowledge.store
+      const model = embedding.model
+      if (isEdgeVectorStore(storeConfig)) store = await createVectorStore(storeConfig, { model })
+      else if (options.vectorStoreFactory !== undefined)
+        store = await options.vectorStoreFactory(storeConfig, {
+          model,
+          baseDir: config.$meta.baseDir ?? null,
+        })
+      else
+        throw new EngineError('not_ready', {
+          message: `knowledge.store "${storeConfig.type}" needs a Node runtime.`,
+          detail:
+            'use a Node adapter (next, express, fastify, node); on the edge use upstash, or memory without a path',
+        })
+      const { createQueryEmbedder } = await import('@sitebot/ingest/query')
+      const embedder = await createQueryEmbedder(embedding)
+      Object.assign(managedKnowledge!, { store, embedder })
+    } catch (error) {
+      // Until both dependencies are ready this attempt owns the store. Once
+      // attached, the engine owns it and closes it during disposal.
+      try {
+        await store?.close()
+      } catch (closeError) {
+        logger.warn('failed to close uninitialized knowledge store', { error: closeError })
+      }
+      throw error
+    }
   }
 
   const debug = config.telemetry.logLevel === 'debug'
@@ -218,6 +246,7 @@ export function createSiteBotHandler(
     request: Request,
     cors: Record<string, string>,
     info: RequestInfo,
+    locale: { value: string },
   ): Promise<Response> {
     const { security } = config
 
@@ -229,6 +258,12 @@ export function createSiteBotHandler(
     checkContentLength(request.headers.get('content-length'), security.maxRequestBytes)
     const raw = await readBodyWithLimit(request, security.maxRequestBytes)
     const chatRequest = parseChatRequest(parseJsonBody(raw))
+    locale.value = resolveLocale(
+      request.headers,
+      config.ui,
+      chatRequest.locale,
+      chatRequest.pageContext?.locale,
+    )
     const token = extractToken(request, chatRequest.auth)
     const budget = createBudgetTracker({
       budget: security.budget,
@@ -272,7 +307,7 @@ export function createSiteBotHandler(
     }
     if (guarded.budget === 'block') {
       if (security.budget.onExceeded === 'error') throw new EngineError('budget_exceeded')
-      return budgetMessageResponse(cors)
+      return budgetMessageResponse(cors, locale.value)
     }
 
     await engine.bindSessionIdentity?.(
@@ -296,7 +331,7 @@ export function createSiteBotHandler(
       identity: guarded.identity,
       pageContext: config.prompt.includePageContext ? (chatRequest.pageContext ?? null) : null,
       origin: request.headers.get('origin') ?? selfOriginOf(request) ?? '',
-      locale: resolveLocale(request.headers, config.ui.locale),
+      locale: locale.value,
       ip,
       signal: request.signal,
       logger: logger.child({ requestId, sessionId: chatRequest.sessionId }),
@@ -318,12 +353,11 @@ export function createSiteBotHandler(
       'x-sitebot-request-id': requestId,
       // docs/03 §11: defeat nginx and Cloudflare buffering of the SSE body,
       // and any proxy that would compress or rewrite it.
-      'x-accel-buffering': 'no',
-      'cache-control': 'no-cache, no-transform',
+      ...CHAT_RESPONSE_HEADERS,
     })
   }
 
-  function budgetMessageResponse(cors: Record<string, string>): Response {
+  function budgetMessageResponse(cors: Record<string, string>, locale: string): Response {
     const id = 'budget-message'
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
@@ -331,12 +365,15 @@ export function createSiteBotHandler(
         writer.write({
           type: 'text-delta',
           id,
-          delta: 'The assistant has reached its usage limit for now. Please try again later.',
+          delta: createTranslator(config.ui, locale)('budgetExceeded'),
         })
         writer.write({ type: 'text-end', id })
       },
     })
-    return withHeaders(createUIMessageStreamResponse({ stream }), cors)
+    return withHeaders(createUIMessageStreamResponse({ stream }), {
+      ...cors,
+      ...CHAT_RESPONSE_HEADERS,
+    })
   }
 
   async function requestFingerprint(request: Request, ip: string | null): Promise<string> {
@@ -436,13 +473,25 @@ export function createSiteBotHandler(
     request: Request,
     info: RequestInfo = {},
   ): Promise<Response> {
+    const locale = { value: resolveLocale(request.headers, config.ui) }
+    const localizedErrors = () => ({
+      ...errorOptions,
+      locale: locale.value,
+      localization: config.ui,
+    })
     const route = resolveRoute(new URL(request.url).pathname, basePath)
 
     if (route === null) {
-      return new Response(JSON.stringify({ code: 'invalid_request', message: 'Not found.' }), {
-        status: 404,
-        headers: { 'content-type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({
+          code: 'invalid_request',
+          message: createTranslator(config.ui, locale.value)('notFound'),
+        }),
+        {
+          status: 404,
+          headers: { 'content-type': 'application/json', 'cache-control': 'private, no-store' },
+        },
+      )
     }
 
     // Preflight is answered before anything else, and without touching the
@@ -465,35 +514,68 @@ export function createSiteBotHandler(
         selfOrigin: selfOriginOf(request),
       })
     } catch (error) {
-      return errorResponse(error, errorOptions)
+      return withHeaders(errorResponse(error, localizedErrors()), {
+        'cache-control': 'private, no-store',
+      })
     }
 
     try {
       switch (route) {
         case 'chat':
-          if (request.method !== 'POST') return methodNotAllowed('POST', cors)
-          return await handleChat(request, cors, info)
+          if (request.method !== 'POST')
+            return methodNotAllowed(
+              'POST',
+              cors,
+              createTranslator(config.ui, locale.value)('invalid_request'),
+            )
+          return await handleChat(request, cors, info, locale)
         case 'config':
-          if (request.method !== 'GET') return methodNotAllowed('GET', cors)
+          if (request.method !== 'GET')
+            return methodNotAllowed(
+              'GET',
+              cors,
+              createTranslator(config.ui, locale.value)('invalid_request'),
+            )
           return await handleConfig(request, cors)
         case 'feedback':
-          if (request.method !== 'POST') return methodNotAllowed('POST', cors)
+          if (request.method !== 'POST')
+            return methodNotAllowed(
+              'POST',
+              cors,
+              createTranslator(config.ui, locale.value)('invalid_request'),
+            )
           return await handleFeedback(request, cors)
         case 'health':
-          if (request.method !== 'GET') return methodNotAllowed('GET', cors)
+          if (request.method !== 'GET')
+            return methodNotAllowed(
+              'GET',
+              cors,
+              createTranslator(config.ui, locale.value)('invalid_request'),
+            )
           return await handleHealth(cors)
       }
     } catch (error) {
       logger.error('request failed', { error, route })
       dispatcher.emit('error', { code: mapError(error, errorOptions).code, route })
-      return withHeaders(errorResponse(error, errorOptions), cors)
+      return withHeaders(errorResponse(error, localizedErrors()), {
+        ...cors,
+        'cache-control': 'private, no-store',
+      })
     }
   } as SiteBotHandler
 
   handler.engine = engine
-  handler.dispose = async () => {
-    await engine.dispose()
-    await dispatcher.drain()
+  let disposal: Promise<void> | undefined
+  handler.dispose = () => {
+    disposal ??= (async () => {
+      disposed = true
+      // An in-flight attempt must hand its store to the engine (or close it)
+      // before the engine is disposed; otherwise a late success leaks it.
+      await knowledgeReady
+      await engine.dispose()
+      await dispatcher.drain()
+    })()
+    return disposal
   }
 
   return handler
@@ -535,14 +617,20 @@ export function resolveRoute(pathname: string, basePath: string): RouteName | nu
   return SUFFIXES[path] ?? null
 }
 
-function methodNotAllowed(allowed: string, cors: Record<string, string>): Response {
-  return new Response(
-    JSON.stringify({ code: 'invalid_request', message: 'That request could not be understood.' }),
-    {
-      status: 405,
-      headers: { ...cors, 'content-type': 'application/json', allow: `${allowed}, OPTIONS` },
+function methodNotAllowed(
+  allowed: string,
+  cors: Record<string, string>,
+  message: string,
+): Response {
+  return new Response(JSON.stringify({ code: 'invalid_request', message }), {
+    status: 405,
+    headers: {
+      ...cors,
+      'content-type': 'application/json',
+      'cache-control': 'private, no-store',
+      allow: `${allowed}, OPTIONS`,
     },
-  )
+  })
 }
 
 function parseFeedback(body: unknown): Feedback {

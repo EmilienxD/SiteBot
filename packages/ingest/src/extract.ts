@@ -1,3 +1,5 @@
+import { normalizeLocale } from '@sitebot/config/i18n'
+
 /**
  * HTML → Markdown extraction — docs/06-knowledge.md §3.3.
  *
@@ -25,6 +27,7 @@ export interface ExtractOptions {
 }
 
 export interface ExtractedPage {
+  lang?: string
   title: string
   text: string
   /** Heading outline seen during extraction — used by the chunker. */
@@ -336,12 +339,15 @@ export function extract(html: string, options: ExtractOptions = {}): ExtractedPa
     .trim()
   // Offsets are filled in by the renderer; recompute them after whitespace
   // collapsing so they point into the emitted text.
-  recomputeOffsets(text, headings)
+  recomputeOffsets(text, headings, options.format !== 'text')
 
   return {
     title,
     text,
     headings,
+    ...(normalizeLocale(findFirst(tree, 'html')?.attrs['lang']) === undefined
+      ? {}
+      : { lang: normalizeLocale(findFirst(tree, 'html')?.attrs['lang']) }),
     skipped: text.length < (options.minChars ?? 200),
   }
 }
@@ -460,11 +466,16 @@ function renderText(element: Element, headings: HeadingCollector): string {
 function recomputeOffsets(
   text: string,
   headings: { level: number; text: string; offset: number }[],
+  markdown: boolean,
 ): void {
   let cursor = 0
   for (const heading of headings) {
-    const index = text.indexOf(heading.text, cursor)
+    // The chunker slices at the start of the heading line, just as it does
+    // for Markdown file sources. Pointing at the label left stray ## markers
+    // in the preceding section and even produced marker-only chunks.
+    const rendered = markdown ? `${'#'.repeat(heading.level)} ${heading.text}` : heading.text
+    const index = text.indexOf(rendered, cursor)
     heading.offset = index < 0 ? cursor : index
-    cursor = heading.offset + heading.text.length
+    cursor = heading.offset + rendered.length
   }
 }

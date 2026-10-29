@@ -1,6 +1,6 @@
 import { embed } from 'ai'
 import type { QueryEmbedder } from '@sitebot/core'
-import { createEmbeddingModel, type EmbeddingConfigLike } from './embedding.js'
+import { createEmbeddingModel, embeddingTokens, type EmbeddingConfigLike } from './embedding.js'
 
 /**
  * The query-time embedder the engine wraps around an `EmbeddingModel`.
@@ -9,13 +9,14 @@ import { createEmbeddingModel, type EmbeddingConfigLike } from './embedding.js'
  * a thin pass-through. Tests bypass this and inject a fake `QueryEmbedder`.
  */
 export function createQueryEmbedder(config: EmbeddingConfigLike): Promise<QueryEmbedder> {
-  return createEmbeddingModel(config).then(({ model, modelId }) => ({
+  return createEmbeddingModel(config, 'query').then(({ model, modelId }) => ({
     modelId,
     async embed(text: string) {
-      const result = await embed({ model, value: text, maxRetries: 2 })
+      const value = `${config.queryPrefix ?? ''}${text}`
+      const result = await embed({ model, value, maxRetries: 2 })
       return {
         embedding: result.embedding,
-        tokens: result.usage?.tokens ?? Math.ceil(text.length / 4),
+        tokens: embeddingTokens(result.usage?.tokens, [value]),
       }
     },
   }))

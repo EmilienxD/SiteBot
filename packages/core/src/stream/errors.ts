@@ -1,3 +1,5 @@
+import { en, createTranslator, type LocaleConfig, type MessageKey } from '@sitebot/config/i18n'
+
 /**
  * `mapError` is normative — docs/04-providers-and-engine.md §7.
  *
@@ -34,47 +36,49 @@ export interface ErrorSpec {
 export const ERROR_TABLE: Record<ErrorCode, ErrorSpec> = {
   invalid_request: {
     status: 400,
-    message: 'That request could not be understood.',
+    message: en.invalid_request,
     retryable: false,
   },
-  auth_required: { status: 401, message: 'Please sign in to continue.', retryable: false },
+  auth_required: { status: 401, message: en.auth_required, retryable: false },
   origin_denied: {
     status: 403,
-    message: 'This assistant is not available on this site.',
+    message: en.origin_denied,
     retryable: false,
   },
   invalid_key: {
     status: 403,
-    message: 'This assistant is not configured correctly for this site.',
+    message: en.invalid_key,
     retryable: false,
   },
-  payload_too_large: { status: 413, message: 'That message is too large.', retryable: false },
+  payload_too_large: { status: 413, message: en.payload_too_large, retryable: false },
   rate_limited: {
     status: 429,
-    message: 'Too many messages just now. Please wait a moment and try again.',
+    message: en.rate_limited,
     retryable: true,
   },
   budget_exceeded: {
     status: 402,
-    message: 'The assistant has reached its usage limit for now.',
+    message: en.budget_exceeded,
     retryable: false,
   },
   provider_error: {
     status: 502,
-    message: 'The assistant is having trouble responding. Please try again.',
+    message: en.provider_error,
     retryable: true,
   },
-  not_ready: { status: 503, message: 'The assistant is not ready yet.', retryable: true },
+  not_ready: { status: 503, message: en.not_ready, retryable: true },
   max_steps_exceeded: {
     status: 500,
-    message: 'The assistant took too many steps and stopped.',
+    message: en.max_steps_exceeded,
     retryable: true,
   },
-  aborted: { status: 499, message: 'The request was cancelled.', retryable: false },
-  internal_error: { status: 500, message: 'Something went wrong.', retryable: true },
+  aborted: { status: 499, message: en.aborted, retryable: false },
+  internal_error: { status: 500, message: en.internal_error, retryable: true },
 }
 
 export interface MappedError {
+  messageKey?: MessageKey
+  values?: Record<string, string | number>
   code: ErrorCode
   message: string
   retryable: boolean
@@ -83,6 +87,8 @@ export interface MappedError {
 }
 
 export interface EngineErrorOptions {
+  messageKey?: MessageKey
+  values?: Record<string, string | number>
   /** Overrides the table's user-facing message. Still never contains internals. */
   message?: string
   /** Internal detail: logged always, returned only in debug + non-production. */
@@ -95,6 +101,8 @@ export interface EngineErrorOptions {
 /** The one error type the engine throws deliberately. */
 export class EngineError extends Error {
   override readonly name = 'EngineError'
+  readonly messageKey: MessageKey | undefined
+  readonly values: Record<string, string | number> | undefined
   readonly code: ErrorCode
   readonly status: number
   readonly retryable: boolean
@@ -107,6 +115,10 @@ export class EngineError extends Error {
     const known = Object.hasOwn(ERROR_TABLE, code)
     const spec = known ? ERROR_TABLE[code] : ERROR_TABLE.internal_error
     super(options.message ?? spec.message, { cause: options.cause })
+    this.messageKey =
+      options.messageKey ??
+      (options.message === undefined ? (known ? code : 'internal_error') : undefined)
+    this.values = options.values
     this.code = known ? code : 'internal_error'
     this.status = spec.status
     this.retryable = spec.retryable
@@ -116,6 +128,8 @@ export class EngineError extends Error {
 }
 
 export interface MapErrorOptions {
+  locale?: string
+  localization?: LocaleConfig
   /** `telemetry.logLevel === 'debug'`. */
   debug?: boolean
   /** `NODE_ENV === 'production'` — detail is withheld in production regardless. */
@@ -168,6 +182,21 @@ export function mapError(error: unknown, options: MapErrorOptions = {}): MappedE
     retryable: spec.retryable,
   }
 
+  if (options.locale !== undefined) {
+    const t = createTranslator(options.localization ?? {}, options.locale)
+    const messageKey =
+      error instanceof EngineError
+        ? error.messageKey
+        : checkpointStatus(error) !== undefined
+          ? (error as { messageKey?: MessageKey }).messageKey
+          : code
+    if (messageKey !== undefined) {
+      mapped.messageKey = messageKey
+      if (error instanceof EngineError && error.values !== undefined) mapped.values = error.values
+      mapped.message = t(messageKey, mapped.values)
+    }
+  }
+
   if (options.debug === true && options.production !== true) {
     const detail =
       error instanceof EngineError
@@ -190,6 +219,7 @@ export function errorResponse(error: unknown, options: MapErrorOptions = {}): Re
       : (checkpointStatus(error) ?? ERROR_TABLE[mapped.code].status)
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    'cache-control': 'private, no-store',
     ...(error instanceof EngineError ? error.headers : {}),
   }
   // 499 is nginx's client-closed code and is not a legal HTTP status to send.

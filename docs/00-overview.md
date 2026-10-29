@@ -16,7 +16,7 @@ A **drop-in AI assistant for websites**, delivered as a template. A developer:
 
 They get a floating launcher button in the bottom-right of every page. Clicking it opens an overlay panel on top of the site — the reference visual is the Chili Piper widget on ramp.com (`docs/example-from-ramp-website.png`).
 
-The assistant is configured entirely from the config file: which model answers, what its system prompt is, what tools it can call, whether it is a single-turn chat or a multi-step agent, and how it learns about the website it lives on.
+The assistant is configured entirely from the config file: which model answers, what its system prompt is, which read-only or optional action tools it can call, how many steps it can take, and how it learns about the website it lives on.
 
 ---
 
@@ -55,7 +55,7 @@ These four were decided in the design session and everything downstream assumes 
 
 **G5 — Can act, safely.** Agent mode calls real APIs. Side-effecting tools are gated behind an explicit user-approval card rendered in the panel.
 
-**G6 — Deployable on a public marketing site.** Rate limits, origin allowlists, hard token/USD budgets, and an explicit prompt-injection posture are v1 features, not v2 hardening.
+**G6 — Deployable on a public marketing site.** Rate limits, origin allowlists, token/USD admission budgets, and an explicit prompt-injection posture are v1 features. Budgets check before calls and record after; they do not reserve concurrent spend or provide a strict dollar cap (see [security](./08-security.md#8-cost-as-a-security-property)).
 
 **G7 — Zero-infra first run.** `npx sitebot init && npx sitebot dev` must produce a working, knowledgeable assistant with nothing but an API key.
 

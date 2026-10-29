@@ -1,7 +1,7 @@
+import { DEFAULT_SUPPORTED_LOCALES } from '@sitebot/config/i18n/locale'
 import type { PublicConfig } from '@sitebot/config'
 
 export const defaultConfig: PublicConfig = {
-  name: 'Assistant',
   mode: 'chat',
   capabilities: {
     streaming: true,
@@ -57,6 +57,8 @@ export const defaultConfig: PublicConfig = {
     extract: { selector: 'main, article, [role="main"]', strip: [] },
     a11y: { launcherAriaLabel: 'Open chat assistant', panelAriaLabel: 'Chat assistant' },
     locale: 'auto',
+    supportedLocales: [...DEFAULT_SUPPORTED_LOCALES],
+    translations: {},
     strings: {},
   },
 }

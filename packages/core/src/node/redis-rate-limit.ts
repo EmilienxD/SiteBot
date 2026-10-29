@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { createClient, type RedisClientType } from 'redis'
+import type { RedisClientType } from 'redis'
+import { createStoreRedisClient } from './redis-client.js'
 import type { RateLimitResult, RateLimitRule, RateLimitStore } from '../guards/rate-limit.js'
 
 export interface RedisRateLimitStoreOptions {
@@ -44,7 +45,7 @@ export class RedisRateLimitStore implements RateLimitStore {
   private readonly instanceId = randomUUID()
 
   constructor(options: RedisRateLimitStoreOptions) {
-    this.client = options.client ?? createClient({ url: options.url })
+    this.client = options.client ?? createStoreRedisClient(options.url)
     this.ownsClient = options.client === undefined
     this.prefix = options.prefix ?? 'sitebot:'
   }
@@ -89,13 +90,22 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 
   async dispose(): Promise<void> {
+    await this.connecting?.catch(() => {})
     if (this.ownsClient && this.client.isOpen) await this.client.quit()
   }
 
   private async connect(): Promise<void> {
+    if (this.connecting !== undefined) {
+      await this.connecting
+      return
+    }
     if (this.client.isOpen) return
-    this.connecting ??= this.client.connect()
-    await this.connecting
+    this.connecting = this.client.connect()
+    try {
+      await this.connecting
+    } finally {
+      this.connecting = undefined
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import { createTranslator, resolveLocale } from '@sitebot/config/i18n'
 import { isMcpImport, type SiteBotConfig } from '@sitebot/config'
 import type { Identity, PageContext } from '../types.js'
 import { randomDelimiterId, untrustedBlock } from './untrusted.js'
@@ -15,13 +16,16 @@ import { substituteVariables } from './variables.js'
 /** One retrieved chunk. */
 export interface KnowledgeSnippet {
   id: string
+  n?: number
   title?: string
   url?: string
   text: string
   score?: number
+  lang?: string
 }
 
 export interface ComposeContext {
+  locale?: string
   pageContext?: PageContext | null
   identity?: Identity | null
 }
@@ -31,6 +35,8 @@ export interface ComposeInput {
   ctx?: ComposeContext
   /** Resolved retrieval mode. Only `always` and `hybrid` inline knowledge. */
   retrieval?: 'tool' | 'always' | 'hybrid'
+  /** Runtime readiness; tool definitions still obey deployment scopes. */
+  knowledgeSearchAvailable?: boolean
   documents?: readonly KnowledgeSnippet[]
   /**
    * Injected in place of the knowledge block when retrieval ran but found
@@ -88,9 +94,16 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
       config,
       ctx.identity ?? null,
       input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool'),
+      input.knowledgeSearchAvailable ?? true,
     ),
   )
-  push('guardrails', guardrailsBlock(config))
+  const locale = resolveLocale(config.ui, { override: ctx.locale })
+  push('guardrails', guardrailsBlock(config, locale))
+  // Locale is part of the cached policy segment; providers see distinct prefixes.
+  push(
+    'language',
+    `<language>\nRespond in language ${locale} by default. If the user explicitly asks for another response language, follow that request. Reference documents may be in another language; preserve original citation URLs and source languages.\n</language>`,
+  )
   const stableEnd = parts.length
 
   // <page_context>: untrusted, after the stable prefix.
@@ -98,9 +111,10 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
     push('page_context', pageContextBlock(ctx.pageContext ?? null, delimiterId))
   }
 
-  // <knowledge>: untrusted, inline only when retrieval is always | hybrid.
+  // <knowledge>: inline excerpts for always/hybrid, or an availability note
+  // in any retrieval mode when the index cannot be reached.
   const retrieval = input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool')
-  if (retrieval !== 'tool') {
+  if (retrieval !== 'tool' || input.note !== undefined) {
     push('knowledge', knowledgeBlock(input.documents ?? [], delimiterId, input.note))
   }
 
@@ -187,7 +201,7 @@ function knowledgeBlock(
   const rendered = documents
     .map((doc, index) => {
       const heading = [doc.title, doc.url].filter((part) => part !== undefined).join(' — ')
-      return `[${index + 1}] ${heading}\n${doc.text}`
+      return `[${doc.n ?? index + 1}] ${heading}${doc.lang ? ` [language: ${doc.lang}]` : ''}\n${doc.text}`
     })
     .join('\n\n')
 
@@ -211,6 +225,7 @@ function toolPolicyBlock(
   config: SiteBotConfig,
   identity: Identity | null,
   retrieval: 'tool' | 'always' | 'hybrid',
+  searchReady: boolean,
 ): string | undefined {
   const lines: string[] = []
 
@@ -239,10 +254,35 @@ function toolPolicyBlock(
   if (retrieval !== 'tool' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {
     lines.push('- Cite sources with [n] when you use knowledge results.')
   }
-  if (retrieval !== 'always' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {
+  const declaredSearch = config.tools.find(
+    (entry) => !isMcpImport(entry) && entry.name === 'search_knowledge_base',
+  )
+  const searchAllowed =
+    searchReady &&
+    config.agent.toolChoice !== 'none' &&
+    (declaredSearch === undefined ||
+      (!isMcpImport(declaredSearch) &&
+        declaredSearch.enabled !== false &&
+        (declaredSearch.scope !== 'authenticated' || identity !== null) &&
+        (config.mode !== 'chat' || declaredSearch.readOnly === true)))
+  if (
+    retrieval !== 'always' &&
+    knowledgeAvailable &&
+    searchAllowed &&
+    config.knowledge.retrieval.includeCitations
+  ) {
     lines.push(
       '- `search_knowledge_base` searches the indexed site content. Cite its results with [n] when you use them.',
     )
+  }
+  if (knowledgeAvailable) {
+    lines.push(
+      '- Ground factual documentation answers in supplied site facts or retrieved excerpts. Previous assistant claims and similarity scores are not evidence. If available excerpts do not support the answer, use an available knowledge search tool before claiming the documentation is missing; refine an incomplete search when useful. If evidence remains missing or search is unavailable, say so plainly.',
+    )
+    if (config.knowledge.retrieval.includeCitations)
+      lines.push(
+        '- Cite only supplied source numbers that support the accompanying claim. Source numbers keep their identity across this conversation. Never invent a source number or use an unrelated result to support a claim.',
+      )
   }
 
   if (config.mode === 'chat' && config.tools.length > 0) {
@@ -255,15 +295,19 @@ function toolPolicyBlock(
 
 // ── block 6 ─────────────────────────────────────────────────────────────────
 
-function guardrailsBlock(config: SiteBotConfig): string | undefined {
+function guardrailsBlock(config: SiteBotConfig, locale: string): string | undefined {
   const { guardrails } = config.prompt
   if (!guardrails.refuseOffTopic) return undefined
 
   const subject = config.siteContext.company ?? config.name
+  const message =
+    guardrails.offTopicMessage === 'I can only help with questions about this site.'
+      ? createTranslator(config.ui, locale)('offTopic')
+      : guardrails.offTopicMessage
   return [
     '<guardrails>',
     `Only answer questions about ${subject} and this website.`,
-    `If a question is unrelated, reply: "${guardrails.offTopicMessage}"`,
+    `If a question is unrelated, reply: "${message}"`,
     '</guardrails>',
   ].join('\n')
 }

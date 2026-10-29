@@ -35,6 +35,8 @@ export interface ChunkMetadata {
   /** Position within the current document, used for neighbour expansion. */
   ordinal?: number
   lang?: string
+  /** Primary language for equality-filtered regional retrieval. */
+  language?: string
 }
 
 export interface ScoredChunk {

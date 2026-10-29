@@ -1,3 +1,4 @@
+import { normalizeLocale } from '@sitebot/config/i18n'
 import type { KnowledgeSource, ResolvedConfig } from '@sitebot/config'
 import { createNodeVectorStore } from '@sitebot/core/node'
 import type { Chunk, VectorStore } from '@sitebot/core'
@@ -109,6 +110,7 @@ export async function runIngest(
   const manifest = options.force ? null : previousManifest
   const fingerprint = {
     model: embedding.model,
+    documentPrefix: embedding.documentPrefix ?? '',
     ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
   }
   assertModelCompatible(manifest, fingerprint)
@@ -119,7 +121,8 @@ export async function runIngest(
     partialRun &&
     previousManifest !== null &&
     (previousManifest.model !== fingerprint.model ||
-      previousManifest.dimensions !== fingerprint.dimensions)
+      previousManifest.dimensions !== fingerprint.dimensions ||
+      (previousManifest.documentPrefix ?? '') !== fingerprint.documentPrefix)
   ) {
     throw new Error(
       'A model change requires rebuilding every source; rerun --force without --source.',
@@ -134,10 +137,11 @@ export async function runIngest(
   let semanticBatches = 0
   let semanticUnits = 0
   const embedBatch = async (texts: string[]) => {
-    if (options.embedder !== undefined) return options.embedder.embedBatch(texts)
+    const values = texts.map((text) => `${embedding.documentPrefix ?? ''}${text}`)
+    if (options.embedder !== undefined) return options.embedder.embedBatch(values)
     modelReady ??= createEmbeddingModel(embedding)
     const { model } = await modelReady
-    return embedChunks(model, texts, {
+    return embedChunks(model, values, {
       batchSize: embedding.batchSize,
       concurrency: options.concurrency ?? 4,
     })
@@ -149,7 +153,10 @@ export async function runIngest(
       const result = options.dryRun
         ? {
             embeddings: texts.map(() => [1]),
-            tokens: texts.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0),
+            tokens: texts.reduce(
+              (sum, text) => sum + Math.ceil(((embedding.documentPrefix ?? '') + text).length / 4),
+              0,
+            ),
           }
         : await embedBatch(texts)
       semanticTokens += result.tokens
@@ -167,16 +174,20 @@ export async function runIngest(
     // docs/06 §3.6 step 3: the manifest's validators make re-fetches
     // conditional, so an unchanged page costs a 304, not a download.
     const previous = new Map(
-      Object.values(existing?.documents ?? {}).map((doc) => [
-        doc.url,
-        {
-          contentHash: doc.contentHash,
-          ...(doc.etag === undefined ? {} : { etag: doc.etag }),
-          ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
-        },
-      ]),
+      Object.values(existing?.lang === source.lang ? (existing?.documents ?? {}) : {}).map(
+        (doc) => [
+          doc.url,
+          {
+            contentHash: doc.contentHash,
+            ...(doc.lang === undefined ? {} : { lang: doc.lang }),
+            ...(doc.etag === undefined ? {} : { etag: doc.etag }),
+            ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
+          },
+        ],
+      ),
     )
     const documents = await loadSource(source, config, options, previous)
+    for (const document of documents) document.lang = normalizeLocale(source.lang) ?? document.lang
     progress(`${source.type.padEnd(8)} ${labelOf(source)}: ${documents.length} documents`)
 
     const remaining = new Set(Object.keys(existing?.documents ?? {}))
@@ -200,7 +211,7 @@ export async function runIngest(
       const status: PlannedDocument['status'] =
         before === undefined
           ? 'added'
-          : before.contentHash === raw.contentHash
+          : before.contentHash === raw.contentHash && before.lang === raw.lang
             ? 'unchanged'
             : 'changed'
       const chunks =
@@ -214,7 +225,12 @@ export async function runIngest(
         const content = JSON.stringify([chunk.headingPath, chunk.text])
         const occurrence = occurrences.get(content) ?? 0
         occurrences.set(content, occurrence + 1)
-        chunk.id = chunkId(id, raw.url, content, occurrence)
+        chunk.id = chunkId(
+          id,
+          raw.url,
+          raw.lang === undefined ? content : JSON.stringify([content, raw.lang]),
+          occurrence,
+        )
       }
       if (before !== undefined && status === 'changed') {
         const nextIds = new Set(chunks.map((chunk) => chunk.id))
@@ -271,7 +287,11 @@ export async function runIngest(
         ),
       0,
     )
-  const estimatedTokens = toEmbed.reduce((total, { chunk }) => total + chunk.tokens, 0)
+  const estimatedTokens = toEmbed.reduce(
+    (total, { chunk }) =>
+      total + chunk.tokens + Math.ceil((embedding.documentPrefix?.length ?? 0) / 4),
+    0,
+  )
 
   // ── 2. embed + write ─────────────────────────────────────────────────────
   let embeddingTokens = 0
@@ -310,7 +330,9 @@ export async function runIngest(
           updatedAt: entry.document.updatedAt,
           tokens: entry.chunk.tokens,
           ordinal: entry.chunk.ordinal,
-          ...(entry.document.lang === undefined ? {} : { lang: entry.document.lang }),
+          ...(entry.document.lang === undefined
+            ? {}
+            : { lang: entry.document.lang, language: entry.document.lang.split('-')[0] }),
         },
       }))
     }
@@ -338,6 +360,8 @@ export async function runIngest(
                   contentHash: doc.document.contentHash,
                   updatedAt: doc.document.updatedAt,
                   ordinal: chunk.ordinal,
+                  lang: doc.document.lang,
+                  language: doc.document.lang?.split('-')[0],
                 },
               }
             })
@@ -365,6 +389,7 @@ export async function runIngest(
       const next: Manifest = {
         version: 1,
         model: fingerprint.model,
+        documentPrefix: fingerprint.documentPrefix,
         ...(embedding.dimensions === undefined ? {} : { dimensions: embedding.dimensions }),
         builtAt: new Date().toISOString(),
         sources: partialRun && previousManifest !== null ? { ...previousManifest.sources } : {},
@@ -375,6 +400,7 @@ export async function runIngest(
           documents[doc.document.url] = {
             url: doc.document.url,
             contentHash: doc.document.contentHash,
+            ...(doc.document.lang === undefined ? {} : { lang: doc.document.lang }),
             chunkHashes: doc.keptChunkHashes ?? doc.chunks.map((chunk) => chunk.id),
             ...(doc.etag === undefined ? {} : { etag: doc.etag }),
             ...(doc.lastModified === undefined ? {} : { lastModified: doc.lastModified }),
@@ -383,6 +409,7 @@ export async function runIngest(
         next.sources[idOf(plan.source)] = {
           id: idOf(plan.source),
           type: plan.source.type,
+          ...(plan.source.lang === undefined ? {} : { lang: plan.source.lang }),
           label: plan.label,
           documents,
         }
@@ -483,7 +510,10 @@ async function loadSource(
   source: KnowledgeSource,
   config: ResolvedConfig,
   options: IngestOptions,
-  previous: Map<string, { contentHash: string; etag?: string; lastModified?: string }>,
+  previous: Map<
+    string,
+    { contentHash: string; lang?: string; etag?: string; lastModified?: string }
+  >,
 ): Promise<RawDocument[]> {
   const http: HttpFetchOptions = {
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),

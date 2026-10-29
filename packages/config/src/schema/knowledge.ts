@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LocaleSchema } from './ui.js'
 import { GlobSchema, SelectorSchema } from './primitives.js'
 
 export const SOURCE_TYPES = ['sitemap', 'crawl', 'files', 'openapi', 'text', 'json'] as const
@@ -22,6 +23,7 @@ export const EMBEDDING_PROVIDERS = [
 export const SitemapSourceSchema = z.strictObject({
   type: z.literal('sitemap'),
   id: z.string().min(1).optional(),
+  lang: LocaleSchema.optional().describe('Source language; overrides detected HTML lang.'),
   url: z.string().min(1),
   include: z.array(GlobSchema).default([]),
   exclude: z.array(GlobSchema).default([]),
@@ -31,6 +33,7 @@ export const SitemapSourceSchema = z.strictObject({
 export const CrawlSourceSchema = z.strictObject({
   type: z.literal('crawl'),
   id: z.string().min(1).optional(),
+  lang: LocaleSchema.optional().describe('Source language; overrides detected HTML lang.'),
   url: z.string().min(1),
   maxDepth: z.number().int().min(0).default(3),
   maxPages: z.number().int().positive().optional(),
@@ -42,6 +45,7 @@ export const CrawlSourceSchema = z.strictObject({
 export const FilesSourceSchema = z.strictObject({
   type: z.literal('files'),
   id: z.string().min(1).optional(),
+  lang: LocaleSchema.optional().describe('Source language; overrides detected HTML lang.'),
   glob: GlobSchema,
   baseUrl: z
     .string()
@@ -53,6 +57,7 @@ export const OpenApiSourceSchema = z
   .strictObject({
     type: z.literal('openapi'),
     id: z.string().min(1).optional(),
+    lang: LocaleSchema.optional().describe('Source language; overrides detected HTML lang.'),
     url: z.string().min(1).optional(),
     path: z.string().min(1).optional(),
   })
@@ -70,12 +75,14 @@ export const OpenApiSourceSchema = z
 export const TextSourceSchema = z.strictObject({
   type: z.literal('text'),
   id: z.string().min(1),
+  lang: LocaleSchema.optional(),
   content: z.string().min(1),
 })
 
 export const JsonSourceSchema = z.strictObject({
   type: z.literal('json'),
   id: z.string().min(1).optional(),
+  lang: LocaleSchema.optional().describe('Source language; overrides detected HTML lang.'),
   path: z.string().min(1),
   jsonPath: z.string().min(1).optional(),
   template: z
@@ -125,6 +132,13 @@ export const EmbeddingSchema = z.strictObject({
   baseUrl: z.string().optional(),
   dimensions: z.number().int().positive().optional(),
   batchSize: z.number().int().positive().default(96),
+  documentPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Model-specific text prefix for indexed documents. Changing it requires ingest --force.',
+    ),
+  queryPrefix: z.string().optional().describe('Model-specific text prefix for retrieval queries.'),
 })
 
 // ── store ───────────────────────────────────────────────────────────────────
@@ -178,6 +192,12 @@ export const RetrievalSchema = z.strictObject({
   minScore: z.number().min(0).max(1).default(0.3),
   maxContextTokens: z.number().int().positive().default(3000),
   includeCitations: z.boolean().default(true),
+  languagePreference: z
+    .enum(['relevance', 'locale-first'])
+    .default('relevance')
+    .describe(
+      'Rank all languages by relevance (locale breaks ties), or prefer suitable locale results before falling back.',
+    ),
   rerank: z
     .union([
       z.boolean(),

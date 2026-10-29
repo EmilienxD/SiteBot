@@ -18,3 +18,5 @@ export { createController } from './chat.js'
 export { Panel, PanelBoundary } from './panel.js'
 export { IframePanel } from './iframe-panel.js'
 export { panelStyles } from './panel-styles.js'
+
+export { createStrings } from './strings.js'

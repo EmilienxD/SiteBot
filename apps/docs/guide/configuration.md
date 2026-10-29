@@ -43,11 +43,19 @@ config. In your own server code, pass `loadConfig(path, { dotenv: true })` to ge
 
 `mode` is the main policy switch.
 
-- **`chat`** (default) is one step. The model may call read-only tools, then answers. It's cheap,
-  predictable, and needs no session storage.
+- **`chat`** (default) allows read-only tool steps followed by an answer within `agent.maxSteps` and
+  `agent.stopWhen` limits. With no tool calls it still uses one model call. No approval storage is needed.
 - **`agent`** allows multiple steps, up to `agent.maxSteps`, and tools that change things. Every
   writable tool shows the visitor an approval card first. Approvals must survive a page reload, so agent
   mode needs persistent `storage` (sqlite, redis, postgres or custom).
+
+Both modes reserve the final permitted step for an answer when `agent.onMaxSteps: summarize`.
+`agent.toolChoice` applies in both modes: `auto` lets the model decide, `required` requires a tool on
+nonfinal steps, and `none` prevents tool calls. With no available tools, choice is always `none`.
+Approval settings apply only to agent mode. The read-only chat filter always remains in force.
+For a public documentation Q&A assistant, use `tools: []` and `knowledge.retrieval.mode: tool` as in
+the [docs assistant recipe](/recipes/docs-assistant). Knowledge search remains available with this
+empty list, while browser effects and mutations have no server-side handler.
 
 ## What the assistant knows
 

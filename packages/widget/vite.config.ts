@@ -35,6 +35,9 @@ export default defineConfig({
     // entry and the panel and therefore loads eagerly with the launcher.
     rollupOptions: {
       output: {
+        // Vite's ES-library preset leaves codegen unminified. This artifact is
+        // also a drop-in script, so minify whitespace while retaining annotations.
+        minify: { compress: true, mangle: true, codegen: true },
         chunkFileNames: (chunk) =>
           chunk.name === 'panel-chunk' ? 'sitebot-panel.js' : 'sitebot-shared.js',
       },

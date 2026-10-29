@@ -649,7 +649,7 @@ describe('data parts', () => {
     await controller.send('Help')
     expect(seen).toContain('Searching…')
     expect(controller.statusText).toBeUndefined()
-    expect(controller.config.ui.messages.suggestions).toEqual([
+    expect(controller.suggestions).toEqual([
       { label: 'More', action: { type: 'send', text: 'More' } },
     ])
     expect(controller.handoff).toMatchObject({ message: 'We will email you.' })

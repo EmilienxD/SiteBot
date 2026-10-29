@@ -144,7 +144,8 @@ export const ADAPTERS: Record<ProviderId, ProviderFactory> = {
   // port, overridable with backend.baseUrl.
   ollama: standardAdapter('ollama', 'createOpenAICompatible', {
     envVar: null,
-    defaults: { name: 'ollama', baseURL: 'http://localhost:11434/v1' },
+    // Ollama only reports streamed token counts when explicitly requested.
+    defaults: { name: 'ollama', baseURL: 'http://localhost:11434/v1', includeUsage: true },
   }),
   // The model id is the Azure *deployment* name; the resource comes from
   // AZURE_RESOURCE_NAME unless backend.baseUrl points at the endpoint.

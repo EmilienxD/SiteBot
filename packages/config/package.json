@@ -1,7 +1,7 @@
 {
   "name": "@sitebot/config",
   "version": "0.0.0",
-  "description": "Schema, loader and types for the SiteBot configuration file. Layer 1 — importable from the browser.",
+  "description": "Schema, loader and types for the SiteBot configuration file. Layer 1 \u00e2\u20ac\u201d importable from the browser.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/config#readme",
   "repository": {
     "type": "git",
@@ -39,7 +39,37 @@
       }
     },
     "./schema/chatbot.schema.json": "./schema/chatbot.schema.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./i18n": {
+      "import": {
+        "types": "./dist/i18n/index.d.ts",
+        "default": "./dist/i18n/index.js"
+      },
+      "require": {
+        "types": "./dist/i18n/index.d.cts",
+        "default": "./dist/i18n/index.cjs"
+      }
+    },
+    "./i18n/locale": {
+      "import": {
+        "types": "./dist/i18n/locale.d.ts",
+        "default": "./dist/i18n/locale.js"
+      },
+      "require": {
+        "types": "./dist/i18n/locale.d.cts",
+        "default": "./dist/i18n/locale.cjs"
+      }
+    },
+    "./i18n/launcher": {
+      "import": {
+        "types": "./dist/i18n/launcher.d.ts",
+        "default": "./dist/i18n/launcher.js"
+      },
+      "require": {
+        "types": "./dist/i18n/launcher.d.cts",
+        "default": "./dist/i18n/launcher.cjs"
+      }
+    }
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

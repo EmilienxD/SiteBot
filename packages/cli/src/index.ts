@@ -7,6 +7,7 @@
  */
 
 import { isEnvSourced, isMcpImport, type ResolvedConfig } from '@sitebot/config'
+import { validateBudgetPricing } from '@sitebot/core'
 
 export interface CommandSpec {
   readonly name: string
@@ -91,6 +92,14 @@ export function productionDoctor(
     'budget alerting',
     budgetAlerting,
     'A daily USD budget and budget_exceeded webhook alert are configured.',
+  )
+  const pricingErrors = validateBudgetPricing(config)
+  add(
+    'budget pricing',
+    pricingErrors.length === 0,
+    pricingErrors.length === 0
+      ? 'All models used with a daily USD cap have pricing.'
+      : pricingErrors.map((error) => `${error.message} ${error.fix}`).join(' '),
   )
   add(
     'rateLimit store',

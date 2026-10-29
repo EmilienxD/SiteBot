@@ -1,5 +1,5 @@
+import { createTranslator, localeTables, resolveLocale } from '@sitebot/config/i18n'
 import {
-  convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
   dynamicTool,
@@ -11,7 +11,12 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from 'ai'
-import { toPublicConfig, type ProviderId, type ResolvedConfig } from '@sitebot/config'
+import {
+  ConfigValidationError,
+  toPublicConfig,
+  type ProviderId,
+  type ResolvedConfig,
+} from '@sitebot/config'
 import { resolvePolicy } from './agent/policy.js'
 import {
   CHECKPOINT_TTL_MS,
@@ -28,6 +33,7 @@ import {
 import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.js'
 import { lastUserMessage, mergeHistory, settleDanglingToolCalls } from './session/history.js'
 import { retrieve } from './knowledge/retrieve.js'
+import { KnowledgeEvidence, searchKnowledge } from './knowledge/search.js'
 import type { KnowledgeDeps, Citation } from './knowledge/types.js'
 import { composePrompt, type ComposedPrompt, type KnowledgeSnippet } from './prompt/compose.js'
 import { cachedSystem } from './prompt/cache.js'
@@ -38,7 +44,7 @@ import { createSessionStore } from './session/factory.js'
 import type { SessionStore } from './session/store.js'
 import { contextBudget, estimateTokens, truncateHistory } from './session/truncate.js'
 import defaultPricing from '../pricing.json'
-import { usageCost, type PricingTable } from './guards/budget.js'
+import { usageCost, validateBudgetPricing, type PricingTable } from './guards/budget.js'
 import { errorResponse, mapError } from './stream/errors.js'
 import { EngineError } from './stream/errors.js'
 import { awaitFirstOutput } from './stream/start.js'
@@ -110,6 +116,9 @@ export function createEngine(
   deps: EngineDeps = {},
   options: EngineOptions = {},
 ): Engine {
+  const pricingErrors = validateBudgetPricing(config)
+  if (pricingErrors.length > 0) throw new ConfigValidationError(pricingErrors)
+
   const logger =
     deps.logger ??
     createLogger({
@@ -183,7 +192,7 @@ export function createEngine(
     session: Awaited<ReturnType<SessionStore['get']>>,
     resumeRunId?: string,
     activeChain = chain,
-    knowledge?: { enabled: boolean; citations: Citation[] },
+    knowledge?: { enabled: boolean; evidence: KnowledgeEvidence },
     composed?: ComposedPrompt,
     progress: { stepsTaken?: number; tokensUsed?: number; activeMs?: number } = {},
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
@@ -209,6 +218,7 @@ export function createEngine(
       ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
       mcpPool,
       ...(knowledgeDeps === undefined ? {} : { knowledge: knowledgeDeps }),
+      ...(knowledge === undefined ? {} : { knowledgeEvidence: knowledge.evidence }),
       onEvent: async (event, data) => {
         dispatcher.emit(event, data, { requestId: ctx.requestId, sessionId: ctx.sessionId })
         if (event === 'feedback') await runHook(hooks, 'onFeedback', ctx, data, ctx)
@@ -221,68 +231,46 @@ export function createEngine(
     let completedSteps = 0
 
     // `search_knowledge_base` — the engine-owned side of retrieval mode `tool`
-    // and `hybrid`. It exists without a `tools` config entry because the model
-    // cannot call what the config does not declare in a chat-mode policy, and
-    // the tool policy block must be able to describe it unconditionally.
-    if (knowledge?.enabled && policy.retrieval !== 'always') {
+    // and `hybrid`. Keep explicitly configured handlers (including disabled or
+    // scoped declarations) under the registry's existing policy.
+    if (
+      knowledge?.enabled &&
+      policy.retrieval !== 'always' &&
+      !config.tools.some((entry) => !('from' in entry) && entry.name === 'search_knowledge_base')
+    ) {
       tools['search_knowledge_base'] = dynamicTool({
         description:
           "Search the site's knowledge base for pages relevant to a question. Returns numbered results with [n], title, url and text.",
         inputSchema: jsonSchema({
           type: 'object',
           properties: {
-            query: { type: 'string', description: 'What to search for.' },
+            query: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 4000,
+              description: 'What to search for.',
+            },
           },
           required: ['query'],
         } as never),
         execute: async (input: unknown) => {
-          if (knowledgeDeps?.store === undefined || knowledgeDeps.embedder === undefined) {
-            return { error: 'not_configured' }
-          }
-          const query =
-            typeof input === 'object' && input !== null
-              ? String((input as Record<string, unknown>).query ?? '')
-              : ''
-          if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
-          try {
-            const result = await retrieve(
-              { ...knowledgeDeps, store: knowledgeDeps.store, embedder: knowledgeDeps.embedder },
-              query,
-              config,
-            )
-            knowledge.citations = result.hits.map((hit, index) => ({
-              id: `c${index + 1}`,
-              title: hit.title,
-              url: hit.url,
-              snippet: hit.text.slice(0, 280),
-              score: hit.score,
-            }))
-            if (result.hits.length === 0) {
-              return {
-                results: [],
-                note: 'No relevant documentation found. Say so rather than guessing.',
-              }
-            }
-            return {
-              results: result.hits.map((hit, index) => ({
-                n: index + 1,
-                title: hit.title,
-                url: hit.url,
-                text: hit.text,
-                score: hit.score,
-              })),
-            }
-          } catch (error) {
-            ctx.logger.warn('knowledge retrieval failed', { error })
-            return {
-              results: [],
-              note: 'Search is temporarily unavailable. Answer from the page context or say you do not know.',
-            }
-          }
+          const override = await runHook(
+            hooks,
+            'onToolCall',
+            ctx,
+            { name: 'search_knowledge_base', input },
+            ctx,
+          )
+          return override !== undefined
+            ? override
+            : searchKnowledge(input, config, knowledgeDeps, ctx, knowledge.evidence)
         },
       } as unknown as Parameters<typeof dynamicTool>[0]) as unknown as (typeof tools)[string]
     }
 
+    // Do not rely on a provider honoring `tool_choice: none` to suppress
+    // execution. In particular, some compatible local endpoints ignore it.
+    const callableTools = policy.toolChoice === 'none' ? {} : tools
     const result = await runChain({
       entries: activeChain,
       onFallback: (event) => {
@@ -315,8 +303,8 @@ export function createEngine(
           model: resolved.model,
           system: cachedSystem(entry.provider, system, composed),
           messages,
-          tools,
-          toolChoice: policy.toolChoice,
+          tools: callableTools,
+          toolChoice: Object.keys(callableTools).length > 0 ? policy.toolChoice : 'none',
           stopWhen: policy.stopWhen,
           ...(policy.summarizeAtStep === undefined
             ? {}
@@ -329,7 +317,7 @@ export function createEngine(
                         system: (() => {
                           const cached = cachedSystem(entry.provider, system, composed)
                           const instruction =
-                            'You have reached the final step. Summarize the useful results already gathered and answer without calling another tool.'
+                            'You have reached the final step. Answer from the evidence already gathered without calling another tool. Cite only sources that support your claims; if evidence is insufficient, say so plainly. Keep the response in the requested language.'
                           return typeof cached === 'string'
                             ? `${cached}\n\n${instruction}`
                             : [...cached, { role: 'system' as const, content: instruction }]
@@ -379,7 +367,7 @@ export function createEngine(
           },
           // `totalUsage`, not `usage`: the latter is the last step only, and a
           // multi-step agent run would be billed — and budgeted — for one step.
-          onFinish: ({ totalUsage: usage, finishReason }) => {
+          onFinish: async ({ totalUsage: usage, finishReason }) => {
             totalTokens = usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
             finalUsage = {
               inputTokens: usage.inputTokens ?? 0,
@@ -394,7 +382,7 @@ export function createEngine(
                 { ...(defaultPricing as PricingTable), ...config.backend.pricing },
               ),
             }
-            void ctx.budget.record(
+            await ctx.budget.record(
               {
                 inputTokens: usage.inputTokens ?? 0,
                 outputTokens: usage.outputTokens ?? 0,
@@ -424,7 +412,9 @@ export function createEngine(
         const uiStream = streamed.toUIMessageStream<UIMessage>({
           originalMessages,
           sendReasoning: config.ui.behaviour.showReasoning,
-          onError: (error) => mapError(error, errorOptions).message,
+          onError: (error) =>
+            mapError(error, { ...errorOptions, locale: ctx.locale, localization: config.ui })
+              .message,
         }) as ReadableStream<UIMessageChunk>
 
         const committed = await awaitFirstOutput(uiStream, { rawError: () => rawError })
@@ -433,8 +423,11 @@ export function createEngine(
           runId,
           clientTools,
           config,
+          locale: ctx.locale,
           debug,
-          status: knowledge?.enabled ? 'Searching documentation…' : undefined,
+          status: knowledge?.enabled
+            ? createTranslator(config.ui, ctx.locale)('searching')
+            : undefined,
           usage: () => finalUsage,
         })
 
@@ -442,14 +435,16 @@ export function createEngine(
           knowledge === undefined
             ? annotated
             : appendCitations(annotated, {
-                items: () => knowledge.citations,
+                items: () => knowledge.evidence.citations,
                 include: config.knowledge.retrieval.includeCitations,
               })
 
         const assembled = createUIMessageStream<UIMessage>({
           originalMessages,
           execute: ({ writer }) => writer.merge(withCitations),
-          onError: (error) => mapError(error, errorOptions).message,
+          onError: (error) =>
+            mapError(error, { ...errorOptions, locale: ctx.locale, localization: config.ui })
+              .message,
           onFinish: async ({ responseMessage }) => {
             if (responseMessage.id === '' && responseMessage.parts.length === 0) return
             const current =
@@ -461,7 +456,19 @@ export function createEngine(
                 updatedAt: now(),
               } satisfies NonNullable<typeof session>)
             const messages = replaceOrAppend(current.messages, responseMessage)
-            const next = { ...current, messages }
+            const next = {
+              ...current,
+              messages,
+              state: {
+                ...current.state,
+                nextCitationNumber: Math.max(
+                  typeof current.state?.['nextCitationNumber'] === 'number'
+                    ? current.state['nextCitationNumber']
+                    : 1,
+                  knowledge?.evidence.nextNumber ?? 1,
+                ),
+              },
+            }
             const pending = pendingRun(responseMessage, runId, now())
             if (pending === null) {
               if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
@@ -490,6 +497,7 @@ export function createEngine(
 
   return {
     async handleChat(request: ChatRequest, ctx: RequestContext): Promise<Response> {
+      ctx = { ...ctx, locale: resolveLocale(config.ui, { override: request.locale ?? ctx.locale }) }
       try {
         return await withSpan(tracer, 'sitebot.handleChat', async (span) => {
           span.setAttribute('sitebot.mode', config.mode)
@@ -512,10 +520,15 @@ export function createEngine(
           // Modes: `always`/`hybrid` embed the latest user message and inject
           // hits into the system prompt; `tool`/`hybrid` register
           // `search_knowledge_base`. Degraded knowledge never fails the chat:
-          // the block is omitted and the tool absent.
-          const knowledgeRequest: { enabled: boolean; citations: Citation[] } = {
+          // the tool is absent and the prompt explains the missing evidence.
+          const sourceSession =
+            config.storage.type === 'none' ? null : await sessionStore.get(request.sessionId)
+          const knowledgeRequest = {
             enabled: false,
-            citations: [],
+            evidence: new KnowledgeEvidence(
+              sourceSession?.messages,
+              sourceSession?.state?.['nextCitationNumber'],
+            ),
           }
           let documents: KnowledgeSnippet[] = []
           let knowledgeNote: string | undefined
@@ -541,21 +554,13 @@ export function createEngine(
                     },
                     query,
                     config,
+                    ctx.locale,
                   )
-                  documents = result.hits
-                  knowledgeRequest.citations = result.hits.map((hit, index) => ({
-                    id: `c${index + 1}`,
-                    title: hit.title,
-                    url: hit.url,
-                    snippet: hit.text.slice(0, 280),
-                    score: hit.score,
-                  }))
-                  if (result.hits.length === 0 && result.belowThreshold) {
+                  const numbers = knowledgeRequest.evidence.add(result.hits)
+                  documents = result.hits.map((hit, index) => ({ ...hit, n: numbers[index]! }))
+                  if (result.hits.length === 0) {
                     knowledgeNote =
                       'No relevant documentation was found for this question. Say so rather than guessing.'
-                  } else if (result.hits.length === 0) {
-                    knowledgeNote =
-                      'The knowledge base contains no indexed content yet. Answer from what you have.'
                   }
                 } catch (error) {
                   ctx.logger.warn('knowledge retrieval failed', { error })
@@ -566,10 +571,16 @@ export function createEngine(
             }
           }
 
+          if (knowledgeConfigured && !knowledgeRequest.enabled) {
+            knowledgeNote =
+              'Documentation search is temporarily unavailable. If the available site context does not cover the question, say you do not know. Never invent facts or citations.'
+          }
+
           const composed = composePrompt({
             config,
-            ctx: { pageContext: ctx.pageContext, identity: ctx.identity },
+            ctx: { pageContext: ctx.pageContext, identity: ctx.identity, locale: ctx.locale },
             retrieval: policy.retrieval,
+            knowledgeSearchAvailable: knowledgeRequest.enabled,
             documents,
             note: knowledgeNote,
           })
@@ -624,6 +635,7 @@ export function createEngine(
                 ctx.requestId,
                 loaded.pending.responseMessage.id,
                 resumedPolicy.budgetExhausted,
+                ctx.locale,
               )
             }
           } else {
@@ -660,7 +672,7 @@ export function createEngine(
           )
           if (budgetDecision === 'block') {
             if (config.security.budget.onExceeded === 'message') {
-              return budgetMessageResponse(ctx.requestId)
+              return budgetMessageResponse(ctx.requestId, ctx.locale)
             }
             throw new EngineError('budget_exceeded')
           }
@@ -681,8 +693,9 @@ export function createEngine(
             { requestId: ctx.requestId, sessionId: ctx.sessionId },
           )
 
+          knowledgeRequest.evidence.retain(truncated.messages)
           const { stream, modelId } = await startStream(
-            await convertToModelMessages(truncated.messages),
+            await knowledgeRequest.evidence.modelMessages(truncated.messages),
             truncated.messages,
             system,
             ctx,
@@ -728,7 +741,11 @@ export function createEngine(
           { code: mapError(error, errorOptions).code },
           { requestId: ctx.requestId, sessionId: ctx.sessionId },
         )
-        return errorResponse(error, errorOptions)
+        return errorResponse(error, {
+          ...errorOptions,
+          locale: ctx.locale,
+          localization: config.ui,
+        })
       }
     },
 
@@ -959,15 +976,27 @@ export function createEngine(
     },
 
     async dispose(): Promise<void> {
-      await dispatcher.drain()
-      await sessionStore.dispose?.()
-      await rateLimitStore.dispose?.()
-      await knowledgeDeps?.store?.close()
-      await mcpPool.dispose()
+      const failures: unknown[] = []
+      // One unreachable store must not leak the other owned resources during
+      // shutdown. Preserve the drain/close order and report every failure.
+      for (const cleanup of [
+        () => dispatcher.drain(),
+        () => sessionStore.dispose?.(),
+        () => rateLimitStore.dispose?.(),
+        () => knowledgeDeps?.store?.close(),
+        () => mcpPool.dispose(),
+      ]) {
+        try {
+          await cleanup()
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      if (failures.length > 0) throw new AggregateError(failures, 'Engine resource cleanup failed.')
     },
   }
 
-  function budgetMessageResponse(requestId: string): Response {
+  function budgetMessageResponse(requestId: string, locale: string): Response {
     const id = 'budget-message'
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
@@ -975,7 +1004,7 @@ export function createEngine(
         writer.write({
           type: 'text-delta',
           id,
-          delta: 'The assistant has reached its usage limit for now. Please try again later.',
+          delta: createTranslator(config.ui, locale)('budgetExceeded'),
         })
         writer.write({ type: 'text-end', id })
       },
@@ -1094,18 +1123,23 @@ export function createEngine(
    * without calling the model. The final summary belongs inside the ceiling.
    * The client tool's result is already in the stored transcript.
    */
-  function limitResponse(requestId: string, messageId: string, budgetExhausted = false): Response {
+  function limitResponse(
+    requestId: string,
+    messageId: string,
+    budgetExhausted = false,
+    locale = 'en',
+  ): Response {
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
         writer.write({ type: 'start', messageId })
         if (budgetExhausted || config.agent.onMaxSteps !== 'silent') {
           const mapped = mapError(
             new EngineError(budgetExhausted ? 'budget_exceeded' : 'max_steps_exceeded'),
-            errorOptions,
+            { ...errorOptions, locale, localization: config.ui },
           )
           writer.write({
             type: 'data-error',
-            data: { code: mapped.code, message: mapped.message, retryable: false },
+            data: { ...mapped, retryable: false },
           } as UIMessageChunk)
         }
         writer.write({ type: 'finish', finishReason: 'stop' } as UIMessageChunk)
@@ -1158,7 +1192,7 @@ export function createEngine(
         maxRetries: 1,
         abortSignal: ctx.signal,
       })
-      void ctx.budget.record(
+      await ctx.budget.record(
         {
           inputTokens: result.usage.inputTokens ?? 0,
           outputTokens: result.usage.outputTokens ?? 0,
@@ -1230,7 +1264,11 @@ function appendCitations(
   const emit = (controller: TransformStreamDefaultController<UIMessageChunk>) => {
     const items = options.items()
     if (items.length > 0)
-      controller.enqueue({ type: 'data-citations', data: { items } } as UIMessageChunk)
+      controller.enqueue({
+        type: 'data-citations',
+        id: 'knowledge-citations',
+        data: { items },
+      } as UIMessageChunk)
     emitted = true
   }
   return stream.pipeThrough(
@@ -1305,6 +1343,7 @@ function annotateAgentStream(
     clientTools: Set<string>
     config: ResolvedConfig
     debug: boolean
+    locale: string
     status?: string
     usage: () => { inputTokens: number; outputTokens: number; costUsd: number } | undefined
   },
@@ -1316,17 +1355,22 @@ function annotateAgentStream(
       transform(chunk, controller) {
         if (chunk.type === 'start') {
           controller.enqueue(chunk)
-          if (options.config.ui.messages.suggestions.length > 0) {
+          const ui = options.config.ui
+          const suggestions = [
+            ...localeTables(ui.translations, ui.locale === 'auto' ? 'en' : ui.locale),
+            ...localeTables(ui.translations, options.locale),
+          ].reduce((items, copy) => copy.messages?.suggestions ?? items, ui.messages.suggestions)
+          if (suggestions.length > 0) {
             controller.enqueue({
               type: 'data-suggestions',
-              data: { items: options.config.ui.messages.suggestions },
+              data: { items: suggestions, locale: options.locale },
             } as UIMessageChunk)
           }
           if (options.status) {
             controller.enqueue({
               type: 'data-status',
               transient: true,
-              data: { text: options.status },
+              data: { text: options.status, messageKey: 'searching' },
             } as UIMessageChunk)
           }
           return

@@ -31,11 +31,13 @@ export function ChatWidget({ className, onEvent, ...options }: ChatWidgetProps) 
     options.position,
     options.theme,
     options.nonce,
+    options.locale,
   ])
   return createElement(WIDGET_ELEMENT_NAME, {
     ref: reference,
     class: className,
     'data-endpoint': options.endpoint,
     'data-key': options.publicKey,
+    'data-locale': options.locale,
   })
 }

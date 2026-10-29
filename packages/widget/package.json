@@ -43,11 +43,11 @@
   },
   "dependencies": {
     "@preact/signals": "^2.10.1",
-    "preact": "^10.29.8"
+    "preact": "^10.29.8",
+    "@sitebot/config": "workspace:*"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
-    "@sitebot/config": "workspace:*",
     "@size-limit/file": "^13.0.3",
     "ai": "^6.0.240",
     "jsdom": "^27.0.0",

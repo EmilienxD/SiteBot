@@ -1,3 +1,5 @@
+import { createLauncherStrings } from '@sitebot/config/i18n/launcher'
+import { hostLocale, localizedUi } from './locale.js'
 import { render, type JSX } from 'preact'
 import type { PublicConfig } from '@sitebot/config'
 import { matchesAny } from './paths.js'
@@ -24,6 +26,21 @@ type PanelChunk = typeof PanelModule
 type ResolvedOptions = SiteBotOptions & { endpoint: string; publicKey: string }
 
 export class SiteChatElement extends HTMLElement {
+  static get observedAttributes(): string[] {
+    return ['data-locale']
+  }
+  attributeChangedCallback(): void {
+    this.updateLocale()
+  }
+  setLocale(locale?: string): void {
+    this.configure({ locale: locale ?? 'auto' })
+  }
+  updateLocale(): void {
+    const override = this.#options.locale ?? this.dataset.locale
+    if (this.#resolved) this.#resolved.locale = override
+    this.#controller?.setLocale?.(override)
+    this.render()
+  }
   #root?: ShadowRoot
   #mount?: HTMLDivElement
   #controller?: WidgetController
@@ -58,6 +75,7 @@ export class SiteChatElement extends HTMLElement {
   }
   configure(options: SiteBotOptions): void {
     this.#options = { ...this.#options, ...options }
+    this.updateLocale()
     if (this.isConnected && !this.#root) this.safe(() => void this.boot())
   }
   open(): void {
@@ -151,7 +169,12 @@ export class SiteChatElement extends HTMLElement {
     if (this.#root || !HTMLElement.prototype.attachShadow) return
     const endpoint = this.#options.endpoint ?? this.dataset.endpoint ?? '/api/chat'
     const publicKey = this.#options.publicKey ?? this.dataset.key ?? ''
-    const options: ResolvedOptions = { ...this.#options, endpoint, publicKey }
+    const options: ResolvedOptions = {
+      ...this.#options,
+      locale: this.#options.locale ?? this.dataset.locale,
+      endpoint,
+      publicKey,
+    }
     this.setAttribute(
       'style',
       `position:fixed!important;inset:0!important;width:0!important;height:0!important;z-index:${DEFAULT_Z_INDEX}!important;display:block!important`,
@@ -181,6 +204,17 @@ export class SiteChatElement extends HTMLElement {
     const onPopState = () => {
       if (this.#config?.ui.behaviour.resetOnNavigate) this.#controller?.reset()
     }
+    const languageObserver = new MutationObserver(() => this.updateLocale())
+    languageObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['lang'],
+    })
+    const onLanguage = () => this.updateLocale()
+    addEventListener('languagechange', onLanguage)
+    this.#cleanup.push(
+      () => languageObserver.disconnect(),
+      () => removeEventListener('languagechange', onLanguage),
+    )
     addEventListener('popstate', onPopState)
     this.#cleanup.push(() => removeEventListener('popstate', onPopState))
     this.#readyResolve()
@@ -265,7 +299,13 @@ export class SiteChatElement extends HTMLElement {
     } catch (error) {
       this.#loading = undefined
       console.warn('[SiteBot] failed to load the chat panel', error)
-      this.dispatch('error', { code: 'chunk_load_failed', message: 'The chat failed to load.' })
+      this.dispatch('error', {
+        code: 'chunk_load_failed',
+        message: createLauncherStrings(
+          this.#config!.ui,
+          hostLocale(this.#config!.ui, this.#resolved?.locale),
+        )('chatLoadFailed'),
+      })
     }
   }
 
@@ -296,7 +336,9 @@ export class SiteChatElement extends HTMLElement {
     const mount = this.#mount
     const config = this.#config
     if (!mount || !config) return
-    const ui = config.ui
+    const locale = hostLocale(config.ui, this.#resolved?.locale)
+    const ui = localizedUi(config.ui, locale)
+    const t = createLauncherStrings(ui, locale)
     const chunk = this.#chunk
     const controller = this.#controller
     const close = () => this.close()
@@ -314,7 +356,7 @@ export class SiteChatElement extends HTMLElement {
             theme={ui.theme.mode}
           />
         ) : (
-          <chunk.PanelBoundary close={close}>
+          <chunk.PanelBoundary close={close} t={chunk.createStrings(config.ui, locale)}>
             <chunk.Panel controller={controller} close={close} offline={offline} />
           </chunk.PanelBoundary>
         )
@@ -329,7 +371,8 @@ export class SiteChatElement extends HTMLElement {
           }}
           type="button"
           class={`launcher${left ? ' left' : ''}${ui.launcher.label ? ' pill' : ''}${this.#open ? ' open' : ''}`}
-          aria-label={ui.a11y.launcherAriaLabel}
+          lang={locale}
+          aria-label={t('launcherAriaLabel')}
           aria-expanded={this.#open}
           // docs/07 §8. Only while the panel is in this shadow root: in iframe
           // mode it lives in another document, where an id reference is void.

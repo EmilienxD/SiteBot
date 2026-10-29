@@ -40,9 +40,9 @@ const CITATIONS = [
 ]
 
 describe('citationList', () => {
-  it('returns every item when the text cites nothing (opaque context)', () => {
+  it('does not imply that uncited context supports an answer or abstention', () => {
     const message = messageWith(CITATIONS, 'Here is an answer without inline markers.')
-    expect(citationList(message, 'Here is an answer without inline markers.')).toHaveLength(3)
+    expect(citationList(message, 'Here is an answer without inline markers.')).toHaveLength(0)
   })
 
   it('shows only the citations the model actually referenced', () => {
@@ -63,5 +63,14 @@ describe('citationList', () => {
   it('ignores markers beyond the citation count', () => {
     const message = messageWith(CITATIONS, 'See [9].')
     expect(citationList(message, 'See [9].')).toHaveLength(0)
+  })
+
+  it('resolves sparse conversation IDs, regardless of position or repeated resume parts', () => {
+    const sources = [{ ...CITATIONS[2]!, id: 'c27' }, CITATIONS[1]!]
+    const message = messageWith(sources, 'Returns [2]; hours [27]; unknown [1].')
+    message.parts.push({ type: 'data-citations', data: { items: sources } } as never)
+    expect(citationList(message, 'Returns [2]; hours [27]; unknown [1].').map((c) => c.id)).toEqual(
+      ['c27', 'c2'],
+    )
   })
 })

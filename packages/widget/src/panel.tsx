@@ -1,9 +1,10 @@
+import { en, type MessageKey } from '@sitebot/config/i18n'
 import { Component, type ComponentChildren } from 'preact'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { UIMessage } from './types.js'
 import { Icon } from './icons.js'
 import { Markdown } from './markdown.js'
-import { createStrings, type Translate } from './strings.js'
+import { createStrings, localizedUi, type Translate } from './strings.js'
 import type { Citation, WidgetController } from './types.js'
 
 /** `data-citations` part, as emitted by the engine's `appendCitations`. */
@@ -57,8 +58,8 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
   const list = useRef<HTMLDivElement>(null)
   const lastScrollTop = useRef(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
-  const ui = controller.config.ui
-  const t = useMemo(() => createStrings(ui), [ui])
+  const ui = localizedUi(controller.config.ui, controller.locale)
+  const t = createStrings(controller.config.ui, controller.locale)
   const [emptyVisible, setEmptyVisible] = useState(ui.messages.emptyStateAfterMs === 0)
   const mobile = useMediaQuery(MOBILE_QUERY)
 
@@ -156,10 +157,10 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
   }
   const suggestions =
     ui.messages.suggestionsPersist || !visible.some((message) => message.role === 'user')
-      ? ui.messages.suggestions
+      ? (controller.suggestions ?? ui.messages.suggestions)
       : []
   const greeting = t('greeting')
-  const name = controller.config.name ?? 'Assistant'
+  const name = controller.config.name ?? t('assistantName')
   const avatar = <Avatar url={ui.panel.avatarUrl} name={name} />
 
   return (
@@ -169,7 +170,8 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
       class={`panel${ui.position === 'bottom-left' ? ' left' : ''}${framed ? ' framed' : ''}`}
       role="dialog"
       aria-modal={mobile ? 'true' : 'false'}
-      aria-label={ui.a11y.panelAriaLabel}
+      lang={controller.locale}
+      aria-label={t('panelAriaLabel')}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           // docs/07 §5: Escape blurs a composer with content before closing.
@@ -283,7 +285,11 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
         {state === 'error' && <ErrorBubble controller={controller} t={t} />}
         {controller.inlineError && state !== 'error' && (
           <div class="error inline-error" role="alert">
-            {t('providerError')}
+            {controller.inlineError.messageKey
+              ? t(controller.inlineError.messageKey, controller.inlineError.values)
+              : Object.hasOwn(en, controller.inlineError.code)
+                ? t(controller.inlineError.code as MessageKey)
+                : t('providerError')}
             {controller.inlineError.retryable && !busy && (
               <button type="button" class="button" onClick={() => void controller.retry()}>
                 {t('retry')}
@@ -294,9 +300,12 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
         {controller.handoff && <HandoffCard data={controller.handoff} t={t} />}
         {controller.usage && (
           <details class="usage">
-            <summary>Usage</summary>
-            {controller.usage.inputTokens} in / {controller.usage.outputTokens} out / $
-            {controller.usage.costUsd.toFixed(4)}
+            <summary>{t('usage')}</summary>
+            {t('usageDetails', {
+              input: controller.usage.inputTokens,
+              output: controller.usage.outputTokens,
+              cost: controller.usage.costUsd.toFixed(4),
+            })}
           </details>
         )}
       </div>
@@ -392,7 +401,7 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
  * recovery UI; the host page is never affected."
  */
 export class PanelBoundary extends Component<
-  { children: ComponentChildren; close: () => void },
+  { children: ComponentChildren; close: () => void; t?: Translate },
   { failed: boolean }
 > {
   override state = { failed: false }
@@ -402,15 +411,18 @@ export class PanelBoundary extends Component<
   }
   override render() {
     if (!this.state.failed) return this.props.children
+    const t =
+      this.props.t ??
+      createStrings({ locale: 'auto', strings: {}, messages: {}, a11y: {} } as never)
     return (
-      <div class="panel" role="dialog" aria-label="Chat assistant">
+      <div class="panel" role="dialog" aria-label={t('panelAriaLabel')}>
         <div class="offline" role="alert">
-          Something went wrong.
+          {t('internal_error')}
           <button type="button" class="button" onClick={() => this.setState({ failed: false })}>
-            Retry
+            {t('retry')}
           </button>
           <button type="button" class="button" onClick={this.props.close}>
-            Close
+            {t('close')}
           </button>
         </div>
       </div>
@@ -555,8 +567,9 @@ function MessageView({
 function ErrorBubble({ controller, t }: { controller: WidgetController; t: Translate }) {
   const error = controller.error
   const code = error?.code
-  const message =
-    code === 'rate_limited' || code === 'network'
+  const message = error?.messageKey
+    ? t(error.messageKey, error.values)
+    : code === 'rate_limited' || code === 'network'
       ? t('errorMessage')
       : code === 'budget_exceeded'
         ? t('budgetExceeded')
@@ -589,11 +602,11 @@ function HandoffCard({
   data: NonNullable<WidgetController['handoff']>
   t: Translate
 }) {
-  const target = String(data.target?.kind ?? 'support')
+  const target = String(data.target?.kind ?? t('support'))
   return (
     <div class="card handoff-card" role="status">
       <strong>{t('handoff', { target })}</strong>
-      <p>{data.message}</p>
+      <p>{data.messageKey ? t(data.messageKey) : data.message}</p>
       {data.ticketUrl && (
         <a href={data.ticketUrl} target="_blank" rel="noopener noreferrer">
           {t('openHandoff')}
@@ -610,15 +623,16 @@ function HandoffCard({
  * UI honest when retrieval surfaced context the model did not use.
  */
 export function citationList(message: UIMessage, text: string): Citation[] {
-  const part = (message.parts as unknown[]).find(isCitationsPart)
-  if (part === undefined) return []
-  const used = new Set<number>()
-  for (const match of text.matchAll(/\[(\d+)\]/g)) used.add(Number(match[1]))
-  // No visible markers (e.g. tool-only answer): still render the sources the
-  // engine attached — the intent of `includeCitations` is transparency, and
-  // hiding them because the model phrased around [n] would surprise a dev.
-  if (used.size === 0) return part.data.items
-  return part.data.items.filter((_, index) => used.has(index + 1))
+  const used = new Set<string>()
+  for (const match of text.matchAll(/\[([1-9]\d*)\]/g)) used.add(`c${match[1]}`)
+  const sources = new Map<string, Citation>()
+  for (const part of message.parts as unknown[]) {
+    if (!isCitationsPart(part)) continue
+    for (const citation of part.data.items) {
+      if (used.has(citation.id)) sources.set(citation.id, citation)
+    }
+  }
+  return [...sources.values()]
 }
 
 function CitationRow({
@@ -632,16 +646,16 @@ function CitationRow({
 }) {
   return (
     <div class="citations" role="group" aria-label={t('sources')}>
-      {citations.map((citation, index) => (
+      {citations.map((citation) => (
         <button
           key={citation.id}
           type="button"
           class="citation-chip"
           title={citation.snippet || citation.title}
-          aria-label={t('source', { n: index + 1, title: citation.title })}
+          aria-label={t('source', { n: citation.id.slice(1), title: citation.title })}
           onClick={() => onClick(citation)}
         >
-          <span class="citation-n">{index + 1}</span>
+          <span class="citation-n">{citation.id.slice(1)}</span>
           <span class="citation-title">{citation.title}</span>
         </button>
       ))}
@@ -751,7 +765,11 @@ function ApprovalCard({
       onKeyDown={(event) => trapFocus(event, card.current)}
     >
       <strong>{request?.title ?? t('approvalTitle')}</strong>
-      {risk && <span class={`risk ${risk}`}>{risk}</span>}
+      {risk && (
+        <span class={`risk ${risk}`}>
+          {t(({ low: 'riskLow', medium: 'riskMedium', high: 'riskHigh' } as const)[risk])}
+        </span>
+      )}
       <p>{request?.description ?? t('approvalBody', { tool: name })}</p>
       <details>
         <summary>{t('details')}</summary>

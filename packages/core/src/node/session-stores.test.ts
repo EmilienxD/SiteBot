@@ -88,6 +88,24 @@ const message = (id: string, text = id): UIMessage => ({
   parts: [{ type: 'text', text }],
 })
 
+describe('Redis session connection recovery', () => {
+  it('retries a failed connection and leaves an injected client owned by its caller', async () => {
+    const client = { ...fakeRedis(), isOpen: false, quit: vi.fn(async () => {}) }
+    client.connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('synthetic unavailable connection'))
+      .mockImplementation(async () => {
+        client.isOpen = true
+      })
+    const store = createRedisSessionStore({ url: 'redis://unused', client })
+    await expect(store.get('synthetic')).rejects.toThrow('synthetic unavailable connection')
+    await store.append('synthetic', [message('recovered')])
+    expect((await store.get('synthetic'))?.messages[0]?.id).toBe('recovered')
+    await store.dispose?.()
+    expect(client.quit).not.toHaveBeenCalled()
+  })
+})
+
 runSessionStoreConformance(
   'memory',
   async (o) =>

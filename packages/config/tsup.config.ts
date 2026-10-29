@@ -10,7 +10,13 @@ import { defineConfig } from 'tsup'
  * build instead of failing on it (docs/01-architecture.md §2).
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/node/index.ts'],
+  entry: [
+    'src/index.ts',
+    'src/node/index.ts',
+    'src/i18n/index.ts',
+    'src/i18n/locale.ts',
+    'src/i18n/launcher.ts',
+  ],
   format: ['esm', 'cjs'],
   dts: true,
   sourcemap: true,

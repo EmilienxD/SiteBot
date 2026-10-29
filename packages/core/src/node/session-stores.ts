@@ -1,5 +1,5 @@
 import { importOptional } from '../providers/optional-import.js'
-import { createClient } from 'redis'
+import { createStoreRedisClient } from './redis-client.js'
 import type { UIMessage } from 'ai'
 import type { SessionStore, SessionStoreOptions, StoredSession } from '../session/store.js'
 
@@ -29,7 +29,7 @@ export interface RedisSessionStoreOptions extends SessionStoreOptions {
 }
 
 export function createRedisSessionStore(options: RedisSessionStoreOptions): SessionStore {
-  const client = options.client ?? (createClient({ url: options.url }) as unknown as RedisLike)
+  const client = options.client ?? (createStoreRedisClient(options.url) as unknown as RedisLike)
   const owns = options.client === undefined
   const prefix = options.prefix ?? 'sitebot:'
   const ttlMs = (options.ttlSeconds ?? 2_592_000) * 1000
@@ -37,9 +37,14 @@ export function createRedisSessionStore(options: RedisSessionStoreOptions): Sess
   const now = options.now ?? (() => Date.now())
   const key = (id: string) => `${prefix}session:${id}`
   let connecting: Promise<unknown> | undefined
-  // One connect for the store's lifetime; an injected, already-open client
-  // is used as is.
-  const ready = () => (connecting ??= client.isOpen ? Promise.resolve() : client.connect())
+  const ready = () => {
+    if (connecting !== undefined) return connecting
+    if (client.isOpen) return Promise.resolve()
+    connecting = client.connect().finally(() => {
+      connecting = undefined
+    })
+    return connecting
+  }
 
   const store: SessionStore = {
     async get(id) {
@@ -79,6 +84,7 @@ export function createRedisSessionStore(options: RedisSessionStoreOptions): Sess
       await client.del(key(id))
     },
     async dispose() {
+      await connecting?.catch(() => {})
       if (owns && client.isOpen !== false) await client.quit?.()
     },
   }
@@ -110,10 +116,15 @@ export async function createPostgresSessionStore(
   const maxMessages = options.maxMessagesPerSession ?? 100
   const now = options.now ?? (() => Date.now())
 
-  await pool.query(
-    `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at BIGINT NOT NULL)`,
-  )
-  await pool.query(`CREATE INDEX IF NOT EXISTS ${table}_updated_at ON ${table} (updated_at)`)
+  try {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at BIGINT NOT NULL)`,
+    )
+    await pool.query(`CREATE INDEX IF NOT EXISTS ${table}_updated_at ON ${table} (updated_at)`)
+  } catch (error) {
+    if (owns) await pool.end?.().catch(() => {})
+    throw error
+  }
 
   const read = async (id: string): Promise<StoredSession | null> => {
     const { rows } = await pool.query(`SELECT data, updated_at FROM ${table} WHERE id = $1`, [id])

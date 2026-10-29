@@ -25,7 +25,7 @@ import {
   containsEnvPlaceholder,
   type ResolvedConfig,
 } from '@sitebot/config'
-import { createEngine, importProviderPackage } from '@sitebot/core'
+import { createEngine, importProviderPackage, validateBudgetPricing } from '@sitebot/core'
 import { connectStdioMcp, createNodeSessionStore, createSafeFetch } from '@sitebot/core/node'
 import { lazySessionStore } from '@sitebot/server/node'
 import { probeWebExtraction, readManifest } from '@sitebot/ingest'
@@ -163,6 +163,7 @@ export async function diagnose(
   options: DiagnoseOptions,
 ): Promise<DiagnosticReport> {
   const checks: Check[] = [
+    ...budgetPricingChecks(config),
     ...envChecks(config, options.env),
     ...(await providerChecks(config, options)),
     ...secretChecks(config),
@@ -172,6 +173,28 @@ export async function diagnose(
   ]
 
   return { checks, ok: !checks.some((check) => check.status === 'fail') }
+}
+
+function budgetPricingChecks(config: ResolvedConfig): Check[] {
+  const errors = validateBudgetPricing(config)
+  if (errors.length > 0) {
+    return errors.map((error) => ({
+      name: `budget pricing ${error.path}`,
+      status: 'fail',
+      detail: error.message,
+      ...(error.fix === undefined ? {} : { fix: error.fix }),
+    }))
+  }
+  return [
+    {
+      name: 'budget pricing',
+      status: config.security.budget.maxUsdPerDay === undefined ? 'skip' : 'pass',
+      detail:
+        config.security.budget.maxUsdPerDay === undefined
+          ? 'no daily USD cap configured'
+          : 'all primary, fallback and summary/degradation models have prices',
+    },
+  ]
 }
 
 /**
@@ -281,8 +304,15 @@ async function providerChecks(config: ResolvedConfig, options: DiagnoseOptions):
     }
   }
 
-  if (options.offline === true) {
-    checks.push({ name: 'provider health', status: 'skip', detail: 'skipped (--offline)' })
+  if (options.offline === true || validateBudgetPricing(config).length > 0) {
+    checks.push({
+      name: 'provider health',
+      status: 'skip',
+      detail:
+        options.offline === true
+          ? 'skipped (--offline)'
+          : 'fix budget pricing before checking engine health',
+    })
     return checks
   }
 

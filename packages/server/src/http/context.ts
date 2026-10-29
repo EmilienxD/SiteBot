@@ -1,3 +1,4 @@
+import { resolveLocale as selectLocale, type LocaleConfig } from '@sitebot/config/i18n'
 import type { Security } from '@sitebot/config'
 import { EngineError } from '@sitebot/core'
 
@@ -42,12 +43,28 @@ export function resolveClientIp(
   return chain[Math.max(0, index)] ?? socketIp ?? null
 }
 
-/** First language tag of `Accept-Language`, or the configured default. */
-export function resolveLocale(headers: Headers, fallback: string): string {
-  const header = headers.get('accept-language')
-  if (header === null) return fallback
-  const first = header.split(',')[0]?.split(';')[0]?.trim()
-  return first === undefined || first === '' || first === '*' ? fallback : first
+/** Body locale is authoritative; page context supports older clients. */
+export function resolveLocale(
+  headers: Headers,
+  config: LocaleConfig | string,
+  explicit?: string,
+  pageLocale?: string,
+): string {
+  const browser = (headers.get('accept-language') ?? '')
+    .split(',')
+    .map((entry) => {
+      const [tag, ...parameters] = entry.trim().split(';')
+      const q = parameters.find((value) => value.trim().startsWith('q='))
+      return { tag: tag?.trim() ?? '', quality: q === undefined ? 1 : Number(q.trim().slice(2)) }
+    })
+    .filter(({ quality }) => Number.isFinite(quality) && quality > 0 && quality <= 1)
+    .sort((a, b) => b.quality - a.quality)
+    .map(({ tag }) => tag)
+  return selectLocale(typeof config === 'string' ? { locale: config } : config, {
+    override: explicit,
+    document: pageLocale,
+    browser,
+  })
 }
 
 /**

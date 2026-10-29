@@ -142,3 +142,14 @@ describe('dependency boundaries (docs/01 §3)', () => {
     expect(restricted(messages)).toHaveLength(1)
   })
 })
+
+it('widget can import the dependency-free catalog subpath without importing the schema runtime', async () => {
+  expect(
+    restricted(
+      await lint(
+        'packages/widget/src/locale.ts',
+        `import { resolveLocale } from '@sitebot/config/i18n'\nexport const locale = resolveLocale({})\n`,
+      ),
+    ),
+  ).toHaveLength(0)
+})

@@ -1,3 +1,5 @@
+import { en, type MessageKey } from '@sitebot/config/i18n'
+import { createStrings, hostLocale } from './strings.js'
 import { signal } from '@preact/signals'
 import type { PublicConfig } from '@sitebot/config'
 import { extractPageContext } from './context.js'
@@ -56,6 +58,10 @@ export function createController(
   let customContext: Record<string, unknown> = {}
   let pageContext: PageContext | null = null
   let pageHash: string | undefined
+  let suggestionsLocale: string | undefined
+  let statusKey: MessageKey | undefined
+  let runtimeSuggestions: PublicConfig['ui']['messages']['suggestions'] | undefined
+  const t = () => createStrings(config.ui, hostLocale(config.ui, options.locale))
   const listeners = new Set<() => void>()
   const status = signal<Status>('ready')
   const messages = signal<UIMessage[]>(
@@ -105,7 +111,10 @@ export function createController(
     switch (part.type) {
       case 'data-suggestions': {
         const items = payload.items as PublicConfig['ui']['messages']['suggestions'] | undefined
-        if (Array.isArray(items)) config.ui.messages.suggestions = items
+        if (Array.isArray(items)) {
+          runtimeSuggestions = items
+          suggestionsLocale = typeof payload.locale === 'string' ? payload.locale : undefined
+        }
         break
       }
       case 'data-navigate': {
@@ -114,7 +123,7 @@ export function createController(
         if (config.capabilities.routes.includes(path)) {
           if (payload.newTab === true) window.open(path, '_blank', 'noopener,noreferrer')
           else pendingNavigation = path
-        } else emit('error', { code: 'route_not_allowed', message: 'Navigation was blocked.' })
+        } else emit('error', { code: 'route_not_allowed', message: t()('navigationBlocked') })
         break
       }
       case 'data-handoff':
@@ -123,6 +132,10 @@ export function createController(
         emit('handoff', { target: payload.target })
         break
       case 'data-status':
+        statusKey =
+          typeof payload.messageKey === 'string' && Object.hasOwn(en, payload.messageKey)
+            ? (payload.messageKey as MessageKey)
+            : undefined
         statusText.value = typeof payload.text === 'string' ? payload.text : undefined
         break
       case 'data-error':
@@ -159,10 +172,19 @@ export function createController(
     const resume = resumePayload(history, announcedRunId, config.capabilities.clientTools)
     const body = {
       sessionId,
+      locale: hostLocale(config.ui, options.locale),
       messages: history,
       trigger: resume ? 'resume' : trigger,
       ...(resume ? { resume } : {}),
-      ...(pageContext ? { pageContext: { ...pageContext, custom: customContext } } : {}),
+      ...(pageContext
+        ? {
+            pageContext: {
+              ...pageContext,
+              locale: hostLocale(config.ui, options.locale),
+              custom: customContext,
+            },
+          }
+        : {}),
       ...(identity ? { auth: identity } : {}),
     }
     const streaming = startMessage(history.at(-1), `a_${createSessionId().replace(/-/g, '')}`)
@@ -174,6 +196,7 @@ export function createController(
         credentials: 'same-origin',
         headers: {
           'content-type': 'application/json',
+          'accept-language': hostLocale(config.ui, options.locale),
           ...(options.publicKey ? { 'x-sitebot-key': options.publicKey } : {}),
         },
         body: JSON.stringify(body),
@@ -214,7 +237,7 @@ export function createController(
         changed()
         return
       }
-      const normalized = normalizeError(cause, config.ui.messages.errorMessage)
+      const normalized = normalizeError(cause, t()('errorMessage'))
       // docs/03 §5 rule 2: the server refused the resume, so the card it
       // answered and any chip still spinning on it are over.
       if (normalized.code === 'run_expired') settleDangling('expired')
@@ -379,6 +402,18 @@ export function createController(
   const controller: WidgetController = {
     options,
     config,
+    get locale() {
+      return hostLocale(config.ui, options.locale)
+    },
+    get suggestions() {
+      return suggestionsLocale === undefined || suggestionsLocale === controller.locale
+        ? runtimeSuggestions
+        : undefined
+    },
+    setLocale(locale) {
+      options.locale = locale
+      changed()
+    },
     get messages() {
       return messages.value
     },
@@ -399,7 +434,7 @@ export function createController(
       return (retryAfter.value ?? 0) > 0 || error.value?.code === 'budget_exceeded'
     },
     get statusText() {
-      return statusText.value
+      return statusText.value && statusKey ? t()(statusKey) : statusText.value
     },
     get handoff() {
       return handoff.value
@@ -467,6 +502,7 @@ export function createController(
       messages.value = []
       identity = null
       customContext = {}
+      runtimeSuggestions = undefined
       announcedRunId = undefined
       lastSend = undefined
       statusText.value = undefined
@@ -491,7 +527,8 @@ export function createController(
       if (pageContext) pageContext = { ...pageContext, custom: customContext }
     },
     setSuggestions(items) {
-      config.ui.messages.suggestions = items
+      runtimeSuggestions = items
+      suggestionsLocale = undefined
       changed()
     },
     rehydratePending(pending) {
@@ -560,6 +597,7 @@ export function createController(
           credentials: 'same-origin',
           headers: {
             'content-type': 'application/json',
+            'accept-language': hostLocale(config.ui, options.locale),
             ...(options.publicKey ? { 'x-sitebot-key': options.publicKey } : {}),
           },
           body: JSON.stringify({ sessionId, messageId, rating }),
@@ -630,6 +668,19 @@ export function normalizeError(cause: unknown, fallback: string): WidgetError {
     if (code && CLIENT_CODES.has(code))
       return {
         code,
+        ...(typeof cause.body.messageKey === 'string' && Object.hasOwn(en, cause.body.messageKey)
+          ? {
+              messageKey: cause.body.messageKey as MessageKey,
+              values:
+                typeof cause.body.values === 'object' && cause.body.values !== null
+                  ? (Object.fromEntries(
+                      Object.entries(cause.body.values).filter(
+                        ([, value]) => typeof value === 'string' || typeof value === 'number',
+                      ),
+                    ) as Record<string, string | number>)
+                  : undefined,
+            }
+          : {}),
         message: typeof cause.body.message === 'string' ? cause.body.message : fallback,
         retryable: false,
       }

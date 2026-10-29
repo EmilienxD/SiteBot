@@ -60,8 +60,19 @@ export async function createPgVectorStore(options: PgVectorStoreOptions): Promis
     if (pg.Pool === undefined) throw new Error('pg did not expose Pool')
     pool = new pg.Pool({ connectionString: options.url })
   }
-  const store = new PgVectorStore(pool, table, options.model ?? '', options.dimensions)
-  await store.init()
+  const store = new PgVectorStore(
+    pool,
+    table,
+    options.model,
+    options.dimensions,
+    options.pool === undefined,
+  )
+  try {
+    await store.init()
+  } catch (error) {
+    await store.close().catch(() => {})
+    throw error
+  }
   return store
 }
 
@@ -90,13 +101,23 @@ class PgVectorStore implements VectorStore {
   #pool: PgPool
   #table: string
   #model: string
+  #writeModel: string | undefined
   #dimensions: number | undefined
+  #ownsPool: boolean
 
-  constructor(pool: PgPool, table: string, model: string, dimensions: number | undefined) {
+  constructor(
+    pool: PgPool,
+    table: string,
+    model: string | undefined,
+    dimensions: number | undefined,
+    ownsPool: boolean,
+  ) {
     this.#pool = pool
     this.#table = table
-    this.#model = model
+    this.#model = model ?? ''
+    this.#writeModel = model
     this.#dimensions = dimensions
+    this.#ownsPool = ownsPool
   }
 
   async init(): Promise<void> {
@@ -154,7 +175,7 @@ class PgVectorStore implements VectorStore {
       await client.query(
         `INSERT INTO ${this.#table}_meta (key, value) VALUES ('model', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [this.#model],
+        [this.#writeModel ?? this.#model],
       )
       await client.query(
         `INSERT INTO ${this.#table}_meta (key, value) VALUES ('lastIndexed', $1)
@@ -162,6 +183,7 @@ class PgVectorStore implements VectorStore {
         [new Date().toISOString()],
       )
       await client.query('COMMIT')
+      this.#model = this.#writeModel ?? this.#model
     } catch (error) {
       // A connection whose ROLLBACK also fails is in an unknown state: destroy it.
       await client.query('ROLLBACK').catch((cause: unknown) => {
@@ -254,6 +276,12 @@ class PgVectorStore implements VectorStore {
   }
 
   async stats(): Promise<VectorStoreStats> {
+    // Another ingester can rebuild the shared table while this reader stays
+    // alive. Report persisted metadata, not the model cached at construction.
+    const model = await this.#pool.query(
+      `SELECT value FROM ${this.#table}_meta WHERE key = 'model'`,
+    )
+    if (model.rows[0] !== undefined) this.#model = String(model.rows[0]['value'])
     const chunks = await this.#pool.query(`SELECT COUNT(*)::int AS n FROM ${this.#table}`)
     const documents = await this.#pool.query(
       `SELECT COUNT(DISTINCT url)::int AS n FROM ${this.#table}`,
@@ -270,6 +298,6 @@ class PgVectorStore implements VectorStore {
   }
 
   async close(): Promise<void> {
-    await this.#pool.end()
+    if (this.#ownsPool) await this.#pool.end()
   }
 }

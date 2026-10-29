@@ -59,7 +59,7 @@ describe('adapter settings', () => {
     expect(calls).toEqual([
       {
         factory: 'createOpenAICompatible',
-        settings: { name: 'ollama', baseURL: 'http://localhost:11434/v1' },
+        settings: { name: 'ollama', baseURL: 'http://localhost:11434/v1', includeUsage: true },
       },
     ])
   })

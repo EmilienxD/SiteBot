@@ -1,3 +1,4 @@
+import { createStrings } from './strings.js'
 import { render } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { Panel, PanelBoundary, type PanelProps } from './panel.js'
@@ -60,7 +61,7 @@ export function IframePanel(props: IframePanelProps) {
       }
       doc.documentElement.dataset.theme = theme
       doc.documentElement.setAttribute('style', variables)
-      doc.documentElement.lang = document.documentElement.lang
+      doc.documentElement.lang = controller.locale
       let style = doc.getElementById('sitebot-style')
       if (!style) {
         style = doc.createElement('style')
@@ -69,7 +70,7 @@ export function IframePanel(props: IframePanelProps) {
       }
       style.textContent = frameStyles(styleText)
       render(
-        <PanelBoundary close={close}>
+        <PanelBoundary close={close} t={createStrings(ui, controller.locale)}>
           <Panel controller={controller} close={close} offline={offline} framed />
         </PanelBoundary>,
         root,
@@ -81,12 +82,12 @@ export function IframePanel(props: IframePanelProps) {
       frame.removeEventListener('load', mount)
       if (root) render(null, root)
     }
-  }, [controller, close, offline, styleText, variables, theme])
+  }, [controller, close, offline, styleText, variables, theme, controller.locale])
   return (
     <iframe
       ref={ref}
       class={`panel-frame${ui.position === 'bottom-left' ? ' left' : ''}`}
-      title={ui.a11y.panelAriaLabel}
+      title={createStrings(ui, controller.locale)('panelAriaLabel')}
     />
   )
 }

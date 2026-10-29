@@ -4,9 +4,17 @@ import assert from 'node:assert/strict'
 import { readdir, readFile, readlink, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const app = resolve(root, 'examples/nextjs')
+const appArgument = process.argv.indexOf('--app')
+const app =
+  appArgument < 0 ? resolve(root, 'examples/nextjs') : resolve(process.argv[appArgument + 1])
+const appPath = relative(root, app).replaceAll('\\', '/')
+assert(
+  appPath && !appPath.startsWith('..') && !isAbsolute(appPath),
+  'Artifact app must be inside this workspace',
+)
 const build = resolve(app, '.next')
 const normalize = (path) => path.replaceAll('\\', '/')
 
@@ -56,25 +64,51 @@ for (const trace of traces) {
     const permitted =
       path.includes('/node_modules/') ||
       path.startsWith('node_modules/') ||
-      path.startsWith('examples/nextjs/.next/') ||
+      path.startsWith(`${appPath}/.next/`) ||
       /^packages\/[^/]+\/(dist\/|package\.json$|pricing\.json$)/.test(path) ||
       [
-        'examples/nextjs/package.json',
-        'examples/nextjs/chatbot.config.yaml',
-        'examples/nextjs/.sitebot/index.json',
+        `${appPath}/package.json`,
+        `${appPath}/chatbot.config.yaml`,
+        `${appPath}/.sitebot/index.json`,
       ].includes(path)
     assert(permitted, `Unexpected application file in ${relative(build, trace)}: ${path}`)
     all.add(file)
   }
   if (trace === chatTrace) {
     assert(resolved.has(resolve(app, 'chatbot.config.yaml')), 'Chat config missing from trace')
+    if (process.argv.includes('--expect-index')) {
+      assert(
+        resolved.has(resolve(app, '.sitebot/index.json')),
+        'Prebuilt knowledge index missing from trace',
+      )
+    }
     await summarize('Chat route dependencies', resolved)
   }
 }
 await summarize('Unique traced dependencies', all)
 const standalone = resolve(build, 'standalone')
-await stat(resolve(standalone, 'examples/nextjs/server.js'))
-await stat(resolve(standalone, 'examples/nextjs/chatbot.config.yaml'))
+const deployedApp = resolve(standalone, relative(root, app))
+await stat(resolve(deployedApp, 'server.js'))
+await stat(resolve(deployedApp, 'chatbot.config.yaml'))
+const sdk = createRequire(resolve(deployedApp, 'runtime.cjs')).resolve(
+  '@ai-sdk/openai/package.json',
+)
+const sdkPath = relative(standalone, sdk)
+assert(
+  !isAbsolute(sdkPath) && sdkPath !== '..' && !sdkPath.startsWith(`..${sep}`),
+  'Provider SDK escaped the standalone artifact',
+)
+await stat(sdk)
+const sdkMetadata = JSON.parse(await readFile(sdk, 'utf8'))
+await stat(resolve(dirname(sdk), sdkMetadata.exports['.'].import))
+if (process.argv.includes('--expect-index')) {
+  const snapshotPath = '.sitebot/index.json'
+  assert.equal(
+    await readFile(resolve(deployedApp, snapshotPath), 'utf8'),
+    await readFile(resolve(app, snapshotPath), 'utf8'),
+    'Traced snapshot bytes changed',
+  )
+}
 await summarize('Standalone server (without static assets)', await walk(standalone))
 await summarize('Static assets', await walk(resolve(build, 'static')))
 console.log(

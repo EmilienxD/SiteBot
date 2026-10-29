@@ -6,6 +6,16 @@ the repo fails if `doctor` gains a check that this page doesn't cover.
 
 ## `sitebot doctor`
 
+### `budget pricing`
+
+With `security.budget.maxUsdPerDay` enabled, every primary, fallback, and
+`budget.degradeTo` model needs a price. A failure names the config path and missing
+`provider:model` key. Set `backend.pricing` with your applicable
+`inputUsdPerMillion` and `outputUsdPerMillion` rates, or use token-only limits
+without a dollar cap. Explicit zero prices are valid for free models. This check
+runs offline and in production doctor; engine creation and `sitebot validate`
+also reject missing pricing under a dollar cap.
+
 ### `env <VARIABLE>`
 
 **"not set, and anthropic needs it."** The provider's key isn't in the environment and `backend.apiKey`
@@ -44,7 +54,8 @@ The same checks `GET /api/chat/health` reports:
 - **`health mcp:<id>`** failed: an MCP server didn't answer. For `stdio`, run the `command` yourself to see
   its error. For `http`, check the `url`.
 - **`health knowledge`** degraded: the vector store isn't reachable. Chat keeps working without
-  retrieval.
+  retrieval. Failed initialization retries on the next chat or health request;
+  retrieval and citations resume when setup succeeds.
 
 ### `health overall`
 

@@ -2,12 +2,16 @@
 // Next preserves pnpm's absolute Windows links. Rebase them into the artifact
 // so copying it to another machine does not retain references to this checkout.
 import assert from 'node:assert/strict'
-import { cp, readdir, readlink, stat, symlink, unlink } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, readlink, stat, symlink, unlink } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const root = resolve(app, '../..')
+const manifest = JSON.parse(
+  await readFile(resolve(app, '.next/required-server-files.json'), 'utf8'),
+)
+const root = resolve(manifest.config.outputFileTracingRoot ?? app)
 const standalone = resolve(app, '.next/standalone')
 let rebased = 0
 
@@ -53,4 +57,33 @@ async function visit(dir) {
 }
 
 await visit(standalone)
+// Turbopack gives external packages hashed aliases. SiteBot's optional SDK
+// imports use their original names, so preserve those names as well. The
+// server-only import must already have traced the package and its dependencies.
+const require = createRequire(resolve(app, 'package.json'))
+for (const name of manifest.config.serverExternalPackages ?? []) {
+  let source = dirname(require.resolve(name))
+  for (;;) {
+    const metadata = await readFile(resolve(source, 'package.json'), 'utf8')
+      .then(JSON.parse)
+      .catch(() => null)
+    if (metadata?.name === name) break
+    const parent = dirname(source)
+    assert(parent !== source, `Cannot find external package root: ${name}`)
+    source = parent
+  }
+  assert(inside(root, source), `External package outside workspace: ${name}`)
+  const target = resolve(standalone, relative(root, source))
+  await stat(target)
+  const alias = resolve(standalone, relative(root, app), 'node_modules', name)
+  if (
+    await stat(alias)
+      .then(() => true)
+      .catch(() => false)
+  )
+    continue
+  await mkdir(dirname(alias), { recursive: true })
+  await symlink(relative(dirname(alias), target), alias, 'dir')
+  rebased += 1
+}
 console.log(`Standalone dependencies prepared: ${rebased} external links rebased.`)

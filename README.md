@@ -11,6 +11,11 @@ A drop-in, fully configurable AI assistant for any website. One config file, one
 
 ---
 
+English and French localization, host-language selection, translated deployment copy,
+and multilingual retrieval are covered in the [multilingual guide](apps/docs/guide/multilingual.md).
+For targeted, read-only documentation Q&A with an empty action-tool list, see the
+[docs assistant recipe](apps/docs/recipes/docs-assistant.md).
+
 ## What it is
 
 A floating launcher button in the corner of every page. Click it, an overlay chat panel opens on top of the site. The assistant knows what page you are on, what is in the site's documentation, and can call the site's own APIs.

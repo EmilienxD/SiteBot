@@ -32,10 +32,15 @@ export function createRouteHandlers(
   options: SiteBotHandlerOptions = {},
 ): NextRouteHandlers {
   const handler = createSiteBotHandler(config, withNodeRuntime(config, options))
+  // NextRequest.url normalizes 127.0.0.1/::1 to localhost. A standard Request
+  // copy retains the original internal URL, body and linked abort signal, so
+  // same-origin CORS compares the browser's actual origin without trusting a
+  // forwarded Host header or treating distinct loopback origins as equivalent.
+  const route = (request: Request) => handler(new Request(request))
   return {
-    GET: handler,
-    POST: handler,
-    OPTIONS: handler,
+    GET: route,
+    POST: route,
+    OPTIONS: route,
     handler,
   }
 }

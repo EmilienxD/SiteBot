@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { SessionStore } from '../src/session/store.js'
 
 /**
@@ -24,9 +24,14 @@ const message = (id: string, text = id): UIMessage => ({
 
 export function runSessionStoreConformance(name: string, make: SessionStoreFactory): void {
   describe(`${name} session store conformance`, () => {
+    const stores: SessionStore[] = []
+    afterEach(async () => {
+      for (const store of stores.splice(0)) await store.dispose?.()
+    })
     const setup = async (max = 100) => {
       let time = 1_000_000
       const store = await make({ now: () => time, ttlSeconds: 60, max })
+      stores.push(store)
       return { store, advance: (ms: number) => (time += ms) }
     }
 

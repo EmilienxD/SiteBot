@@ -366,3 +366,92 @@ describe('engine knowledge (docs/06)', () => {
     expect(health.checks['provider']?.status).toBe('ok')
   })
 })
+
+// Deterministic vectors and a scripted model verify routing, not embedding/model quality.
+describe('engine locale propagation to knowledge', () => {
+  it.each(['always', 'hybrid', 'tool'] as const)(
+    'keeps French retrieval, prompts, status and citations coherent in %s mode',
+    async (mode) => {
+      const config = knowledgeConfig()
+      config.mode = 'agent'
+      config.knowledge.retrieval.mode = mode
+      config.knowledge.retrieval.topK = 1
+      config.knowledge.retrieval.languagePreference = 'locale-first'
+      config.ui.messages.suggestions = [
+        { label: 'English', action: { type: 'send', text: 'English' } },
+      ]
+      config.ui.translations.fr = {
+        messages: {
+          suggestions: [{ label: 'Français', action: { type: 'send', text: 'Question' } }],
+        },
+      }
+      const english = testChunk(
+        'english',
+        'https://example.com/en/real',
+        'English document',
+        [1, 0, 0],
+      )
+      const french = testChunk(
+        'french',
+        'https://example.com/fr/real',
+        'Document français',
+        [0.8, 0.6, 0],
+      )
+      english.metadata.lang = 'en'
+      french.metadata.lang = 'fr'
+      const store = new MemoryVectorStore({ chunks: [english, french] })
+      const answer = textModel(['Réponse [1].'])
+      const model = new MockLanguageModelV3({
+        doStream: async (options) => {
+          if (mode !== 'tool' || options.prompt.at(-1)?.role === 'tool')
+            return answer.doStream(options)
+          return {
+            stream: simulateReadableStream({
+              initialDelayInMs: null,
+              chunkDelayInMs: null,
+              chunks: [
+                { type: 'stream-start', warnings: [] },
+                {
+                  type: 'tool-call',
+                  toolCallId: 'locale-search',
+                  toolName: 'search_knowledge_base',
+                  input: JSON.stringify({ query: 'documentation' }),
+                },
+                {
+                  type: 'finish',
+                  finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+                  usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+                },
+              ] as LanguageModelV3StreamPart[],
+            }),
+          }
+        },
+      })
+      const engine = createEngine(config, {
+        adapters: adapterFor(model),
+        knowledge: { store, embedder: needleEmbedder({ doc: 0 }) },
+      })
+      const response = await engine.handleChat(
+        { sessionId: SESSION, locale: 'fr-CA', messages: [userMessage('documentation')] },
+        testContext({ locale: 'en' }),
+      )
+      const events = (await readSse(response))
+        .filter((event) => event !== '[DONE]')
+        .map((event) => JSON.parse(event))
+      expect(events.find((event) => event.type === 'data-citations')?.data.items).toMatchObject([
+        { lang: 'fr', url: 'https://example.com/fr/real' },
+      ])
+      expect(events.find((event) => event.type === 'data-status')?.data.text).toBe(
+        'Recherche dans la documentation…',
+      )
+      expect(events.find((event) => event.type === 'data-suggestions')?.data.items[0].label).toBe(
+        'Français',
+      )
+      const prompt = JSON.stringify(answer.doStreamCalls[0]?.prompt)
+      expect(prompt).toContain('Respond in language fr by default')
+      expect(prompt).toContain('https://example.com/fr/real')
+      expect(prompt).not.toContain('English document')
+      await engine.dispose()
+    },
+  )
+})

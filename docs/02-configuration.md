@@ -245,7 +245,7 @@ All keys optional. `routes` doubles as the target list for the builtin `navigate
 
 |                        | `mode: chat`                                                    | `mode: agent`                        |
 | ---------------------- | --------------------------------------------------------------- | ------------------------------------ |
-| Max loop steps         | `1`                                                             | `agent.maxSteps` (default `8`)       |
+| Max loop steps         | `min(agent.maxSteps, agent.stopWhen.steps)` (default `8`)          | same                                 |
 | Tools                  | only those with `readOnly: true`; others rejected at validation | all                                  |
 | Default retrieval mode | `always`                                                        | `tool`                               |
 | Side-effecting tools   | forbidden                                                       | allowed, gated by `approvalRequired` |
@@ -280,6 +280,19 @@ agent:
 | `toolChoice`        | enum           | `auto`      |                                                                       |
 
 **Validation rule:** if `mode: chat` and any configured tool lacks `readOnly: true`, the config fails validation with a message naming the offending tools. This prevents an accidentally dangerous "simple chatbot".
+
+Loop limits (`maxSteps`, `stopWhen`) and `onMaxSteps` apply in both modes. Chat
+has no approval gates; approval settings apply only in agent mode.
+`agent.toolChoice` applies in both modes (`auto`, `required`, `none`), with no tools
+always resolving to `none` and the reserved final answer step disabling tools.
+`required` requires a tool on every nonfinal step, even for greetings or a follow-up
+already supported by earlier evidence. Chat's read-only filter still applies.
+`always` retrieval with no tools
+still answers in one call. For targeted public documentation Q&A, use `tools: []`
+and `knowledge.retrieval.mode: tool`. Automatic knowledge search needs no tool
+entry; its results can feed further searches and a final answer within the limits.
+See the [generic recipe](../apps/docs/recipes/docs-assistant.md) for English/French
+configuration and the distinction from browser/action tools.
 
 ---
 
@@ -549,7 +562,9 @@ ui:
     launcherAriaLabel: Open chat assistant
     panelAriaLabel: Chat with Acme assistant
 
-  locale: auto # auto | a BCP-47 tag
+  locale: auto # final fallback; host override → document lang → browser → fallback
+  supportedLocales: [en, fr] # enforced in widget and server
+  translations: {} # per-locale deployment copy (messages, suggestions, a11y, launcher, panel, footer)
   strings: # override any UI string per locale
     fr:
       greeting: Bonjour ! Comment puis-je vous aider ?
@@ -597,6 +612,8 @@ Defaults are deliberately safe: `auth.mode: optional`, `rateLimit.perSession: 30
 
 Rate limit syntax: `<count>/<window>` where window is `<n>[s|m|h|d]`.
 
+With `budget.maxUsdPerDay` configured, every primary, fallback, and `budget.degradeTo` model needs a price in the shipped table or an explicit `backend.pricing` override keyed by `provider:model`, with `inputUsdPerMillion` and `outputUsdPerMillion`. `sitebot validate`, both doctor modes, and engine creation check this after config resolution. Unlisted models remain supported with token-only budgets when no dollar cap is set. Explicit zero prices are accepted for models you operate at no cost; missing prices never authorize spend under a dollar cap.
+
 ---
 
 ## 13. `telemetry`
@@ -634,3 +651,15 @@ telemetry:
   8. Any tool with `scope: authenticated` requires `security.auth.mode` ≠ `none`.
   9. Suggestion actions of `type: tool` must name a configured tool.
   10. `ui` may not contain `${env.*}`.
+
+
+## Multilingual configuration
+
+English and French built-in catalogs, locale resolution, deployment-copy overrides,
+regional fallback, adding languages, source-language metadata and migration from
+fixed `ui.locale` behavior are documented in the
+[multilingual guide](../apps/docs/guide/multilingual.md).
+`ui.locale` is the final fallback, `ui.supportedLocales` is the deployment allowlist,
+`ui.strings` overrides shared message keys (validated interpolation placeholders),
+and `ui.translations` overlays public deployment-owned copy. The entire UI block
+remains public and subject to the existing environment-secret exclusion rules.

@@ -36,17 +36,18 @@ const readOnlyTool = (name: string) => ({
 })
 
 describe('resolvePolicy — chat mode (docs/04 §4)', () => {
-  it('stops after a single step and never approves', () => {
+  it('bounds read-only tool iterations and never approves', () => {
     const policy = resolvePolicy(testConfig())
     expect(policy.approvals).toBe(false)
-    expect(policy.summarizeAtStep).toBeUndefined()
-    expect(policy.stopWhen).toHaveLength(1)
+    expect(policy.summarizeAtStep).toBe(7)
+    expect(policy.stopWhen).toHaveLength(3)
   })
 
-  it('its single stop condition is stepCountIs(1)', async () => {
-    const [condition] = resolvePolicy(testConfig()).stopWhen
+  it('uses the configured step ceiling, including the final answer', async () => {
+    const [condition] = resolvePolicy(testConfig({ agent: { maxSteps: 2 } })).stopWhen
     expect(await stops(condition!, [])).toBe(false)
-    expect(await stops(condition!, [step(0)])).toBe(true)
+    expect(await stops(condition!, [step(0)])).toBe(false)
+    expect(await stops(condition!, [step(0), step(0)])).toBe(true)
   })
 
   it('admits only read-only tools', () => {
@@ -57,28 +58,28 @@ describe('resolvePolicy — chat mode (docs/04 §4)', () => {
     expect(toolFilter({})).toBe(false)
   })
 
-  it('sets toolChoice to none when there is no enabled tool', () => {
-    expect(resolvePolicy(testConfig()).toolChoice).toBe('none')
+  it('allows automatic knowledge tools even without enabled action tools', () => {
+    expect(resolvePolicy(testConfig()).toolChoice).toBe('auto')
     expect(
       resolvePolicy(testConfig({ tools: [{ ...readOnlyTool('lookup'), enabled: false }] }))
         .toolChoice,
-    ).toBe('none')
+    ).toBe('auto')
   })
 
   it('sets toolChoice to auto once a tool is enabled', () => {
     expect(resolvePolicy(testConfig({ tools: [readOnlyTool('lookup')] })).toolChoice).toBe('auto')
   })
 
-  it('ignores agent.toolChoice — chat mode never forces a tool call', () => {
+  it('honors agent.toolChoice while retaining the read-only chat filter', () => {
     const policy = resolvePolicy(
       testConfig({ tools: [readOnlyTool('lookup')], agent: { toolChoice: 'required' } }),
     )
-    expect(policy.toolChoice).toBe('auto')
+    expect(policy.toolChoice).toBe('required')
+    expect(policy.toolFilter({ readOnly: false })).toBe(false)
+    expect(resolvePolicy(testConfig({ agent: { toolChoice: 'none' } })).toolChoice).toBe('none')
   })
 
-  it('does not count an MCP import as an enabled tool', () => {
-    // `from` entries are imports, not tools: their contents are not known
-    // until the server is reached, so they cannot flip toolChoice on their own.
+  it('allows the engine to select expanded read-only MCP tools', () => {
     const policy = resolvePolicy(
       testConfig({
         tools: [
@@ -91,7 +92,7 @@ describe('resolvePolicy — chat mode (docs/04 §4)', () => {
         ],
       }),
     )
-    expect(policy.toolChoice).toBe('none')
+    expect(policy.toolChoice).toBe('auto')
   })
 
   it('defaults retrieval to always, and honours an explicit mode', () => {

@@ -103,6 +103,7 @@ describe('composePrompt — block ordering (docs/04 §5)', () => {
       'site_context',
       'tool_policy',
       'guardrails',
+      'language',
       'page_context',
       'knowledge',
     ])
@@ -157,7 +158,7 @@ describe('composePrompt — block ordering (docs/04 §5)', () => {
       retrieval: 'tool',
       delimiterId: DELIMITER,
     })
-    expect(result.blocks).toEqual(['system'])
+    expect(result.blocks).toEqual(['system', 'language'])
     expect(result.text).toMatchSnapshot()
   })
 })
@@ -179,7 +180,7 @@ describe('composePrompt — block presence permutations', () => {
     // an empty shell. An empty `<site_context></site_context>` is worse than
     // no block: it spends tokens telling the model nothing.
     const result = composePrompt({ config: testConfig(), delimiterId: DELIMITER })
-    expect(result.blocks).toEqual(['system'])
+    expect(result.blocks).toEqual(['system', 'language'])
   })
 
   it('drops page_context when includePageContext is false, even with a page', () => {
@@ -423,6 +424,36 @@ describe('composePrompt — tool_policy (block 5)', () => {
     })
     expect(result.text).not.toContain('search_knowledge_base')
   })
+
+  it.each(['not-ready', 'disabled', 'scoped'] as const)(
+    'does not promise indexed search when it is %s',
+    (condition) => {
+      const config = fullConfig()
+      if (condition !== 'not-ready')
+        config.tools = testConfig({
+          mode: 'agent',
+          tools: [
+            {
+              name: 'search_knowledge_base',
+              description: 'Search indexed documentation.',
+              readOnly: true,
+              enabled: condition !== 'disabled',
+              scope: condition === 'scoped' ? 'authenticated' : 'public',
+              parameters: { type: 'object', properties: {}, required: [] },
+              executor: { type: 'builtin', id: 'search_knowledge_base' },
+            },
+          ],
+        }).tools
+      const result = composePrompt({
+        config,
+        retrieval: 'tool',
+        knowledgeSearchAvailable: condition !== 'not-ready',
+      })
+      expect(result.text).not.toContain(
+        '`search_knowledge_base` searches the indexed site content.',
+      )
+    },
+  )
 
   it('drops the citation instructions when includeCitations is off', () => {
     const result = composePrompt({

@@ -142,7 +142,7 @@ This is where widget-specific behaviour lives. Each is a typed, transient or per
 
 | Part type               | Payload                                                                                          | Widget behaviour                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `data-citations`        | `{ items: [{ id, title, url, snippet, score }] }`                                                | Renders numbered source chips under the message                          |
+| `data-citations`        | `{ items: [{ id, chunkId?, title, url, snippet, score, lang? }] }`                                | Renders referenced source chips using the number in `id` (`c27` → `[27]`) |
 | `data-approval-request` | `{ approvalId, toolName, toolCallId, title, description, input, risk: 'low'\|'medium'\|'high' }` | Renders a confirm card with Approve / Deny. Stream ends after this part. |
 | `data-client-tool-call` | `{ toolCallId, toolName, input }`                                                                | Widget executes the registered client tool, POSTs the result back        |
 | `data-suggestions`      | `{ items: [{ label, action }] }`                                                                 | Replaces the quick-reply pill row                                        |
@@ -382,3 +382,23 @@ Cost control: the extract is hashed; if the hash is unchanged from the previous 
 - **Abort:** the widget's Stop button aborts the `fetch`; the server sees `signal` fire and cancels the model call and any in-flight tool calls.
 - **Reconnect:** on a network drop mid-stream the widget silently retries once with `trigger: "regenerate"`, dropping the partial assistant message first. The server dedupes the user turn by message id, so the retry cannot double it. A second failure shows an error bubble with a manual Retry. `trigger: "resume"` is reserved for suspended runs (§5) and is never used for reconnection: it needs an approval or client-tool result, and a dropped stream has neither.
 - **Compression:** `Content-Encoding` must not be applied to the SSE response by intermediaries; the server sets `X-Accel-Buffering: no` and `Cache-Control: no-transform` to defeat nginx/Cloudflare buffering.
+
+
+## Locale on the wire
+
+`POST /api/chat` accepts an optional `locale` BCP-47 tag. The widget sends the
+resolved host locale on every send/retry/resume, also setting `Accept-Language`
+and `pageContext.locale` to the same value. The server validates body tags and
+applies `ui.supportedLocales`; resolution is body locale → legacy page-context
+locale → quality-weighted Accept-Language → configured fallback. Malformed body
+tags return `invalid_request`. Locale never grants permissions.
+
+Built-in JSON/inline errors may additionally carry a catalog `messageKey` and
+safe interpolation `values` so existing errors can relabel after a locale change.
+`data-status` may include `messageKey`; `data-suggestions` may include `locale`;
+built-in `data-handoff` may include `messageKey`. Citation items retain optional
+`lang` metadata. These are additive fields; source URLs are unchanged.
+
+`/config` serves all public locale catalogs/copy with no language negotiation, so
+shared responses are language-independent. Session probes remain private/no-store.
+See `apps/docs/guide/multilingual.md` in the repository for the full guide.

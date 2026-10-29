@@ -385,3 +385,21 @@ The widget must **never** throw into the host page. Every entry point — event 
 | Multi-instance | Two script tags on one page → one widget, one warning, no crash.                                                                                    |
 
 The browser rows live in `e2e/` (`pnpm e2e`, after `pnpm build`): Playwright against `examples/plain-html`, served by the real CLI with a scripted offline model (`e2e/fixtures/scripted-model.mjs`), so no key is needed and no provider is called. Visual baselines are per platform; CI runs in the pinned Playwright image and compares against the `-linux` files, regenerated with `pnpm e2e:update-snapshots` inside that image. Framework stylesheets (Tailwind preflight, Bootstrap) and an SPA page are covered in `e2e/visual.spec.ts` and `e2e/fixture-pages.spec.ts`.
+
+
+## Host-selected locale
+
+English/French controls, accessibility labels, statuses and errors use shared
+catalogs. Resolution is explicit host `locale` → host `<html lang>` → browser
+preferences → `ui.locale` fallback, constrained by `ui.supportedLocales`.
+Use script/custom-element `data-locale`, `defineSiteBot({ locale })`,
+`SiteBot.setLocale(locale)`, `element.configure({ locale })` or React
+`<ChatWidget locale={selectedLanguage} />`; `auto` resumes following the host.
+The widget observes document-language changes independently of framework routing.
+Copy and subsequent request locales update without clearing messages or session;
+existing conversation text and an in-flight answer keep their original language.
+Explicit `resetOnNavigate` retains its separate documented behavior.
+
+`ui.strings` overrides shared keys; `ui.translations` supplies translated branded
+copy including greetings, suggestions/send text, launcher/panel and footer.
+Details and extension instructions: [multilingual guide](../apps/docs/guide/multilingual.md).

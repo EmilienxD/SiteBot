@@ -469,6 +469,9 @@ importers:
       '@preact/signals':
         specifier: ^2.10.1
         version: 2.10.1(preact@10.29.8)
+      '@sitebot/config':
+        specifier: workspace:*
+        version: link:../config
       preact:
         specifier: ^10.29.8
         version: 10.29.8
@@ -476,9 +479,6 @@ importers:
       '@preact/preset-vite':
         specifier: ^2.10.6
         version: 2.10.6(@babel/core@7.29.7)(preact@10.29.8)(rollup@4.62.4)(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.1)(yaml@2.9.0))
-      '@sitebot/config':
-        specifier: workspace:*
-        version: link:../config
       '@size-limit/file':
         specifier: ^13.0.3
         version: 13.0.3(size-limit@13.0.3)

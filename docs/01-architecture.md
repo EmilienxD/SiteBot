@@ -168,7 +168,7 @@ sitebot doctor          diagnose env vars, provider reachability, store health, 
 1. `config` imports nothing from the workspace.
 2. `core` imports only `config`.
 3. `server`, `ingest` import `core` and `config`.
-4. `widget`, `react` import **types only** from `config` — never `core`.
+4. `widget`, `react` import **types only** from the `config` root — never `core`. The dependency-free `@sitebot/config/i18n` subpath is the sole runtime exception: catalogs, locale resolution and interpolation shared with the server, without Zod, parsers or server configuration.
 5. Nothing imports `cli`.
 6. `core`'s root entry must not import `node:*`. Node-specific code goes in `core/node`.
 7. No package may import from another package's internal path — only its declared exports.

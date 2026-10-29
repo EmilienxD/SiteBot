@@ -76,6 +76,7 @@ async function loadPackage(provider: EmbeddingConfig['provider']): Promise<Loade
 
 export async function createEmbeddingModel(
   config: EmbeddingConfig,
+  purpose: 'document' | 'query' = 'document',
 ): Promise<{ model: EmbeddingModel; modelId: string; provider: EmbeddingConfig['provider'] }> {
   switch (config.provider) {
     case 'openai': {
@@ -138,7 +139,7 @@ export async function createEmbeddingModel(
     case 'voyage': {
       // No maintained @ai-sdk adapter: both ship client SDKs with an embed
       // endpoint, so the adapter below is a thin EmbeddingModel over fetch.
-      return createHttpEmbeddingModel(config, httpSpec(config.provider))
+      return createHttpEmbeddingModel(config, httpSpec(config.provider, purpose))
     }
     case 'ollama': {
       // Local, zero-cost, no key. The native `/api/embed` endpoint accepts a
@@ -166,7 +167,10 @@ interface HttpSpec {
   pluck(body: unknown): number[][]
 }
 
-function httpSpec(provider: 'cohere' | 'voyage'): (config: EmbeddingConfig) => HttpSpec {
+function httpSpec(
+  provider: 'cohere' | 'voyage',
+  purpose: 'document' | 'query',
+): (config: EmbeddingConfig) => HttpSpec {
   if (provider === 'cohere') {
     return (config) => ({
       url: `${config.baseUrl ?? 'https://api.cohere.com'}/v2/embed`,
@@ -177,7 +181,7 @@ function httpSpec(provider: 'cohere' | 'voyage'): (config: EmbeddingConfig) => H
       body: (model, texts) => ({
         model,
         texts,
-        input_type: 'search_document',
+        input_type: purpose === 'query' ? 'search_query' : 'search_document',
         embedding_types: ['float'],
         ...(config.dimensions === undefined ? {} : { output_dimension: config.dimensions }),
       }),
@@ -193,6 +197,7 @@ function httpSpec(provider: 'cohere' | 'voyage'): (config: EmbeddingConfig) => H
     body: (model, texts) => ({
       model,
       input: texts,
+      input_type: purpose,
       ...(config.dimensions === undefined ? {} : { output_dimension: config.dimensions }),
     }),
     pluck: (body) => (body as { data: { embedding: number[] }[] }).data.map((d) => d.embedding),
@@ -259,12 +264,18 @@ export async function embedChunks(
         for (let offset = 0; offset < batch.length; offset++) {
           embeddings[batchIndex * batchSize + offset] = result.embeddings[offset]!
         }
-        tokens +=
-          result.usage?.tokens ?? batch.reduce((total, t) => total + Math.ceil(t.length / 4), 0)
+        tokens += embeddingTokens(result.usage?.tokens, batch)
       }
     }),
   )
   return { embeddings, tokens }
+}
+
+/** The AI SDK uses NaN when an embedding provider omits usage. */
+export function embeddingTokens(reported: number | undefined, texts: readonly string[]): number {
+  return reported !== undefined && Number.isFinite(reported) && reported >= 0
+    ? reported
+    : texts.reduce((total, text) => total + Math.ceil(text.length / 4), 0)
 }
 
 async function withRetry<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {

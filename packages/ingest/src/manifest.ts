@@ -14,6 +14,7 @@ import { dirname, resolve } from 'node:path'
 export interface ManifestDocument {
   url: string
   contentHash: string
+  lang?: string
   /** Stable per-chunk hashes the diff reuses. */
   chunkHashes: string[]
   etag?: string
@@ -21,6 +22,8 @@ export interface ManifestDocument {
 }
 
 export interface ManifestSource {
+  /** Declared source override, separate from each detected document language. */
+  lang?: string
   id: string
   type: string
   label: string
@@ -30,6 +33,7 @@ export interface ManifestSource {
 export interface Manifest {
   version: 1
   model: string
+  documentPrefix?: string
   dimensions?: number
   builtAt: string
   sources: Record<string, ManifestSource>
@@ -39,6 +43,7 @@ export const MANIFEST_VERSION = 1
 
 export interface ModelFingerprint {
   model: string
+  documentPrefix?: string
   dimensions?: number
 }
 
@@ -47,7 +52,7 @@ export class ModelMismatchError extends Error {
     super(
       `The knowledge index was built with "${expected.model}${expected.dimensions === undefined ? '' : ` (${expected.dimensions}d)`}" ` +
         `but the config now asks for "${actual.model}${actual.dimensions === undefined ? '' : ` (${actual.dimensions}d)`}".\n` +
-        `Embedding spaces do not mix; run \`sitebot ingest --force\` to rebuild the index from scratch.`,
+        `Embedding spaces and document prefixes do not mix; run \`sitebot ingest --force\` to rebuild the index from scratch.`,
     )
     this.name = 'ModelMismatchError'
   }
@@ -89,6 +94,7 @@ export function assertModelCompatible(manifest: Manifest | null, next: ModelFing
   if (manifest === null) return
   const mismatch =
     manifest.model !== next.model ||
+    (manifest.documentPrefix ?? '') !== (next.documentPrefix ?? '') ||
     (manifest.dimensions ?? undefined) !== (next.dimensions ?? undefined)
   if (mismatch) throw new ModelMismatchError(manifest, next)
 }

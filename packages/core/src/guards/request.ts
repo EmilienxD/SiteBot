@@ -1,3 +1,4 @@
+import { normalizeLocale } from '@sitebot/config/i18n'
 import type { UIMessage } from 'ai'
 import { EngineError } from '../stream/errors.js'
 import type { ChatRequest } from '../types.js'
@@ -84,6 +85,12 @@ export function parseChatRequest(body: unknown): ChatRequest {
   if (raw.pageContext != null && typeof raw.pageContext === 'object') {
     request.pageContext = raw.pageContext as ChatRequest['pageContext']
   }
+  if (raw.locale !== undefined) {
+    const locale = normalizeLocale(raw.locale)
+    if (locale === undefined)
+      throw new EngineError('invalid_request', { detail: 'locale must be a valid BCP-47 tag' })
+    request.locale = locale
+  }
   if (typeof raw.auth === 'string') request.auth = raw.auth
   if (
     raw.trigger === 'submit-message' ||
@@ -129,6 +136,8 @@ export function checkMessageLength(message: UIMessage, maxChars: number): void {
   if (length > maxChars) {
     throw new EngineError('invalid_request', {
       message: `That message is too long. Please keep it under ${maxChars} characters.`,
+      messageKey: 'messageTooLong',
+      values: { maxChars },
       detail: `user message is ${length} chars, limit ${maxChars}`,
     })
   }
@@ -161,6 +170,7 @@ export function checkBlockedPatterns(message: UIMessage, patterns: readonly RegE
     if (pattern.test(text)) {
       throw new EngineError('invalid_request', {
         message: 'That message could not be processed.',
+        messageKey: 'messageBlocked',
         detail: `matched security.blockedPatterns /${pattern.source}/`,
       })
     }

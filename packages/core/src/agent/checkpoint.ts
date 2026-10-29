@@ -1,3 +1,4 @@
+import type { MessageKey } from '@sitebot/config/i18n'
 import type { UIMessage } from 'ai'
 import type { SessionStore, StoredSession } from '../session/store.js'
 import { argumentHash } from '../tools/approvals.js'
@@ -23,6 +24,7 @@ export class CheckpointError extends Error {
   constructor(
     message: string,
     readonly status: 403 | 410,
+    readonly messageKey?: MessageKey,
   ) {
     super(message)
     this.name = 'CheckpointError'
@@ -38,16 +40,20 @@ export async function loadPendingRun(
   const owner = await store.get(ownerKey(runId))
   const ownerSessionId = owner?.state?.sessionId
   if (typeof ownerSessionId !== 'string' || ownerSessionId !== sessionId) {
-    throw new CheckpointError('This action does not belong to this session.', 403)
+    throw new CheckpointError(
+      'This action does not belong to this session.',
+      403,
+      'actionWrongSession',
+    )
   }
 
   const session = await store.get(sessionId)
   const pending = asAgentState(session?.state).pendingRun
   if (session === null || pending?.runId !== runId) {
-    throw new CheckpointError('This action is no longer available.', 410)
+    throw new CheckpointError('This action is no longer available.', 410, 'actionUnavailable')
   }
   if (now > pending.expiresAt) {
-    throw new CheckpointError('This action timed out.', 410)
+    throw new CheckpointError('This action timed out.', 410, 'actionTimedOut')
   }
   return { session, pending }
 }

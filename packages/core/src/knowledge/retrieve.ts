@@ -1,3 +1,4 @@
+import { normalizeLocale } from '@sitebot/config/i18n'
 import type { ResolvedConfig } from '@sitebot/config'
 import { estimateTokens } from '../session/truncate.js'
 import type { ScoredChunk, VectorStore } from './store.js'
@@ -29,22 +30,60 @@ export async function retrieve(
   deps: { store: VectorStore; embedder: QueryEmbedder; reranker?: Reranker },
   query: string,
   config: ResolvedConfig,
+  locale?: string,
 ): Promise<RetrievalResult> {
   const retrieval = config.knowledge.retrieval
   const embedded = await deps.embedder.embed(query)
   const overfetch =
     retrieval.rerank !== false || retrieval.expandNeighbours > 0 || retrieval.dedupeByUrl
-  const raw = await deps.store.query(embedded.embedding, {
+  const options = {
     topK: overfetch ? retrieval.topK * 4 : retrieval.topK,
     minScore: 0,
     ...(retrieval.filter === undefined ? {} : { filter: retrieval.filter }),
-  })
-
+  }
   const reranker =
     retrieval.rerank === false ? undefined : (deps.reranker ?? (await configuredReranker(config)))
+  const tag = normalizeLocale(locale)
+  const language = tag?.split('-')[0]
+  const queries = [deps.store.query(embedded.embedding, options)]
+  // Explicit deployment language filters remain authoritative. Never widen them.
+  if (tag && retrieval.filter?.lang === undefined && retrieval.filter?.language === undefined) {
+    queries.push(
+      deps.store.query(embedded.embedding, {
+        ...options,
+        filter: { ...retrieval.filter, lang: tag },
+      }),
+      deps.store.query(embedded.embedding, {
+        ...options,
+        filter: { ...retrieval.filter, language },
+      }),
+      ...(tag === language
+        ? []
+        : [
+            deps.store.query(embedded.embedding, {
+              ...options,
+              filter: { ...retrieval.filter, lang: language },
+            }),
+          ]),
+    )
+  }
+  // Rerank one combined pool. Separate language-specific reranker calls may
+  // produce scores that cannot meaningfully be compared across candidate sets.
+  const pool = [
+    ...new Map((await Promise.all(queries)).flat().map((hit) => [hit.chunk.id, hit])).values(),
+  ]
+  const preference = (hit: ScoredChunk) => {
+    const lang = normalizeLocale(hit.chunk.metadata.lang)
+    return tag && lang === tag ? 2 : language && lang?.split('-')[0] === language ? 1 : 0
+  }
   const ranked =
-    reranker !== undefined && raw.length > 0 ? await rerankCandidates(reranker, query, raw) : raw
-  const above = ranked.filter((hit) => hit.score >= retrieval.minScore)
+    reranker !== undefined && pool.length > 0 ? await rerankCandidates(reranker, query, pool) : pool
+  ranked.sort((a, b) => b.score - a.score || preference(b) - preference(a))
+  let above = ranked.filter((hit) => hit.score >= retrieval.minScore)
+  if (retrieval.languagePreference === 'locale-first' && above.length) {
+    const preferred = Math.max(...above.map(preference))
+    if (preferred > 0) above = above.filter((hit) => preference(hit) === preferred)
+  }
   const belowThreshold = ranked.length > 0 && above.length === 0
   const expanded = await expandNeighbours(deps.store, above, config)
   const hits = finalize(expanded, config)
@@ -79,7 +118,13 @@ export async function expandNeighbours(
     }
     for (let offset = -n; offset <= n; offset++) {
       const chunk = document[index + offset]
-      if (chunk === undefined || seen.has(chunk.id)) continue
+      if (
+        chunk === undefined ||
+        seen.has(chunk.id) ||
+        chunk.metadata.sourceId !== hit.chunk.metadata.sourceId ||
+        chunk.metadata.lang !== hit.chunk.metadata.lang
+      )
+        continue
       seen.add(chunk.id)
       out.push({ chunk, score: offset === 0 ? hit.score : hit.score * 0.999 })
     }
@@ -104,10 +149,16 @@ export function finalize(raw: ScoredChunk[], config: ResolvedConfig): RetrievalH
     if (seenIds.has(hit.chunk.id)) continue
     if (retrieval.dedupeByUrl && seenUrls.has(url) && distinctUrls >= topK) continue
     const headingPrefix = hit.chunk.metadata.headingPath.join(' > ')
-    const text = headingPrefix === '' ? hit.chunk.text : `${headingPrefix}\n\n${hit.chunk.text}`
+    let text = headingPrefix === '' ? hit.chunk.text : `${headingPrefix}\n\n${hit.chunk.text}`
     const tokens = estimateTokens(text)
-    if (budget - tokens < 0 && out.length > 0) continue
-    budget -= tokens
+    if (budget <= 0) break
+    if (budget < tokens) {
+      if (out.length > 0) continue
+      // An oversized first chunk used to bypass the entire context ceiling.
+      // Keep a useful bounded excerpt even for imported/custom-store chunks.
+      text = text.slice(0, budget * 4)
+    }
+    budget -= estimateTokens(text)
     seenUrls.add(url)
     seenIds.add(hit.chunk.id)
     out.push({
@@ -116,6 +167,7 @@ export function finalize(raw: ScoredChunk[], config: ResolvedConfig): RetrievalH
       title: hit.chunk.metadata.title,
       text,
       score: hit.score,
+      ...(hit.chunk.metadata.lang === undefined ? {} : { lang: hit.chunk.metadata.lang }),
     })
   }
   return out

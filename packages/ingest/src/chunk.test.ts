@@ -24,6 +24,26 @@ function doc(overrides: Partial<DocumentInput> = {}): DocumentInput {
 }
 
 describe('extract()', () => {
+  it.each(['markdown', 'text'] as const)(
+    'chunks extracted %s headings without stray markers',
+    (format) => {
+      const page = extract(
+        '<html><main><h2>Enable previews</h2><p>Set preview=true.</p><h2>Expiry</h2><p>Expires after 72 hours.</p></main></html>',
+        { format, minChars: 0 },
+      )
+      const chunks = chunkDocument(doc({ ...page }), {
+        ...OPTIONS,
+        strategy: 'heading',
+        minTokens: 0,
+      })
+      expect(chunks.map((chunk) => chunk.text)).toEqual([
+        'Set preview=true.',
+        'Expires after 72 hours.',
+      ])
+      expect(chunks.map((chunk) => chunk.headingPath.at(-1))).toEqual(['Enable previews', 'Expiry'])
+    },
+  )
+
   it('keeps the main element and strips chrome', () => {
     const html = `<html><head><title>Pricing — Acme</title></head><body>
       <nav><a href="/">Home</a></nav>

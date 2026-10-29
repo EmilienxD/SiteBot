@@ -1,10 +1,11 @@
+import { createTranslator } from '@sitebot/config/i18n'
 import { jsonSchema, tool, type ToolSet } from 'ai'
 import type { ResolvedConfig, ToolEntry } from '@sitebot/config'
 import { isMcpImport } from '@sitebot/config'
 import type { RequestContext } from '../types.js'
 import type { UIMessage } from 'ai'
 import type { KnowledgeDeps } from '../knowledge/types.js'
-import { retrieve } from '../knowledge/retrieve.js'
+import { searchKnowledge, type KnowledgeEvidence } from '../knowledge/search.js'
 import { randomDelimiterId, untrustedBlock } from '../prompt/untrusted.js'
 import { EngineError } from '../stream/errors.js'
 import { loadModuleExport } from '../modules.js'
@@ -18,7 +19,12 @@ export type WidgetEffect =
   | { type: 'data-navigate'; data: { path: string; newTab: boolean } }
   | {
       type: 'data-handoff'
-      data: { target: Record<string, unknown>; ticketUrl?: string; message: string }
+      data: {
+        target: Record<string, unknown>
+        ticketUrl?: string
+        message: string
+        messageKey?: 'handoffMessage'
+      }
     }
 
 export function widgetEffect(
@@ -41,6 +47,7 @@ export interface ToolRegistryOptions {
   isApprovalGranted?: (toolName: string, input: unknown) => Promise<boolean>
   /** Phase 6: the reachable knowledge index. Absent → tool is not registered. */
   knowledge?: KnowledgeDeps | null
+  knowledgeEvidence?: KnowledgeEvidence
   onEvent?: (
     event: 'feedback' | 'lead' | 'handoff',
     data: Record<string, unknown>,
@@ -205,7 +212,10 @@ async function resolveExecutor(
         : result
     } catch (error) {
       ctx.logger.error('tool failed', { name: entry.name, error })
-      return { error: 'tool_failed', message: entry.errorMessage ?? 'The tool could not complete.' }
+      return {
+        error: 'tool_failed',
+        message: entry.errorMessage ?? createTranslator(options.config.ui, ctx.locale)('toolError'),
+      }
     }
   }
 }
@@ -262,35 +272,13 @@ function builtinExecutor(
 ) {
   return async (input: unknown, ctx: RequestContext): Promise<unknown> => {
     if (id === 'search_knowledge_base') {
-      const knowledge = options.knowledge
-      if (knowledge?.store === undefined || knowledge.embedder === undefined) {
-        return { error: 'not_configured', tool: id }
-      }
-      const query =
-        typeof input === 'object' && input !== null
-          ? String((input as Record<string, unknown>).query ?? '')
-          : ''
-      if (query === '') return { error: 'invalid_input', issues: ['query is required'] }
-      const result = await retrieve(
-        { ...knowledge, store: knowledge.store, embedder: knowledge.embedder },
-        query,
+      return searchKnowledge(
+        input,
         options.config,
+        options.knowledge,
+        ctx,
+        options.knowledgeEvidence,
       )
-      if (result.hits.length === 0) {
-        return {
-          results: [],
-          note: 'No relevant documentation found. Say so rather than guessing.',
-        }
-      }
-      return {
-        results: result.hits.map((hit, index) => ({
-          n: index + 1,
-          title: hit.title,
-          url: hit.url,
-          text: hit.text,
-          score: hit.score,
-        })),
-      }
     }
     switch (id) {
       case 'list_site_sections':
@@ -321,7 +309,10 @@ function builtinExecutor(
             : {}),
           sessionId: ctx.sessionId,
         })
-        return { accepted: true, message: 'Feedback recorded.' }
+        return {
+          accepted: true,
+          message: createTranslator(options.config.ui, ctx.locale)('feedbackRecorded'),
+        }
       case 'collect_lead': {
         const lead =
           typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
@@ -350,7 +341,9 @@ function builtinExecutor(
       case 'handoff': {
         const target = (config.target as Record<string, unknown> | undefined) ?? null
         const message =
-          typeof config.message === 'string' ? config.message : 'A human will follow up shortly.'
+          typeof config.message === 'string'
+            ? config.message
+            : createTranslator(options.config.ui, ctx.locale)('handoffMessage')
         const transcript = target?.includeTranscript === true ? options.transcript : undefined
         let ticketUrl = handoffUrl(target)
         if (target?.kind === 'webhook' && typeof target.url === 'string') {
@@ -380,6 +373,7 @@ function builtinExecutor(
               target: target ?? {},
               ...(ticketUrl === undefined ? {} : { ticketUrl }),
               message,
+              ...(typeof config.message === 'string' ? {} : { messageKey: 'handoffMessage' }),
             },
           },
           {

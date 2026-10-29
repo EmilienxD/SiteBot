@@ -138,20 +138,26 @@ export async function run(input: RunInput, ctx: RequestContext): Promise<UIMessa
 
 ```ts
 function resolvePolicy(c: ResolvedConfig): Policy {
+  const limits = {
+    stopWhen: [
+      stepCountIs(Math.min(c.agent.maxSteps, c.agent.stopWhen.steps)),
+      tokenBudgetIs(c.agent.stopWhen.tokens),
+      wallClockIs(c.agent.stopWhen.seconds),
+    ],
+    ...(c.agent.onMaxSteps === 'summarize'
+      ? { summarizeAtStep: Math.min(c.agent.maxSteps, c.agent.stopWhen.steps) - 1 }
+      : {}),
+  }
   if (c.mode === 'chat')
     return {
-      stopWhen: stepCountIs(1),
+      ...limits,
       toolFilter: (t) => t.readOnly === true,
-      toolChoice: c.tools.length ? 'auto' : 'none',
+      toolChoice: c.agent.toolChoice,
       retrieval: c.knowledge.retrieval.mode ?? 'always',
       approvals: false,
     }
   return {
-    stopWhen: [
-      stepCountIs(c.agent.stopWhen.steps),
-      tokenBudgetIs(c.agent.stopWhen.tokens),
-      wallClockIs(c.agent.stopWhen.seconds),
-    ],
+    ...limits,
     toolFilter: () => true,
     toolChoice: c.agent.toolChoice,
     retrieval: c.knowledge.retrieval.mode ?? 'tool',
@@ -162,11 +168,23 @@ function resolvePolicy(c: ResolvedConfig): Policy {
 
 That function is the entire difference between "simple chatbot" and "AI agent". Nothing else in the codebase branches on `mode`.
 
+Both policies allow bounded tool-result/answer iterations. A response with no tool
+calls ends after one model call. Tool choice is disabled when the **built** registry
+is empty; configured action-tool count cannot disable automatic knowledge search
+or read-only tools discovered through MCP. Chat always uses automatic tool choice.
+For targeted documentation Q&A use `mode: chat`, `tools: []` and
+`knowledge.retrieval.mode: tool`; see the [recipe](../apps/docs/recipes/docs-assistant.md).
+
 ### Stop conditions
 
 Three conditions, OR'd. Custom `tokenBudgetIs` and `wallClockIs` are ours (the AI SDK ships `stepCountIs`):
 
 All three apply to the **whole run**, across approval and client-tool round trips. Resumes subtract the server-computed steps, tokens, and active server time already consumed. The step ceiling is the smaller of `agent.maxSteps` and `agent.stopWhen.steps`. Waiting for the visitor or page is excluded from active server time. A spent token or time budget ends the run without another model call; a new user turn starts with fresh run limits. Session and daily security budgets still apply independently.
+
+These loop limits apply in chat mode as well. Token and time conditions are checked
+between completed steps; an individual in-flight call can cross those thresholds.
+`backend.maxOutputTokens` separately bounds output per call. The final summary
+does not bypass an exhausted token/time budget.
 
 ```ts
 const tokenBudgetIs =
@@ -295,7 +313,7 @@ interface BudgetTracker {
 }
 ```
 
-Cost is computed from a per-model price table (`pricing.json`, shipped and overridable via `backend.pricing`). Unknown models record tokens but not USD, and log a one-time warning naming the model — so budgets degrade to token-only rather than silently passing.
+Cost is computed from a per-model price table (`packages/core/pricing.json`, shipped and overridable via `backend.pricing`, keyed by `provider:model`). When `maxUsdPerDay` is set, engine creation and `sitebot validate` reject missing prices for the primary, every fallback, and `budget.degradeTo` (also used for history summaries). Both doctor modes report missing prices. The config package's schema validator remains model-agnostic; the core pricing check runs after config resolution. Set explicit input/output USD prices per million tokens for unlisted models; explicit zero prices are valid for free models. The runtime budget tracker blocks unpriced or unidentified model checks and rejects unpriced usage records under a dollar cap. Without a dollar cap, unknown models retain token-only accounting and log a one-time warning; token limits still apply.
 
 Enforcement order per request: **origin → key → rate limit → budget → auth → size**. Cheapest and most-certain rejections first.
 
@@ -339,3 +357,16 @@ Details that matter when writing one:
 | Budgets             | Fake clock + fake store; assert `degrade` and `block` transitions at boundaries.                                                                     |
 
 **No test in CI may make a real provider call.** A single opt-in `pnpm test:live` suite, gated on env vars, hits real providers for smoke coverage.
+
+
+## Response language
+
+The canonical request locale becomes a `<language>` policy after tool policy and
+guardrails, before untrusted page/knowledge blocks. It instructs the model to
+answer in the selected locale by default while honoring an explicit conversational
+request for a different answer language. The locale-dependent policy is included
+in the cached segment text, so policies for different locales are distinct while
+the deployment prefix remains stable. Built-in errors/limits/statuses and retrieval
+use the same locale. Operator prompts/hooks must avoid conflicting language rules.
+Offline fixtures validate this plumbing; they do not certify multilingual model or
+embedding quality. See the [multilingual guide](../apps/docs/guide/multilingual.md).

@@ -1,3 +1,4 @@
+import type { MessageKey } from '@sitebot/config/i18n'
 import type { PublicConfig, Ui } from '@sitebot/config'
 
 /**
@@ -26,6 +27,8 @@ export interface SiteBotOptions {
   autoOpen?: boolean
   position?: Ui['position']
   theme?: Ui['theme']['mode']
+  /** Host locale override; auto/undefined follows the host document. */
+  locale?: string
   nonce?: string
   onEvent?: (event: SiteBotEvent) => void
 }
@@ -37,15 +40,19 @@ export interface Citation {
   url: string
   snippet: string
   score: number
+  lang?: string
 }
 
 export interface HandoffData {
   target: Record<string, unknown>
   ticketUrl?: string
   message: string
+  messageKey?: MessageKey
 }
 
 export interface InlineErrorData {
+  messageKey?: MessageKey
+  values?: Record<string, string | number>
   code: string
   message: string
   retryable: boolean
@@ -56,6 +63,8 @@ export interface InlineErrorData {
  * provider's own error text never reaches this type.
  */
 export interface WidgetError {
+  messageKey?: MessageKey
+  values?: Record<string, string | number>
   code:
     | 'network'
     | 'rate_limited'
@@ -112,6 +121,8 @@ export interface PageContext {
 export interface WidgetController {
   options: Required<Pick<SiteBotOptions, 'endpoint' | 'publicKey'>> & SiteBotOptions
   config: PublicConfig
+  readonly locale: string
+  readonly suggestions?: PublicConfig['ui']['messages']['suggestions']
   readonly messages: UIMessage[]
   readonly state: WidgetState
   readonly error?: WidgetError
@@ -130,6 +141,7 @@ export interface WidgetController {
   reset(): void
   identify(jwt: string | null): void
   clearIdentity(): void
+  setLocale(locale?: string): void
   setContext(data: Record<string, unknown>): void
   setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void
   rehydratePending(pending: NonNullable<PublicConfig['pending']>): void
@@ -152,6 +164,7 @@ export interface SiteBotApi {
   send(text: string, options?: { hidden?: boolean }): void
   identify(jwt: string): void
   clearIdentity(): void
+  setLocale(locale?: string): void
   setContext(data: Record<string, unknown>): void
   setSuggestions(items: NonNullable<PublicConfig['ui']['messages']['suggestions']>): void
   reset(): void

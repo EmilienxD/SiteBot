@@ -45,7 +45,9 @@ function boundary(denied, why, typeOnly = []) {
             message: `${why} (docs/01-architecture.md §3)`,
           })),
           ...typeOnly.map((name) => ({
-            group: spec(name),
+            ...(name === PKG.config
+              ? { regex: '^@sitebot/config(?:$|/(?!i18n(?:/(?:locale|launcher))?$))' }
+              : { group: spec(name) }),
             message: `${why} — use \`import type\` (docs/01-architecture.md §3)`,
             allowTypeImports: true,
           })),

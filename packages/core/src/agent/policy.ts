@@ -60,36 +60,38 @@ export const wallClockIs = (seconds: number, now = Date.now): StopCondition<Tool
 }
 
 export function resolvePolicy(config: ResolvedConfig, options: PolicyOptions = {}): Policy {
-  const enabledTools = config.tools.filter((entry) => !('from' in entry) && entry.enabled !== false)
-
-  if (config.mode === 'chat') {
-    return {
-      stopWhen: [stepCountIs(1)],
-      toolFilter: (tool) => tool.readOnly === true,
-      toolChoice: enabledTools.length > 0 ? 'auto' : 'none',
-      retrieval: config.knowledge.retrieval.mode ?? 'always',
-      approvals: false,
-    }
-  }
-
   const remaining =
     Math.min(config.agent.maxSteps, config.agent.stopWhen.steps) - (options.stepsTaken ?? 0)
   const tokensRemaining = config.agent.stopWhen.tokens - (options.tokensUsed ?? 0)
   const secondsRemaining = config.agent.stopWhen.seconds - (options.activeMs ?? 0) / 1000
   const summarize = config.agent.onMaxSteps === 'summarize'
-  return {
+  const limits = {
     // Reserve the final permitted step for a tool-less summary.
     stopWhen: [
       stepCountIs(Math.max(1, remaining)),
       tokenBudgetIs(tokensRemaining),
       wallClockIs(secondsRemaining, options.now),
     ],
+    ...(summarize ? { summarizeAtStep: Math.max(0, remaining - 1) } : {}),
+    ...(remaining <= 0 ? { stepsExhausted: true as const } : {}),
+    ...(tokensRemaining <= 0 || secondsRemaining <= 0 ? { budgetExhausted: true as const } : {}),
+  }
+  if (config.mode === 'chat') {
+    return {
+      ...limits,
+      toolFilter: (tool) => tool.readOnly === true,
+      // The engine decides whether any tools survived registry construction,
+      // including automatic knowledge search and expanded MCP imports.
+      toolChoice: config.agent.toolChoice,
+      retrieval: config.knowledge.retrieval.mode ?? 'always',
+      approvals: false,
+    }
+  }
+  return {
+    ...limits,
     toolFilter: () => true,
     toolChoice: config.agent.toolChoice,
     retrieval: config.knowledge.retrieval.mode ?? 'tool',
     approvals: true,
-    ...(summarize ? { summarizeAtStep: Math.max(0, remaining - 1) } : {}),
-    ...(remaining <= 0 ? { stepsExhausted: true as const } : {}),
-    ...(tokensRemaining <= 0 || secondsRemaining <= 0 ? { budgetExhausted: true as const } : {}),
   }
 }

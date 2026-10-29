@@ -58,6 +58,19 @@ describe('mapError', () => {
 })
 
 describe('EngineError', () => {
+  it.each(['rate_limited', 'budget_exceeded', 'provider_error'] as const)(
+    'does not cache session/locale-dependent %s responses',
+    (code) => {
+      for (const locale of ['en', 'fr']) {
+        const response = errorResponse(new EngineError(code, { headers: { 'retry-after': '3' } }), {
+          locale,
+          production: true,
+        })
+        expect(response.headers.get('cache-control')).toBe('private, no-store')
+        expect(response.headers.get('retry-after')).toBe('3')
+      }
+    },
+  )
   it('degrades an unknown code to internal_error instead of throwing', () => {
     const error = new EngineError('no_such_code' as never)
     expect(error.code).toBe('internal_error')

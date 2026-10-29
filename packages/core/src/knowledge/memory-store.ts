@@ -25,16 +25,18 @@ export class MemoryVectorStore implements VectorStore {
   #model: string
   #lastIndexed: string
   readonly #persist?: (snapshot: unknown) => Promise<void>
+  #dirty = false
 
   constructor(
     options: {
       model?: string
       chunks?: Chunk[]
+      lastIndexed?: string
       persist?: (snapshot: unknown) => Promise<void>
     } = {},
   ) {
     this.#model = options.model ?? ''
-    this.#lastIndexed = new Date(0).toISOString()
+    this.#lastIndexed = options.lastIndexed ?? new Date(0).toISOString()
     this.#persist = options.persist
     for (const chunk of options.chunks ?? []) this.chunks.set(chunk.id, chunk)
   }
@@ -97,19 +99,24 @@ export class MemoryVectorStore implements VectorStore {
 
   /** Called by the ingest pipeline when the manifest's model becomes known. */
   setModel(model: string): void {
+    if (model !== this.#model) this.#dirty = true
     this.#model = model
   }
 
   protected touched(): void {
+    this.#dirty = true
     this.#lastIndexed = new Date().toISOString()
   }
 
   private async flush(): Promise<void> {
-    if (this.#persist === undefined) return
+    // Loading/querying a bundled snapshot must not require a writable artifact
+    // directory, including when the host explicitly disposes the engine.
+    if (this.#persist === undefined || !this.#dirty) return
     await this.#persist({
       model: this.#model,
       lastIndexed: this.#lastIndexed,
       chunks: [...this.chunks.values()],
     })
+    this.#dirty = false
   }
 }

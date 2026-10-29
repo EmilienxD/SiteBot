@@ -16,13 +16,19 @@ import {
 } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const app = join(root, 'examples/nextjs')
+const appArgument = process.argv.indexOf('--app')
+const app = appArgument < 0 ? join(root, 'examples/nextjs') : resolve(process.argv[appArgument + 1])
+const appRelative = relative(root, app)
+assert(
+  appRelative && !appRelative.startsWith('..') && !isAbsolute(appRelative),
+  'Smoke app must be inside this workspace',
+)
 const deployment = await mkdtemp(join(tmpdir(), 'sitebot-next-standalone-'))
-const deployedApp = join(deployment, 'examples/nextjs')
+const deployedApp = join(deployment, appRelative)
 let server
 let log = ''
 
@@ -61,7 +67,12 @@ try {
   server = spawn(process.execPath, [join(deployedApp, 'server.js')], {
     cwd: deployedApp,
     env: {
-      ...process.env,
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) =>
+          ['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'COMSPEC'].includes(key.toUpperCase()),
+        ),
+      ),
+      NEXT_TELEMETRY_DISABLED: '1',
       PORT: String(port),
       HOSTNAME: '127.0.0.1',
       OPENAI_API_KEY: 'sk-offline-dummy',
@@ -69,6 +80,7 @@ try {
       SITE_URL: origin,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   })
   server.stdout.on('data', (data) => (log += data))
   server.stderr.on('data', (data) => (log += data))
@@ -85,7 +97,7 @@ try {
       '--timeout',
       '30',
     ],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', windowsHide: true },
   )
   assert.equal((await once(smoke, 'exit'))[0], 0, log)
   for (const route of ['/', '/bikes', '/service', '/sitemap.xml']) {
@@ -104,12 +116,20 @@ try {
   }
   assert((await readFile(join(deployedApp, 'chatbot.config.yaml'), 'utf8')).includes('Lumen Bikes'))
   process.stdout.write('Copied standalone deployment smoke passed.\n')
+  const closed = once(server, 'exit')
+  server.kill()
+  await closed
+  if (process.argv.includes('--qa')) {
+    const { verifyNextQa } = await import('./nextjs-qa.mjs')
+    await verifyNextQa(deployedApp, deployment)
+  }
 } finally {
   if (server && server.exitCode === null && server.signalCode === null) {
     const closed = once(server, 'exit')
     server.kill()
     await closed
   }
-  // deployment is the exact directory returned by mkdtemp above.
+  assert.equal(dirname(resolve(deployment)), resolve(tmpdir()))
+  assert(deployment.includes('sitebot-next-standalone-'))
   await rm(deployment, { recursive: true, force: true })
 }

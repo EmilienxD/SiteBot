@@ -30,17 +30,21 @@ export async function createNodeVectorStore(
       // dependency. Hosts must include a prebuilt index explicitly when needed;
       // tracing this dynamic path would otherwise sweep in the entire app.
       const file = resolve(options.baseDir ?? process.cwd(), store.path)
-      let initial: { model?: string; chunks?: Chunk[] } = {}
+      let initial: { model?: string; chunks?: Chunk[]; lastIndexed?: string } = {}
       try {
         initial = JSON.parse(
           await readFile(/* turbopackIgnore: true */ file, 'utf8'),
         ) as typeof initial
-      } catch {
+      } catch (error) {
         // A missing file is a fresh index, not an error.
+        // Corruption and read failures must degrade knowledge and remain
+        // retryable, rather than replacing the evidence with a healthy empty DB.
+        if ((error as { code?: string }).code !== 'ENOENT') throw error
       }
       const memory = new MemoryVectorStore({
         model: options.model ?? initial.model ?? '',
         chunks: initial.chunks ?? [],
+        ...(initial.lastIndexed === undefined ? {} : { lastIndexed: initial.lastIndexed }),
         persist: async (snapshot) => {
           await mkdir(dirname(file), { recursive: true })
           const tmp = `${file}.tmp`

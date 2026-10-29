@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DEFAULT_SUPPORTED_LOCALES, normalizeLocale, validateCatalog } from '../i18n/index.js'
 import { GlobSchema, SelectorSchema, ToolNameSchema } from './primitives.js'
 
 export const POSITIONS = ['bottom-right', 'bottom-left'] as const
@@ -145,6 +146,44 @@ export const A11ySchema = z.strictObject({
   panelAriaLabel: z.string().default('Chat assistant'),
 })
 
+export const LocaleSchema = z
+  .string()
+  .refine((value) => normalizeLocale(value) !== undefined, 'Expected a valid BCP-47 language tag.')
+const StringOverridesSchema = z.record(z.string(), z.string()).check((ctx) => {
+  for (const message of validateCatalog(ctx.value, false))
+    ctx.issues.push({ code: 'custom', input: ctx.value, message })
+})
+export const UiTranslationSchema = z.strictObject({
+  messages: z
+    .strictObject({
+      greeting: z.string().optional(),
+      placeholder: z.string().optional(),
+      errorMessage: z.string().optional(),
+      suggestions: z.array(SuggestionSchema).optional(),
+    })
+    .optional(),
+  a11y: z
+    .strictObject({
+      launcherAriaLabel: z.string().optional(),
+      panelAriaLabel: z.string().optional(),
+    })
+    .optional(),
+  launcher: z
+    .strictObject({
+      label: z.string().optional(),
+      badge: z.strictObject({ text: z.string().optional() }).optional(),
+    })
+    .optional(),
+  panel: z.strictObject({ title: z.string().optional() }).optional(),
+  footer: z
+    .strictObject({
+      text: z.string().optional(),
+      linkText: z.string().optional(),
+      linkUrl: z.string().optional(),
+    })
+    .optional(),
+})
+
 export const UiSchema = z
   .strictObject({
     position: z.enum(POSITIONS).default('bottom-right'),
@@ -160,9 +199,21 @@ export const UiSchema = z
     pageContext: PageContextSchema.prefault({}),
     extract: UiExtractSchema.prefault({}),
     a11y: A11ySchema.prefault({}),
-    locale: z.string().default('auto'),
+    locale: z
+      .union([z.literal('auto'), LocaleSchema])
+      .default('auto')
+      .describe('Fallback locale after host and browser preferences; auto falls back to English.'),
+    supportedLocales: z
+      .array(LocaleSchema)
+      .min(1)
+      .default([...DEFAULT_SUPPORTED_LOCALES])
+      .describe('Deployment allowlist, applied by both widget and server.'),
+    translations: z
+      .record(LocaleSchema, UiTranslationSchema)
+      .default({})
+      .describe('Public deployment-owned copy, keyed by locale.'),
     strings: z
-      .record(z.string(), z.record(z.string(), z.string()))
+      .record(LocaleSchema, StringOverridesSchema)
       .default({})
       .describe('Per-locale overrides, keyed by BCP-47 tag.'),
   })
