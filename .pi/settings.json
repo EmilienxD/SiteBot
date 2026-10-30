@@ -1,0 +1,6 @@
+{
+  "packages": [
+    "npm:harness-pi-pi-transport@file:C:/Users/emb/.harness/pi-packages/46f9819907c3f62abe0c2eacdbffaa136eaac5e44034ad3dd87dddc249d087db.tgz",
+    "npm:harness-pi-subagents@file:C:/Users/emb/.harness/pi-packages/00ea58373d333c62679371dfbb3475f75c24699d707e0dc0bd9541a100a623a0.tgz"
+  ]
+}
