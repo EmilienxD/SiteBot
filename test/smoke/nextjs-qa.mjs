@@ -1,17 +1,17 @@
 /* global Element, document, window */
 // Real relocated Next.js process, real provider SDK/SQLite/widget; synthetic
-// loopback model and embedding HTTP only. Run by nextjs-standalone.mjs.
+// loopback model HTTP only. Run by nextjs-standalone.mjs.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
-import { providerFixture, qaConfig, knowledgeSnapshot } from './nextjs-provider.mjs'
+import { providerFixture, qaConfig, applicationTool } from './nextjs-provider.mjs'
 
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
 const session = () => `s_${randomUUID()}`
@@ -27,7 +27,6 @@ export async function verifyNextQa(app, deployment) {
   await new Promise((done) => socket.close(done))
   const origin = `http://127.0.0.1:${port}`
   const configFile = join(app, 'qa.config.json')
-  const snapshotFile = join(app, '.sitebot/index.json')
   const config = qaConfig(provider.baseUrl)
   let storeEnv = {}
   let requestOrigin
@@ -63,7 +62,6 @@ export async function verifyNextQa(app, deployment) {
           HOSTNAME: '127.0.0.1',
           SITEBOT_CONFIG: inputFile,
           SITEBOT_TEST_CHAT_KEY: provider.keys.chat,
-          SITEBOT_TEST_EMBED_KEY: provider.keys.embedding,
           ...storeEnv,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -156,19 +154,8 @@ export async function verifyNextQa(app, deployment) {
     return { events, citations, text: text.map((e) => e.delta).join('') }
   }
   try {
-    await mkdir(join(app, '.sitebot'), { recursive: true })
+    await writeFile(join(app, 'application-tool.mjs'), applicationTool)
     await mkdir(join(app, 'runtime-state'), { recursive: true })
-    const snapshot = await readFile(snapshotFile, 'utf8').catch((error) => {
-      if (error.code !== 'ENOENT') throw error
-      return undefined
-    })
-    if (snapshot === undefined) await writeFile(snapshotFile, JSON.stringify(knowledgeSnapshot()))
-    else
-      assert.deepEqual(
-        JSON.parse(snapshot),
-        knowledgeSnapshot(),
-        'Traced snapshot does not match the declared synthetic fixture',
-      )
     await save({ ...config, version: 999 })
     await start()
     // A transient config error must not poison the lazy handler forever.
@@ -180,7 +167,7 @@ export async function verifyNextQa(app, deployment) {
     assert.equal(recovered.status, 200, 'Lazy Next handler did not recover after config repair')
     const publicConfig = await recovered.text()
     secretFree(publicConfig)
-    assert(!/backend|apiKey|runtime-inputs|synthetic-embedding/.test(publicConfig))
+    assert(!/backend|apiKey|runtime-inputs/.test(publicConfig))
     assert.match(recovered.headers.get('cache-control'), /^public,/)
     const french = await fetch(`${origin}/api/chat/config`, {
       headers: { 'accept-language': 'fr' },
@@ -195,8 +182,6 @@ export async function verifyNextQa(app, deployment) {
     const health = await fetch(`${origin}/api/chat/health`)
     const report = await health.json()
     assert.equal(health.status, 200, 'Packaged provider SDK or store could not initialize')
-    assert.equal(report.checks.knowledge.chunks, 2, 'Shipped snapshot was not loaded')
-    assert.equal(report.checks.knowledge.lastIndexed, knowledgeSnapshot().lastIndexed)
     assert.equal(report.checks.provider.status, 'ok')
     const id = session()
     const en = await answer('Pro plan trial', id, 'en')
@@ -236,7 +221,7 @@ export async function verifyNextQa(app, deployment) {
     assert.equal((loopCalls.at(-1).body.tools ?? []).length, 0, 'Final answer still exposed search')
     assert.equal(loop.events.filter((event) => event.type === 'tool-output-available').length, 3)
     process.stdout.write(
-      'Production incremental search → answer SSE, bilingual sources and SQLite restart continuity passed.\n',
+      'Production application tool → answer SSE, bilingual sources and SQLite restart continuity passed.\n',
     )
 
     await browserChecks(origin, app, secretFree, provider)
@@ -276,35 +261,7 @@ export async function verifyNextQa(app, deployment) {
     secretFree(await failed.text())
     provider.failure = false
     await answer('Pro plan trial')
-    provider.embeddingFailure = true
-    const unavailable = await post('Pro plan trial', session(), 'fr')
-    assert.equal(unavailable.status, 200)
-    const unavailableText = await unavailable.text()
-    secretFree(unavailableText)
-    assert(
-      !unavailableText.includes('data-citations'),
-      'Embedding failure fabricated source metadata',
-    )
-    assert(unavailableText.includes('unavailable'), 'Missing embedding evidence was not explained')
-    provider.embeddingFailure = false
-    await answer('Pro plan trial')
     process.stdout.write('Production disconnect cancellation and provider-error recovery passed.\n')
-
-    await writeFile(snapshotFile, '{broken snapshot')
-    await restart()
-    const degraded = await (await fetch(`${origin}/api/chat/health`)).json()
-    assert.equal(
-      degraded.checks.knowledge.status,
-      'degraded',
-      'Corrupt snapshot was silently treated as an empty healthy index',
-    )
-    await writeFile(snapshotFile, JSON.stringify(knowledgeSnapshot()))
-    const ready = await (await fetch(`${origin}/api/chat/health`)).json()
-    assert.equal(
-      ready.checks.knowledge.chunks,
-      2,
-      'Knowledge initialization did not recover after snapshot repair',
-    )
 
     await save({
       ...config,
@@ -372,12 +329,12 @@ export async function verifyNextQa(app, deployment) {
     assert.equal((await fetch(`${origin}/api/chat/health`)).status, 200)
     await answer('Pro plan trial')
     process.stdout.write(
-      'Production corrupt-index recovery, rate limiting and pre-provider budget rejection passed (local counters only).\n',
+      'Production rate limiting and pre-provider budget rejection passed (local counters only).\n',
     )
     if (process.env.SITEBOT_LIVE_NEXT_STORES === '1') await sharedStores()
     assert.deepEqual(provider.errors, [])
     process.stdout.write(
-      `Synthetic HTTP requests: ${provider.calls.filter((c) => c.kind === 'chat').length} model, ${provider.calls.filter((c) => c.kind === 'embedding').length} embedding; paid inference: 0.\n`,
+      `Synthetic HTTP requests: ${provider.calls.filter((c) => c.kind === 'chat').length} model, paid inference: 0.\n`,
     )
   } catch (error) {
     // Server diagnostics may contain the intentionally synthetic canaries.
@@ -406,11 +363,9 @@ export async function verifyNextQa(app, deployment) {
     const require = createRequire(new URL('../../packages/core/package.json', import.meta.url))
     const { createClient } = require('redis')
     const pg = require('pg')
-    const { createPgVectorStore } = require('@sitebot/core/node')
     const redis = createClient({ url: redisUrl, socket: { reconnectStrategy: false } })
     redis.on('error', () => {})
     const admin = new pg.Pool({ connectionString: pgUrl })
-    const table = `sitebot_next_${randomUUID().replaceAll('-', '')}`
     let peer
     let ownsSessions = false
     const freshSession = session
@@ -430,17 +385,6 @@ export async function verifyNextQa(app, deployment) {
       // Both backend ports serve one visitor-facing origin. The session's
       // security fingerprint must describe that same visitor on each replica.
       requestOrigin = 'https://docs.example.com'
-      const vectors = await createPgVectorStore({
-        url: pgUrl,
-        table,
-        model: 'synthetic-embedding',
-        dimensions: 3,
-      })
-      try {
-        await vectors.upsert(knowledgeSnapshot().chunks)
-      } finally {
-        await vectors.close()
-      }
       const reserve = createServer().listen(0, '127.0.0.1')
       await once(reserve, 'listening')
       const peerPort = reserve.address().port
@@ -456,11 +400,7 @@ export async function verifyNextQa(app, deployment) {
         const response = await post(question, id, 'fr', undefined, target)
         assert.equal(response.status, expected)
         secretFree(await response.text())
-        assert.equal(
-          provider.calls.length,
-          before,
-          'Shared rejection reached an inference/embedding provider',
-        )
+        assert.equal(provider.calls.length, before, 'Shared rejection reached an model provider')
       }
       for (const type of ['redis', 'postgres']) {
         await stop(peer)
@@ -480,10 +420,6 @@ export async function verifyNextQa(app, deployment) {
             },
           },
           storage: { type, url: '${env.SITEBOT_TEST_STORE_URL}', ttlSeconds: 60 },
-          knowledge: {
-            ...config.knowledge,
-            store: { type: 'pgvector', url: '${env.SITEBOT_TEST_PG_URL}', table },
-          },
           security: {
             allowedOrigins: [requestOrigin],
             rateLimit: {
@@ -505,7 +441,6 @@ export async function verifyNextQa(app, deployment) {
         peer = await launch(peerPort)
         const publicPayload = await (await fetch(`${peerOrigin}/api/chat/config`)).text()
         secretFree(publicPayload)
-        assert(!publicPayload.includes(table), 'Private store namespace appeared in public config')
         const id = freshSession()
         const before = await usage(dayKey)
         const en = await answer('Pro plan trial', id, 'en')
@@ -614,7 +549,7 @@ export async function verifyNextQa(app, deployment) {
         assert.equal(
           provider.calls.length - callsBefore,
           3,
-          'Rejected burst requests accessed chat or embeddings',
+          'Rejected burst requests accessed the model',
         )
         await restart()
         await deny(origin, 'Pro plan trial', 429, burstId)
@@ -644,7 +579,7 @@ export async function verifyNextQa(app, deployment) {
         await deny(origin, 'Pro plan trial')
         await redis.del(dayKey)
         process.stdout.write(
-          `Production shared ${type} sessions/citations + pgvector + Redis counters: two Next processes, both restarted; burst and pre-provider rejection passed. Fixture $15 threshold admitted $40 overlapping output: no strict spend reservation.\n`,
+          `Production shared ${type} sessions/citations + Redis counters: two Next processes, both restarted; burst and pre-provider rejection passed. Fixture $15 threshold admitted $40 overlapping output: no strict spend reservation.\n`,
         )
       }
     } finally {
@@ -658,9 +593,7 @@ export async function verifyNextQa(app, deployment) {
             if (keys.length) await redis.del(keys)
         await redis.quit()
       }
-      if (ownsSessions) {
-        await admin.query(`DROP TABLE IF EXISTS ${table}, ${table}_meta, sitebot_sessions`)
-      }
+      if (ownsSessions) await admin.query('DROP TABLE IF EXISTS sitebot_sessions')
       await admin.end()
       storeEnv = {}
       requestOrigin = undefined
@@ -782,8 +715,6 @@ async function browserChecks(origin, app, secretFree, provider) {
     for (const path of [
       '/qa.config.json',
       '/chatbot.config.yaml',
-      '/runtime-inputs/knowledge.json',
-      '/.sitebot/index.json',
       '/runtime-state/sessions.db',
       '/.env',
       '/.next/server/app/api/chat/route.js.map',

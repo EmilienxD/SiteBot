@@ -63,16 +63,4 @@ describe('examples/cloudflare-worker', () => {
       'assistant',
     ])
   })
-
-  it('switches retrieval on only when Upstash is configured', async () => {
-    const base = { SESSIONS: new FakeKv(), OPENAI_API_KEY: 'sk-test' } as unknown as Env
-    expect(resolveConfig(base).knowledge.sources).toEqual([])
-    const withUpstash = {
-      ...base,
-      UPSTASH_VECTOR_REST_URL: 'https://example.upstash.io',
-      UPSTASH_VECTOR_REST_TOKEN: 'token',
-    }
-    expect(resolveConfig(withUpstash).knowledge.store).toMatchObject({ type: 'upstash' })
-    expect((await createDeps(resolveConfig(withUpstash), withUpstash)).knowledge).toBeDefined()
-  })
 })

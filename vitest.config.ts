@@ -21,7 +21,6 @@ export default defineConfig({
       nodeProject('config'),
       nodeProject('core'),
       nodeProject('server'),
-      nodeProject('ingest'),
       nodeProject('cli'),
       {
         test: {

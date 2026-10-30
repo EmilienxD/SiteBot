@@ -3,14 +3,14 @@
  *
  * The checks are ordered by how early they fail in a real run: a missing
  * environment variable stops everything, an unreachable provider stops every
- * request, a stale index degrades answers. That ordering matters more than it
+ * request, a broken session store loses continuity. That ordering matters more than it
  * looks — a developer reads the first failure and stops, so the first failure
  * has to be the root cause rather than a symptom.
  *
  * Every check reports one of four states. `pass` and `fail` are obvious;
  * `warn` is something that works but will bite in production; `skip` is a check
  * that does not apply, and is printed rather than hidden so the absence of a
- * knowledge index does not look like a passing knowledge index.
+ * session backend does not look like a passing session backend.
  *
  * `--production` runs the deployment checklist from docs/08-security.md §13
  * instead — see {@link productionDoctor}.
@@ -28,7 +28,6 @@ import {
 import { createEngine, importProviderPackage, validateBudgetPricing } from '@sitebot/core'
 import { connectStdioMcp, createNodeSessionStore, createSafeFetch } from '@sitebot/core/node'
 import { lazySessionStore } from '@sitebot/server/node'
-import { probeWebExtraction, readManifest } from '@sitebot/ingest'
 import type { FlagSpecs } from '../args.js'
 import { formatMs, type Ui } from '../terminal.js'
 import { findInlineSecrets, productionDoctor } from '../production.js'
@@ -168,7 +167,6 @@ export async function diagnose(
     ...(await providerChecks(config, options)),
     ...secretChecks(config),
     ...corsChecks(config),
-    ...(await knowledgeChecks(config, options)),
     ...storageChecks(config),
   ]
 
@@ -444,149 +442,6 @@ function corsChecks(config: ResolvedConfig): Check[] {
  * work without an index (docs/06 §1) and reporting a missing index as a failure
  * would make a perfectly good chat-only deployment look broken.
  */
-async function knowledgeChecks(config: ResolvedConfig, options: DiagnoseOptions): Promise<Check[]> {
-  const { knowledge } = config
-
-  if (knowledge.sources.length === 0) {
-    return [
-      {
-        name: 'knowledge',
-        status: 'skip',
-        detail: 'no sources configured — siteContext and page context still apply',
-      },
-    ]
-  }
-
-  const checks: Check[] = []
-
-  if (knowledge.embedding === undefined) {
-    checks.push({
-      name: 'knowledge embedding',
-      status: 'fail',
-      detail: 'sources are configured but knowledge.embedding is not',
-      fix: 'Set knowledge.embedding.provider and .model, then run `sitebot ingest`.',
-    })
-  }
-
-  // Sensitive routes reaching the index — docs/06 §6.
-  const sensitive = knowledge.sources
-    .filter(
-      (source): source is Extract<typeof source, { type: 'sitemap' | 'crawl' }> =>
-        source.type === 'sitemap' || source.type === 'crawl',
-    )
-    .filter((source) => !source.exclude.some((glob) => /admin|account|internal/i.test(glob)))
-  if (sensitive.length > 0) {
-    checks.push({
-      name: 'knowledge exclusions',
-      status: 'warn',
-      detail: `${sensitive.length} web ${sensitive.length === 1 ? 'source excludes' : 'sources exclude'} nothing under /admin, /account or /internal`,
-      fix: 'Add exclude globs before ingesting, or a logged-in page ends up in the index.',
-    })
-  }
-
-  checks.push(await indexCheck(config, options))
-  if (knowledge.sources.some((source) => source.type === 'sitemap' || source.type === 'crawl')) {
-    if (options.offline === true) {
-      checks.push({
-        name: 'knowledge extraction',
-        status: 'skip',
-        detail: 'offline; page extraction was not probed',
-      })
-    } else {
-      try {
-        const sample = await probeWebExtraction(config, {
-          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-        })
-        const short = sample.documents === 0 && sample.shortPages > 0
-        checks.push({
-          name: 'knowledge extraction',
-          status: sample.documents > 0 ? 'pass' : 'warn',
-          detail: short
-            ? `all ${sample.shortPages} sampled pages extract below ${knowledge.extract.minChars} characters`
-            : `${sample.documents} sampled documents extracted`,
-          ...(short
-            ? {
-                fix: knowledge.extract.renderJs
-                  ? 'Check knowledge.extract.selector and minChars; the rendered pages still extract too little content.'
-                  : 'For a JavaScript site, install playwright and Chromium, then set knowledge.extract.renderJs: true. Otherwise check selector and minChars.',
-              }
-            : {}),
-        })
-      } catch (error) {
-        checks.push({
-          name: 'knowledge extraction',
-          status: 'fail',
-          detail: error instanceof Error ? error.message : String(error),
-          fix: 'Check source access and robots.txt. For renderJs, install playwright and run `npx playwright install chromium`.',
-        })
-      }
-    }
-  }
-
-  if (options.offline !== true && knowledge.store.type === 'sqlite') {
-    const path = resolve(options.cwd, knowledge.store.path)
-    const present = await readFile(path).then(
-      () => true,
-      () => false,
-    )
-    checks.push({
-      name: 'knowledge store',
-      status: present ? 'pass' : 'warn',
-      detail: present ? `sqlite at ${knowledge.store.path}` : `no index at ${knowledge.store.path}`,
-      ...(present ? {} : { fix: 'Run `sitebot ingest` to build it.' }),
-    })
-  }
-
-  return checks
-}
-
-/** An index older than this is reported as stale — docs/06 §5 re-ingest cadence. */
-export const INDEX_STALE_AFTER_DAYS = 7
-
-/**
- * The ingest manifest is the index's own record of what it holds and which
- * embedding model built it (docs/06 §3.6), so it answers the three questions
- * that matter without a network call: was it built, does it match the
- * configured model, and how old is it.
- */
-async function indexCheck(config: ResolvedConfig, options: DiagnoseOptions): Promise<Check> {
-  const manifest = await readManifest({ dir: options.cwd })
-  if (manifest === null) {
-    return {
-      name: 'knowledge index',
-      status: 'warn',
-      detail: 'no index has been built — answers fall back to siteContext and page context',
-      fix: 'Run `sitebot ingest` (add --dry-run first for a cost estimate).',
-    }
-  }
-  const model = config.knowledge.embedding?.model
-  if (model !== undefined && manifest.model !== model) {
-    return {
-      name: 'knowledge index',
-      status: 'fail',
-      detail: `built with "${manifest.model}" but knowledge.embedding.model is "${model}"`,
-      fix: 'Embedding spaces do not mix: run `sitebot ingest --force` to rebuild.',
-    }
-  }
-  const documents = Object.values(manifest.sources).reduce(
-    (total, source) => total + Object.keys(source.documents).length,
-    0,
-  )
-  const ageDays = (Date.now() - Date.parse(manifest.builtAt)) / 86_400_000
-  const age = ageDays < 1 ? 'today' : `${Math.floor(ageDays)} day${ageDays < 2 ? '' : 's'} ago`
-  const stale = ageDays > INDEX_STALE_AFTER_DAYS
-  return {
-    name: 'knowledge index',
-    status: documents === 0 || stale ? 'warn' : 'pass',
-    detail: `${documents} document${documents === 1 ? '' : 's'}, built ${age} with ${manifest.model}`,
-    ...(documents === 0
-      ? { fix: 'The sources matched nothing — check their URLs, globs and exclude patterns.' }
-      : stale
-        ? { fix: 'Re-run `sitebot ingest`; unchanged pages cost no embedding calls.' }
-        : {}),
-  }
-}
-
 function storageChecks(config: ResolvedConfig): Check[] {
   const checks: Check[] = []
 

@@ -1,21 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
-import { Index } from '@upstash/vector'
 import pg from 'pg'
 import { createClient } from 'redis'
 import { afterAll, describe, expect, it } from 'vitest'
-import { validateConfig } from '@sitebot/config'
-import type { Chunk, VectorStore } from '../knowledge/store.js'
-import { createUpstashVectorStore } from '../knowledge/upstash-store.js'
 import { runSessionStoreConformance } from '../../test/session-store-conformance.js'
-import { runVectorStoreConformance } from '../../test/vector-store-conformance.js'
 import { createRedisRateLimitStore } from './redis-rate-limit.js'
 import { createPostgresSessionStore, createRedisSessionStore } from './session-stores.js'
-import { createNodeVectorStore } from './vector-store.js'
-import { createPgVectorStore } from './vector-pgvector.js'
 import { createBudgetTracker } from '../guards/budget.js'
-import { retrieve } from '../knowledge/retrieve.js'
 
 /**
  * Real-infrastructure checks — `pnpm test:live` only (docs/04 §10).
@@ -25,44 +17,20 @@ import { retrieve } from '../knowledge/retrieve.js'
  * understands SQL or commands the server does not fails here. Each backend
  * is gated on its own variable and skips without it:
  *
- *   SITEBOT_LIVE_PG_URL        Postgres with the pgvector extension available
+ *   SITEBOT_LIVE_PG_URL        Postgres sessions
  *   SITEBOT_LIVE_REDIS_URL     Redis 6.2+
- *   SITEBOT_LIVE_UPSTASH_URL   A *scratch* Upstash Vector index (cosine) —
- *   SITEBOT_LIVE_UPSTASH_TOKEN it is reset before every case.
  *
  * Tables and keys carry a random run id and are dropped afterwards.
  */
 
 const PG_URL = process.env['SITEBOT_LIVE_PG_URL']
 const REDIS_URL = process.env['SITEBOT_LIVE_REDIS_URL']
-const UPSTASH_URL = process.env['SITEBOT_LIVE_UPSTASH_URL']
-const UPSTASH_TOKEN = process.env['SITEBOT_LIVE_UPSTASH_TOKEN']
 
 const RUN = randomUUID().slice(0, 8)
 let tableCounter = 0
 const nextTable = (kind: string) => `sitebot_live_${RUN}_${kind}_${tableCounter++}`
 
-function chunk(id: string, embedding: number[], sourceId = 'live'): Chunk {
-  return {
-    id,
-    text: `Chunk ${id}`,
-    embedding,
-    metadata: {
-      url: `https://example.com/${id}`,
-      title: id,
-      headingPath: [],
-      sourceId,
-      sourceType: 'text',
-      contentHash: `hash-${id}`,
-      updatedAt: '2026-10-01T00:00:00Z',
-      tokens: 3,
-    },
-  }
-}
-
 /** A unit vector along `axis` in `dimensions` dimensions. */
-const axis = (dimensions: number, index: number) =>
-  Array.from({ length: dimensions }, (_, i) => (i === index ? 1 : 0))
 
 // ── Postgres ────────────────────────────────────────────────────────────────
 
@@ -80,17 +48,6 @@ describe.skipIf(PG_URL === undefined)('live: Postgres', () => {
     await admin.end()
   })
 
-  runVectorStoreConformance({
-    name: 'pgvector (real server)',
-    create: async (model) =>
-      createPgVectorStore({
-        url: PG_URL!,
-        table: table('vec'),
-        dimensions: 3,
-        ...(model === undefined ? {} : { model }),
-      }),
-  })
-
   runSessionStoreConformance('postgres (real server)', (o) =>
     createPostgresSessionStore({
       url: PG_URL!,
@@ -100,74 +57,6 @@ describe.skipIf(PG_URL === undefined)('live: Postgres', () => {
       maxMessagesPerSession: o.max,
     }),
   )
-
-  it('keeps accepting writes after more upserts than the pool has connections', async () => {
-    const store = await createPgVectorStore({ url: PG_URL!, table: table('pool'), dimensions: 3 })
-    try {
-      // pg's default pool holds ten connections; a client that is never
-      // released back makes the eleventh upsert wait forever.
-      for (let index = 0; index < 25; index++) await store.upsert([chunk(`c${index}`, [1, 0, 0])])
-      expect((await store.stats()).chunks).toBe(25)
-    } finally {
-      await store.close()
-    }
-  }, 30_000)
-
-  it('builds from config and accepts the width the embedding model produces', async () => {
-    const name = table('config')
-    const result = validateConfig(
-      {
-        version: 1,
-        name: 'live',
-        backend: { provider: 'anthropic', model: 'm', apiKey: 'k' },
-        prompt: { system: 's' },
-        knowledge: {
-          sources: [{ id: 'live', type: 'text', content: 'x' }],
-          embedding: { provider: 'ollama', model: 'nomic-embed-text' },
-          store: { type: 'pgvector', url: PG_URL!, table: name },
-        },
-      },
-      { env: {} },
-    )
-    if (!result.ok) throw new Error(JSON.stringify(result.errors))
-    // nomic-embed-text is 768-wide; the column used to be a fixed vector(1536).
-    const store = await createNodeVectorStore(result.value.knowledge!.store, {
-      model: 'nomic-embed-text',
-    })
-    try {
-      await store.upsert([chunk('wide-a', axis(768, 0)), chunk('wide-b', axis(768, 1))])
-      const [first] = await store.query(axis(768, 1), { topK: 1 })
-      expect(first?.chunk.id).toBe('wide-b')
-      expect(first?.score).toBeCloseTo(1, 5)
-      expect((await store.stats()).model).toBe('nomic-embed-text')
-    } finally {
-      await store.close()
-    }
-  })
-
-  it('refuses an embedding of the wrong width with the dimensions in the message', async () => {
-    const store = await createPgVectorStore({ url: PG_URL!, table: table('width'), dimensions: 3 })
-    try {
-      await expect(store.upsert([chunk('bad', [1, 0, 0, 0])])).rejects.toThrow(/3.*4|4.*3/)
-      expect((await store.stats()).chunks).toBe(0)
-    } finally {
-      await store.close()
-    }
-  })
-
-  it('rejects a filter key that tries to break out of the JSON path', async () => {
-    const store = await createPgVectorStore({ url: PG_URL!, table: table('inject'), dimensions: 3 })
-    try {
-      await store.upsert([chunk('a', [1, 0, 0])])
-      const results = await store.query([1, 0, 0], {
-        topK: 5,
-        filter: { "title' OR '1'='1": 'x' },
-      })
-      expect(results).toEqual([])
-    } finally {
-      await store.close()
-    }
-  })
 
   it('shares sessions across connections, renews retention and expires stored citation state', async () => {
     const name = table('continuity')
@@ -202,110 +91,10 @@ describe.skipIf(PG_URL === undefined)('live: Postgres', () => {
     }
   })
 
-  it('rolls back partial vector batches, releases the connection and permits recovery', async () => {
-    const store = await createPgVectorStore({
-      url: PG_URL!,
-      table: table('rollback'),
-      dimensions: 3,
-    })
-    try {
-      for (let n = 0; n < 12; n++) {
-        await expect(
-          store.upsert([chunk('valid', [1, 0, 0]), chunk('bad', [1, 0])]),
-        ).rejects.toThrow()
-      }
-      expect((await store.stats()).chunks).toBe(0)
-      await store.upsert([chunk('recovered', [1, 0, 0])])
-      expect((await store.query([1, 0, 0], { topK: 1 }))[0]?.chunk.id).toBe('recovered')
-    } finally {
-      await store.close()
-    }
-  })
-
-  it('preserves multilingual citation fields and relevance/fallback through real SQL filters', async () => {
-    const store = await createPgVectorStore({
-      url: PG_URL!,
-      table: table('language'),
-      dimensions: 3,
-    })
-    const localized = (id: string, vector: number[], lang?: string) => {
-      const c = chunk(id, vector)
-      if (lang) Object.assign(c.metadata, { lang, language: lang.split('-')[0] })
-      return c
-    }
-    const config = validateConfig(
-      {
-        version: 1,
-        name: 'synthetic vectors',
-        backend: { provider: 'ollama', model: 'fixture' },
-        prompt: { system: 'fixture' },
-        knowledge: {
-          retrieval: { topK: 1, minScore: 0.5, expandNeighbours: 0, dedupeByUrl: false },
-        },
-      },
-      { env: {} },
-    )
-    if (!config.ok) throw new Error('Invalid fixture config')
-    const deps = {
-      store,
-      embedder: {
-        modelId: 'synthetic-vectors',
-        embed: async () => ({ embedding: [1, 0, 0], tokens: 1 }),
-      },
-    }
-    try {
-      const english = localized('en', [1, 0, 0], 'en')
-      await store.upsert([
-        english,
-        localized('fr', [0.8, 0.6, 0], 'fr'),
-        localized('fr-ca', [0, 1, 0], 'fr-CA'),
-        localized('unknown', [0, 0, 1]),
-      ])
-      expect(
-        (await retrieve(deps, 'synthetic query', config.value, 'fr-CA')).hits[0],
-      ).toMatchObject({ id: 'en', lang: 'en', url: english.metadata.url })
-      config.value.knowledge.retrieval.languagePreference = 'locale-first'
-      expect((await retrieve(deps, 'synthetic query', config.value, 'fr-CA')).hits[0]?.id).toBe(
-        'fr',
-      )
-      await store.deleteByIds(['fr'])
-      expect((await retrieve(deps, 'synthetic query', config.value, 'fr-CA')).hits[0]?.id).toBe(
-        'en',
-      )
-      expect((await store.documentChunks!(english.metadata.url))[0]).toEqual(english)
-      expect((await store.query([0, 0, 1], { topK: 1 }))[0]?.chunk.id).toBe('unknown')
-    } finally {
-      await store.close()
-    }
-  })
-
-  it('does not close a caller-owned pool on success or initialization failure', async () => {
-    const pool = new pg.Pool({ connectionString: PG_URL, max: 1 })
-    try {
-      const store = await createPgVectorStore({
-        url: PG_URL!,
-        table: table('ownership'),
-        dimensions: 3,
-        pool,
-      })
-      await store.close()
-      expect((await pool.query('SELECT 1 AS n')).rows[0]).toEqual({ n: 1 })
-      await expect(
-        createPgVectorStore({ url: PG_URL!, table: table('init_failure'), dimensions: -1, pool }),
-      ).rejects.toThrow()
-      expect((await pool.query('SELECT 1 AS n')).rows[0]).toEqual({ n: 1 })
-    } finally {
-      if (!pool.ended) await pool.end()
-    }
-  })
-
-  it('releases owned pools when vector or session initialization fails', async () => {
+  it('releases owned pools when session initialization fails', async () => {
     const marker = `sitebot_failure_${RUN}`
     const url = new URL(PG_URL!)
     url.searchParams.set('application_name', marker)
-    await expect(
-      createPgVectorStore({ url: url.href, table: table('owned_failure'), dimensions: -1 }),
-    ).rejects.toThrow()
     const invalid = table('invalid_sessions')
     await admin.query(`CREATE TABLE ${invalid} (id TEXT PRIMARY KEY)`)
     await expect(createPostgresSessionStore({ url: url.href, table: invalid })).rejects.toThrow()
@@ -516,68 +305,3 @@ describe.skipIf(REDIS_URL === undefined)('live: Redis', () => {
     }
   })
 })
-
-// ── Upstash Vector ──────────────────────────────────────────────────────────
-
-describe.skipIf(UPSTASH_URL === undefined || UPSTASH_TOKEN === undefined)(
-  'live: Upstash Vector',
-  () => {
-    // A skipped describe still runs its body, and the SDK throws on a missing token.
-    let client: Index | undefined
-    const index = () => (client ??= new Index({ url: UPSTASH_URL!, token: UPSTASH_TOKEN! }))
-
-    /** Upstash indexes asynchronously; reads are only meaningful once drained. */
-    async function settled(): Promise<void> {
-      for (let attempt = 0; attempt < 60; attempt++) {
-        if ((await index().info()).pendingVectorCount === 0) return
-        await new Promise((resolve) => setTimeout(resolve, 500))
-      }
-      throw new Error('Upstash index did not finish indexing within 30 s')
-    }
-
-    /**
-     * The conformance corpus is three-dimensional; a hosted index has a fixed
-     * width. Zero-padding preserves every cosine similarity exactly.
-     */
-    function padded(store: VectorStore, width: number): VectorStore {
-      const pad = (vector: number[]) => [...vector, ...new Array(width - vector.length).fill(0)]
-      return {
-        ...store,
-        upsert: async (chunks) => {
-          await store.upsert(chunks.map((c) => ({ ...c, embedding: pad(c.embedding) })))
-          await settled()
-        },
-        query: (embedding, options) => store.query(pad(embedding), options),
-        deleteBySource: async (sourceId) => {
-          await store.deleteBySource(sourceId)
-          await settled()
-        },
-        deleteByIds: async (ids) => {
-          await store.deleteByIds(ids)
-          await settled()
-        },
-        stats: () => store.stats(),
-        close: () => store.close(),
-      }
-    }
-
-    runVectorStoreConformance({
-      name: 'upstash (hosted)',
-      create: async (model) => {
-        await index().reset()
-        await settled()
-        const { dimension } = await index().info()
-        const store = await createUpstashVectorStore({
-          url: UPSTASH_URL!,
-          token: UPSTASH_TOKEN!,
-          ...(model === undefined ? {} : { model }),
-        })
-        return padded(store, dimension)
-      },
-    })
-
-    afterAll(async () => {
-      await index().reset()
-    })
-  },
-)

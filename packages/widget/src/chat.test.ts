@@ -325,6 +325,54 @@ describe('failure and degradation (docs/07 §10)', () => {
     expect(controller.inlineError).toMatchObject({ retryable: true })
     expect(controller.state).toBe('idle')
   })
+
+  it.each([
+    ['en', 'The assistant has reached its usage limit for now.'],
+    ['fr', 'L’assistant a atteint sa limite d’utilisation.'],
+  ])(
+    'shows a terminal tool-only limit in %s without retrying, and clears it on the next turn',
+    async (locale, message) => {
+      fetchMock.mockResolvedValueOnce(
+        sse([
+          { type: 'start', messageId: 'a1' },
+          {
+            type: 'tool-input-available',
+            toolCallId: 'c',
+            toolName: 'search_knowledge_base',
+            input: {},
+          },
+          { type: 'tool-output-available', toolCallId: 'c', output: { matches: [] } },
+          {
+            type: 'data-error',
+            data: {
+              code: 'budget_exceeded',
+              messageKey: 'budget_exceeded',
+              message,
+              retryable: false,
+            },
+          },
+          { type: 'finish', finishReason: 'error' },
+        ]),
+      )
+      const controller = setup((config) => {
+        config.ui.locale = locale
+      })
+      await controller.send('Question')
+      expect(controller.inlineError).toMatchObject({
+        code: 'budget_exceeded',
+        messageKey: 'budget_exceeded',
+        message,
+        retryable: false,
+      })
+      expect(controller.state).toBe('idle')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(controller.messages[1]?.parts.some((part) => part.type === 'text')).toBe(false)
+      fetchMock.mockResolvedValueOnce(sse(answer('A new answer.', 'a2')))
+      await controller.send('Follow-up')
+      expect(controller.inlineError).toBeUndefined()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    },
+  )
 })
 
 describe('suspend / resume (docs/03 §5)', () => {
@@ -562,48 +610,8 @@ describe('suspend / resume (docs/03 §5)', () => {
   })
 })
 
-describe('navigation waits for the run to settle', () => {
-  it('a client-tool navigate leaves the page only after the result is posted back', async () => {
-    const assign = vi.fn()
-    vi.stubGlobal('location', { ...location, assign, pathname: '/', href: 'https://acme.test/' })
-    fetchMock.mockResolvedValueOnce(
-      sse([
-        { type: 'start', messageId: 'a1' },
-        {
-          type: 'tool-input-available',
-          toolCallId: 'tc1',
-          toolName: 'go_to',
-          input: { path: '/pricing' },
-        },
-        {
-          type: 'data-client-tool-call',
-          transient: true,
-          data: { runId: 'r_n', toolCallId: 'tc1', toolName: 'go_to', input: { path: '/pricing' } },
-        },
-        { type: 'finish' },
-      ]),
-    )
-    let resumeSeenBeforeNavigation = false
-    fetchMock.mockImplementationOnce(async () => {
-      resumeSeenBeforeNavigation = assign.mock.calls.length === 0
-      return sse(answer('Here is pricing.', 'a1'))
-    })
-    const controller = setup((config) => {
-      config.capabilities.clientTools = ['go_to']
-      config.capabilities.clientToolIds = { go_to: 'navigate' }
-      config.capabilities.routes = ['/pricing']
-    })
-    await controller.send('Show me pricing')
-    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith('/pricing'))
-    expect(resumeSeenBeforeNavigation).toBe(true)
-    expect(body(1).resume).toMatchObject({
-      clientToolResults: [{ toolCallId: 'tc1', output: { navigated: true, path: '/pricing' } }],
-    })
-  })
-})
-
 describe('data parts', () => {
-  it('navigates only to server-declared routes', async () => {
+  it('ignores legacy navigation data parts', async () => {
     const assign = vi.fn()
     vi.stubGlobal('location', { ...location, assign, pathname: '/', href: 'https://acme.test/' })
     fetchMock.mockResolvedValueOnce(
@@ -614,19 +622,12 @@ describe('data parts', () => {
         { type: 'finish' },
       ]),
     )
-    const controller = setup((config) => {
-      config.capabilities.routes = ['/pricing']
-    })
+    const controller = setup()
     await controller.send('Take me to pricing')
-    expect(assign).toHaveBeenCalledTimes(1)
-    expect(assign).toHaveBeenCalledWith('/pricing')
-    expect(events).toContainEqual({
-      type: 'error',
-      detail: expect.objectContaining({ code: 'route_not_allowed' }),
-    })
+    expect(assign).not.toHaveBeenCalled()
   })
 
-  it('handoff, status, usage and suggestions update the controller', async () => {
+  it('ignores legacy effects while status, usage and suggestions update the controller', async () => {
     fetchMock.mockResolvedValueOnce(
       sse([
         { type: 'start' },
@@ -652,9 +653,8 @@ describe('data parts', () => {
     expect(controller.suggestions).toEqual([
       { label: 'More', action: { type: 'send', text: 'More' } },
     ])
-    expect(controller.handoff).toMatchObject({ message: 'We will email you.' })
     expect(controller.usage).toEqual({ inputTokens: 1, outputTokens: 2, costUsd: 0 })
-    expect(events).toContainEqual({ type: 'handoff', detail: { target: { kind: 'email' } } })
+    expect(events.some((event) => String(event.type) === 'handoff')).toBe(false)
     // data-status is transient: never part of the stored message.
     expect(JSON.stringify(controller.messages)).not.toContain('data-status')
   })

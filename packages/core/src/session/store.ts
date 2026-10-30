@@ -27,6 +27,8 @@ export interface SessionStore {
   set(session: StoredSession): Promise<void>
   append(id: string, messages: UIMessage[]): Promise<StoredSession>
   delete(id: string): Promise<void>
+  /** Atomically consume one allowed invocation. Stores lacking this fail closed for capped tools. */
+  claimToolCall?(sessionId: string, name: string, limit: number): Promise<boolean>
   dispose?(): Promise<void>
 }
 
@@ -63,6 +65,10 @@ export class NoneSessionStore implements SessionStore {
  */
 export class MemorySessionStore implements SessionStore {
   private readonly sessions = new Map<string, StoredSession>()
+  private readonly toolCounts = new Map<
+    string,
+    { counts: Map<string, number>; updatedAt: number }
+  >()
   private readonly ttlMs: number
   private readonly maxMessages: number
   private readonly now: () => number
@@ -82,6 +88,7 @@ export class MemorySessionStore implements SessionStore {
     if (session === undefined) return null
     if (this.expired(session)) {
       this.sessions.delete(id)
+      this.toolCounts.delete(id)
       return null
     }
     return structuredClone(session)
@@ -89,6 +96,8 @@ export class MemorySessionStore implements SessionStore {
 
   async set(session: StoredSession): Promise<void> {
     this.sweep()
+    const counts = this.toolCounts.get(session.id)
+    if (counts) counts.updatedAt = this.now()
     this.sessions.set(session.id, {
       ...structuredClone(session),
       messages: session.messages.slice(-this.maxMessages),
@@ -113,10 +122,27 @@ export class MemorySessionStore implements SessionStore {
 
   async delete(id: string): Promise<void> {
     this.sessions.delete(id)
+    this.toolCounts.delete(id)
+  }
+
+  async claimToolCall(id: string, name: string, limit: number): Promise<boolean> {
+    const time = this.now()
+    let record = this.toolCounts.get(id)
+    if (record === undefined || time - record.updatedAt > this.ttlMs) {
+      record = { counts: new Map(), updatedAt: time }
+      this.toolCounts.set(id, record)
+    }
+    const count = record.counts.get(name) ?? 0
+    if (count >= limit) return false
+    record.counts.set(name, count + 1)
+    record.updatedAt = time
+    return true
   }
 
   /** Drop expired sessions. Called on write so the map cannot grow unbounded. */
   private sweep(): void {
+    for (const [id, record] of this.toolCounts)
+      if (this.now() - record.updatedAt > this.ttlMs) this.toolCounts.delete(id)
     for (const [id, session] of this.sessions) {
       if (this.expired(session)) this.sessions.delete(id)
     }

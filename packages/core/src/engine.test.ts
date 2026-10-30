@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { readSse, streamedText, testConfig, testContext, userMessage } from '../test/helpers.js'
 import { createEngine } from './engine.js'
 import { MemorySessionStore } from './session/store.js'
-import { MemoryVectorStore } from './knowledge/memory-store.js'
 import { MemoryRateLimitStore } from './guards/rate-limit.js'
 import { McpClientPool } from './tools/mcp.js'
 import { silentLogger } from './telemetry/logger.js'
@@ -33,14 +32,11 @@ describe('engine resource cleanup', () => {
     })
     const counters = new MemoryRateLimitStore()
     const disposeCounters = vi.spyOn(counters, 'dispose').mockRejectedValue(counterFailure)
-    const knowledge = new MemoryVectorStore()
-    const closeKnowledge = vi.spyOn(knowledge, 'close')
     const mcp = new McpClientPool()
     const disposeMcp = vi.spyOn(mcp, 'dispose')
     const engine = createEngine(testConfig(), {
       sessionStore: sessions,
       rateLimitStore: counters,
-      knowledge: { store: knowledge },
       mcpPool: mcp,
     })
     await expect(engine.dispose()).rejects.toMatchObject({
@@ -48,7 +44,6 @@ describe('engine resource cleanup', () => {
     })
     expect(sessions.dispose).toHaveBeenCalledOnce()
     expect(disposeCounters).toHaveBeenCalledOnce()
-    expect(closeKnowledge).toHaveBeenCalledOnce()
     expect(disposeMcp).toHaveBeenCalledOnce()
   })
 })
@@ -266,28 +261,10 @@ describe('createEngine().handleChat', () => {
             suggestions: [{ label: 'Pricing', action: { type: 'navigate', path: '/pricing' } }],
           },
         },
-        knowledge: {
-          sources: [{ type: 'sitemap', url: 'https://acme.test/sitemap.xml' }],
-          embedding: { provider: 'openai', model: 'text-embedding-3-small' },
-        },
       }),
       {
         adapters: adapterFor(textModel(['ok'])),
         sessionStore: store,
-        knowledge: {
-          store: {
-            upsert: async () => {},
-            query: async () => [],
-            deleteBySource: async () => {},
-            deleteByIds: async () => {},
-            stats: async () => ({ documents: 0, chunks: 0, lastIndexed: '', model: 'test' }),
-            close: async () => {},
-          },
-          embedder: {
-            modelId: 'test',
-            embed: async () => ({ embedding: [0.1], tokens: 1 }),
-          },
-        },
       },
     )
     const response = await engine.handleChat(chatRequest(), testContext())
@@ -305,13 +282,6 @@ describe('createEngine().handleChat', () => {
     )
     expect(chunks).toContainEqual(
       expect.objectContaining({
-        type: 'data-status',
-        transient: true,
-        data: { text: 'Searching documentation…', messageKey: 'searching' },
-      }),
-    )
-    expect(chunks).toContainEqual(
-      expect.objectContaining({
         type: 'data-usage',
         data: { inputTokens: 10, outputTokens: 5, costUsd: 0 },
       }),
@@ -322,57 +292,6 @@ describe('createEngine().handleChat', () => {
     expect(parts.some((part) => part.type === 'data-suggestions')).toBe(true)
     expect(parts.some((part) => part.type === 'data-usage')).toBe(true)
     expect(parts.some((part) => part.type === 'data-status')).toBe(false)
-  })
-
-  it.each([
-    [
-      'navigate',
-      { path: '/pricing' },
-      { type: 'data-navigate', data: { path: '/pricing', newTab: false } },
-    ],
-    [
-      'handoff',
-      {},
-      {
-        type: 'data-handoff',
-        data: expect.objectContaining({ message: 'A person will reply.' }),
-      },
-    ],
-  ] as const)('emits %s builtin effects as persistent data parts', async (id, input, expected) => {
-    const store = new MemorySessionStore()
-    const engine = createEngine(
-      testConfig({
-        mode: 'agent',
-        storage: { type: 'memory' },
-        siteContext: { routes: [{ path: '/pricing' }] },
-        tools: [
-          {
-            name: id,
-            parameters: { type: 'object', properties: {}, additionalProperties: true },
-            executor:
-              id === 'handoff'
-                ? {
-                    type: 'builtin',
-                    id,
-                    target: { kind: 'url', url: 'https://support.test', includeTranscript: false },
-                    message: 'A person will reply.',
-                  }
-                : { type: 'builtin', id },
-          },
-        ],
-      }),
-      { adapters: adapterFor(toolModel(id, input)), sessionStore: store },
-    )
-    const chunks = (await readSse(await engine.handleChat(chatRequest(), testContext())))
-      .filter((event) => event !== '[DONE]')
-      .map((event) => JSON.parse(event) as Record<string, unknown>)
-    expect(chunks).toContainEqual(expect.objectContaining(expected))
-    const stored = await store.get(SESSION)
-    expect(
-      stored?.messages.some((message) =>
-        (message.parts as Array<{ type: string }>).some((part) => part.type === expected.type),
-      ),
-    ).toBe(true)
   })
 
   it('sends the composed system prompt to the model', async () => {
@@ -770,9 +689,11 @@ describe('getPublicConfig / health', () => {
         storage: { type: 'memory' },
         tools: [
           {
+            description: 'Test application tool.',
+            outputSchema: {},
             name: 'create_ticket',
             parameters: { type: 'object', properties: {} },
-            executor: { type: 'builtin', id: 'submit_feedback' },
+            execute: () => ({ iso: 'registered-handler' }),
             requiresApproval: true,
             approvalRisk: 'high',
           },
@@ -834,10 +755,12 @@ describe('getPublicConfig / health', () => {
 
 describe('hooks (docs/04 §9)', () => {
   const getTime = {
+    parameters: { type: 'object' },
+    outputSchema: {},
     name: 'get_time',
     description: 'Current time. Use when the visitor asks what time it is.',
     readOnly: true,
-    executor: { type: 'builtin', id: 'get_time' },
+    execute: () => ({ iso: 'registered-handler' }),
   } as const
 
   it('onMessage rewrites the visitor message before the model sees it', async () => {
@@ -864,11 +787,11 @@ describe('hooks (docs/04 §9)', () => {
     expect(sent).not.toContain('original text')
   })
 
-  it('onPromptComposed has the final say on the system prompt', async () => {
+  it('prompt.system resolves trusted instructions', async () => {
     const model = textModel(['ok'])
     const engine = createEngine(
       testConfig({
-        hooks: { onPromptComposed: (prompt: string) => `${prompt}\nALWAYS ANSWER IN FRENCH.` },
+        prompt: { system: () => 'ALWAYS ANSWER IN FRENCH.' },
       } as never),
       { adapters: adapterFor(model) },
     )
@@ -878,7 +801,7 @@ describe('hooks (docs/04 §9)', () => {
     expect(JSON.stringify(model.doStreamCalls[0]?.prompt)).toContain('ALWAYS ANSWER IN FRENCH.')
   })
 
-  it('onToolCall sees every server tool call and can short-circuit it', async () => {
+  it('onToolCall observes calls while its return value is ignored', async () => {
     const calls: unknown[] = []
     const model = toolModel('get_time', { timezone: 'UTC' })
     const engine = createEngine(
@@ -901,7 +824,8 @@ describe('hooks (docs/04 §9)', () => {
       ),
     )
     expect(calls).toEqual([{ name: 'get_time', input: { timezone: 'UTC' } }])
-    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('from-the-hook')
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('registered-handler')
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).not.toContain('from-the-hook')
   })
 
   it('onStep and onFinish report steps, usage and the model', async () => {
@@ -969,7 +893,7 @@ describe('hooks (docs/04 §9)', () => {
     const engine = createEngine(
       testConfig({
         hooks: {
-          onPromptComposed: () => {
+          onStep: () => {
             throw new Error('bug in the hook')
           },
         },
@@ -983,7 +907,7 @@ describe('hooks (docs/04 §9)', () => {
       ),
     )
     expect(text).toBe('still answered')
-    expect(logged).toContain('onPromptComposed hook threw')
+    expect(logged).toContain('onStep hook threw')
   })
 })
 
@@ -995,6 +919,7 @@ describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () =
         mode: 'agent',
         tools: [
           {
+            outputSchema: {},
             name: 'get_time',
             description: 'Current time. Use when the visitor asks what time it is.',
             readOnly: true,
@@ -1003,7 +928,7 @@ describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () =
               properties: { timezone: { type: 'string' } },
               required: ['timezone'],
             },
-            executor: { type: 'builtin', id: 'get_time' },
+            execute: () => ({ iso: 'registered-handler' }),
           },
         ],
       }),
@@ -1015,7 +940,7 @@ describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () =
         testContext(),
       ),
     )
-    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('invalid_input')
+    expect(JSON.stringify(model.doStreamCalls[1]?.prompt)).toContain('Invalid tool input.')
   })
 
   it('turns an executor failure into tool_failed, and the answer still streams', async () => {
@@ -1025,6 +950,7 @@ describe('tool failures reach the model as data (docs/05 §1 rules 1–2)', () =
         mode: 'agent',
         tools: [
           {
+            outputSchema: {},
             name: 'order_status',
             description: 'Order status. Use when the visitor asks about an order.',
             readOnly: true,

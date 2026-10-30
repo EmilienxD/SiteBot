@@ -1,6 +1,5 @@
 import { containsEnvPlaceholder } from './env.js'
 import { childPath, didYouMean } from './errors.js'
-import { isMcpImport } from './schema/tools.js'
 import type { SiteBotConfig } from './schema/config.js'
 import type { BackendEntry } from './schema/backend.js'
 import type { BuildTarget, ConfigError, ConfigWarning } from './types.js'
@@ -36,11 +35,18 @@ export function checkCrossFields(
   const errors: ConfigError[] = []
   const warnings: ConfigWarning[] = []
 
+  config.tools.forEach((entry, index) => {
+    if (entry.maxCallsPerSession !== undefined && config.storage.type === 'none')
+      errors.push({
+        path: `tools[${index}].maxCallsPerSession`,
+        rule: 'tools/session-limit-needs-storage',
+        message: 'Session tool limits require session storage.',
+      })
+  })
+
   ruleChatForbidsWritableTools(config, errors)
   ruleAgentForbidsStatelessStorage(config, errors)
   ruleProviderRequirements(config, errors)
-  ruleKnowledgeNeedsEmbedding(config, errors)
-  ruleStoreNotAvailableOnEdge(config, context, errors)
   ruleAuthRequiredNeedsJwt(config, errors)
   ruleAuthenticatedToolsNeedAuth(config, errors)
   ruleSuggestionToolsExist(config, errors)
@@ -51,7 +57,6 @@ export function checkCrossFields(
   ruleNoWildcardOrigin(config, errors)
   ruleHttpParamsStayInThePath(config, errors)
 
-  warnMcpImportWithoutAllow(config, errors, warnings)
   warnUnapprovedWritableTools(config, warnings)
   warnPublicFieldFromEnv(config, context, warnings)
 
@@ -70,11 +75,9 @@ function warnUnapprovedWritableTools(config: SiteBotConfig, warnings: ConfigWarn
   const never = config.agent.approvalPolicy === 'never'
   config.tools.forEach((entry, index) => {
     if (entry.readOnly || entry.enabled === false) return
-    const gated =
-      entry.requiresApproval ||
-      (!isMcpImport(entry) && config.agent.approvalRequired.includes(entry.name))
+    const gated = entry.requiresApproval || config.agent.approvalRequired.includes(entry.name)
     if (gated && !never) return
-    const name = isMcpImport(entry) ? `MCP import "${entry.id}"` : `Writable tool "${entry.name}"`
+    const name = `Writable tool "${entry.name}"`
     warnings.push({
       path: `tools[${index}]`,
       message: never
@@ -98,7 +101,7 @@ function ruleChatForbiddenNames(config: SiteBotConfig): string[] {
   const offenders: string[] = []
   for (const entry of config.tools) {
     if (entry.readOnly === true) continue
-    offenders.push(isMcpImport(entry) ? `mcp:${entry.id}` : entry.name)
+    offenders.push(entry.name)
   }
   return offenders
 }
@@ -165,39 +168,7 @@ function checkBackendEntry(entry: BackendEntry, path: string, errors: ConfigErro
 
 // ── 5 ───────────────────────────────────────────────────────────────────────
 
-function ruleKnowledgeNeedsEmbedding(config: SiteBotConfig, errors: ConfigError[]): void {
-  if (config.knowledge.sources.length === 0) return
-  if (config.knowledge.embedding !== undefined) return
-
-  errors.push({
-    path: 'knowledge.embedding',
-    message: 'knowledge.sources is not empty, so knowledge.embedding is required.',
-    expected: 'an embedding provider and model',
-    fix: 'Add `knowledge.embedding: { provider: openai, model: text-embedding-3-small }`, or remove the sources to turn the knowledge base off.',
-    rule: 'cross-field/5',
-  })
-}
-
 // ── 6 ───────────────────────────────────────────────────────────────────────
-
-function ruleStoreNotAvailableOnEdge(
-  config: SiteBotConfig,
-  context: CrossFieldContext,
-  errors: ConfigError[],
-): void {
-  if (context.target !== 'edge' || config.knowledge.store.type !== 'sqlite') {
-    return
-  }
-
-  errors.push({
-    path: 'knowledge.store.type',
-    message: 'knowledge.store.type "sqlite" is not available on the edge runtime.',
-    value: 'sqlite',
-    expected: 'memory | pgvector | upstash | custom',
-    fix: 'Edge runtimes have no filesystem and cannot load the sqlite-vec native extension. Use `upstash` for a zero-ops edge store, or `pgvector` if you already run Postgres.',
-    rule: 'cross-field/6',
-  })
-}
 
 // ── 7 ───────────────────────────────────────────────────────────────────────
 
@@ -221,7 +192,7 @@ function ruleAuthenticatedToolsNeedAuth(config: SiteBotConfig, errors: ConfigErr
 
   config.tools.forEach((entry, index) => {
     if (entry.scope !== 'authenticated') return
-    const label = isMcpImport(entry) ? `mcp:${entry.id}` : entry.name
+    const label = entry.name
     errors.push({
       path: `tools[${index}].scope`,
       message: `Tool "${label}" has scope: authenticated, but security.auth.mode is "none" — there is no verified identity to check against.`,
@@ -238,7 +209,7 @@ function ruleAuthenticatedToolsNeedAuth(config: SiteBotConfig, errors: ConfigErr
 function ruleSuggestionToolsExist(config: SiteBotConfig, errors: ConfigError[]): void {
   const configured = new Set<string>()
   for (const entry of config.tools) {
-    if (!isMcpImport(entry)) configured.add(entry.name)
+    configured.add(entry.name)
   }
 
   config.ui.messages.suggestions.forEach((suggestion, index) => {
@@ -255,9 +226,6 @@ function ruleSuggestionToolsExist(config: SiteBotConfig, errors: ConfigError[]):
           ? `one of: ${[...configured].join(', ')}`
           : 'the name of a tool declared in `tools`',
       fix: `Add a tool named "${tool}" to \`tools\`, or point the suggestion at an existing one.`,
-      // Names imported in bulk from an MCP server are not known until the
-      // server is reached, so a pill pointing at one still fails here. That is
-      // the intended trade — a dead quick-reply pill is a visible bug.
       suggestion: didYouMean(tool, [...configured]),
       rule: 'cross-field/9',
     })
@@ -300,7 +268,6 @@ function findEnvPlaceholders(node: unknown, path: string): string[] {
 function ruleToolNamesAreUnique(config: SiteBotConfig, errors: ConfigError[]): void {
   const seen = new Map<string, number>()
   config.tools.forEach((entry, index) => {
-    if (isMcpImport(entry)) return
     const first = seen.get(entry.name)
     if (first === undefined) {
       seen.set(entry.name, index)
@@ -326,11 +293,7 @@ function ruleStdioNotAvailableOnEdge(
   if (context.target !== 'edge') return
 
   config.tools.forEach((entry, index) => {
-    const server = isMcpImport(entry)
-      ? entry.server
-      : entry.executor?.type === 'mcp'
-        ? entry.executor.server
-        : undefined
+    const server = entry.executor?.type === 'mcp' ? entry.executor.server : undefined
     if (server?.transport !== 'stdio') return
 
     errors.push({
@@ -375,7 +338,7 @@ export function modelParameterIn(text: string): string | undefined {
  */
 function ruleHttpParamsStayInThePath(config: SiteBotConfig, errors: ConfigError[]): void {
   config.tools.forEach((entry, index) => {
-    if (isMcpImport(entry) || entry.executor?.type !== 'http') return
+    if (entry.executor?.type !== 'http') return
     const { url, headers } = entry.executor
     // Everything before the path: `scheme://host:port`.
     const origin = /^[^/]*\/\/[^/]*/.exec(url)?.[0] ?? url.split('/')[0] ?? ''
@@ -406,33 +369,6 @@ function ruleHttpParamsStayInThePath(config: SiteBotConfig, errors: ConfigError[
 }
 
 // ── warnings ────────────────────────────────────────────────────────────────
-
-function warnMcpImportWithoutAllow(
-  config: SiteBotConfig,
-  errors: ConfigError[],
-  warnings: ConfigWarning[],
-): void {
-  config.tools.forEach((entry, index) => {
-    if (!isMcpImport(entry) || entry.allow !== undefined) return
-
-    const path = `tools[${index}].allow`
-    const message = `MCP import "${entry.id}" has no \`allow\` list, so every tool the server exposes is imported.`
-    const fix =
-      'List the tool names you actually want. Without it, a server-side update silently grants the assistant new capabilities.'
-
-    if (config.security.strictTools) {
-      errors.push({
-        path,
-        message,
-        expected: 'an explicit allow list',
-        fix,
-        rule: 'tools/mcp-allow-required',
-      })
-    } else {
-      warnings.push({ path, message, fix, rule: 'tools/mcp-allow-missing' })
-    }
-  })
-}
 
 /**
  * `name` is the one public field that can legitimately come from the

@@ -188,6 +188,7 @@ for (const provider of PROVIDERS) {
           },
           tools: [
             {
+              outputSchema: {},
               name: 'check_stock',
               description: 'Look up how many bags of a coffee are in stock.',
               readOnly: true,
@@ -234,6 +235,7 @@ for (const provider of PROVIDERS) {
           agent: { maxSteps: 4 },
           tools: [
             {
+              outputSchema: {},
               name: 'create_ticket',
               description: 'Open a support ticket for the visitor.',
               readOnly: false,

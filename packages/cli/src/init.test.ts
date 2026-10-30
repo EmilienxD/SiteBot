@@ -57,7 +57,7 @@ describe('sitebot init', () => {
     await makeNextApp()
 
     const ctx = context({
-      flags: { yes: true, 'skip-draft': true, provider: 'anthropic' },
+      flags: { yes: true, provider: 'anthropic' },
     })
     const result = await runInit(ctx)
 
@@ -86,7 +86,7 @@ describe('sitebot init', () => {
     await makeNextApp()
     await writeFile(join(cwd, 'chatbot.config.yaml'), 'version: 1\n')
 
-    const ctx = context({ flags: { yes: true, 'skip-draft': true } })
+    const ctx = context({ flags: { yes: true } })
     const result = await runInit(ctx)
 
     expect(result.exitCode).toBe(1)
@@ -98,7 +98,7 @@ describe('sitebot init', () => {
 
   it('writes nothing on --dry-run', async () => {
     await makeNextApp()
-    const ctx = context({ flags: { yes: true, 'skip-draft': true, 'dry-run': true } })
+    const ctx = context({ flags: { yes: true, 'dry-run': true } })
     const result = await runInit(ctx)
 
     expect(result.exitCode).toBe(0)
@@ -108,7 +108,7 @@ describe('sitebot init', () => {
 
   it('writes no route file for a static site and points at the sidecar', async () => {
     await writeFile(join(cwd, 'package.json'), JSON.stringify({ name: 'plain' }))
-    const ctx = context({ flags: { yes: true, 'skip-draft': true } })
+    const ctx = context({ flags: { yes: true } })
     const result = await runInit(ctx)
 
     expect(result.exitCode).toBe(0)
@@ -122,7 +122,7 @@ describe('sitebot init', () => {
     await makeNextApp()
     await writeFile(join(cwd, '.gitignore'), 'node_modules\n')
 
-    const ctx = context({ flags: { yes: true, 'skip-draft': true } })
+    const ctx = context({ flags: { yes: true } })
     await runInit(ctx)
 
     expect(await readFile(join(cwd, '.gitignore'), 'utf8')).toContain('.env.local')

@@ -3,7 +3,6 @@ import type { SessionStore } from '@sitebot/core'
 import {
   connectStdioMcp,
   createNodeSessionStore,
-  createNodeVectorStore,
   createRedisRateLimitStore,
   createSafeFetch,
 } from '@sitebot/core/node'
@@ -19,8 +18,6 @@ import type { SiteBotHandlerOptions } from './handler.js'
  *  - `security.rateLimit.store: redis` (docs/08 §8),
  *  - `storage.type: sqlite | redis | postgres | custom` (docs/02 §10), which
  *    the edge-safe `createSessionStore` deliberately refuses to construct,
- *  - the Node-only `knowledge.store` types (sqlite, pgvector, a persisted
- *    memory file, custom), for the same reason.
  *
  * Caller-supplied options always win, so a developer can still inject their
  * own store or fetch.
@@ -42,7 +39,6 @@ export function withNodeRuntime(
     config.storage.type !== 'none'
   return {
     ...options,
-    vectorStoreFactory: options.vectorStoreFactory ?? createNodeVectorStore,
     ...(rateLimitStore === undefined ? {} : { rateLimitStore }),
     deps: {
       fetchImpl: safe.fetch,

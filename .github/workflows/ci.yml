@@ -55,8 +55,8 @@ jobs:
         run: pnpm check:packages
 
   sqlite-native:
-    # Exercise the actual prebuilt extension, including the minimum Node
-    # release with loadExtension. Native initialization errors must fail.
+    # Exercise actual SQLite session persistence, including the minimum Node
+    # release with node:sqlite. Initialization errors must fail.
     strategy:
       fail-fast: false
       matrix:
@@ -72,8 +72,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sitebot/core... build
-      - name: Native SQLite vector tests
-        run: pnpm exec vitest run --project=core --project=ingest packages/core/src/node/vector-sqlite.test.ts packages/core/src/knowledge/store-conformance.test.ts packages/ingest/src/sqlite.test.ts
+      - name: SQLite session tests
+        run: pnpm exec vitest run --project=core packages/core/src/node/session-stores.test.ts
 
   e2e:
     # The Playwright image pins browsers *and fonts*, so the committed
@@ -117,8 +117,6 @@ jobs:
     env:
       ANTHROPIC_API_KEY: sk-ant-ci-dummy-key
       OPENAI_API_KEY: sk-ci-dummy-key
-      UPSTASH_VECTOR_REST_URL: https://ci.upstash.io
-      UPSTASH_VECTOR_REST_TOKEN: ci-dummy-token
     steps:
       - uses: actions/checkout@v4
 

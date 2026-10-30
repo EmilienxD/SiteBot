@@ -6,7 +6,6 @@
 //   "highlight #id"   → highlight_section tool call
 //   "fill"            → fill_wholesale_form (approval-gated client tool)
 //   "fill bad"        → same, with a volume that is not an option
-//   "go to shop"      → navigate to /shop
 //   "forms?"          → echo the form outline from the page context
 //   "markers?"        → list the PAGE-MARKER-x tokens in the page context
 //   "slow"            → a long answer streamed in small, delayed chunks
@@ -75,7 +74,6 @@ function script(prompt, call, toolChoice) {
       },
       call,
     )
-  if (text.includes('go to shop')) return toolCall('navigate', { path: '/shop' }, call)
   if (text.includes('forms?')) {
     // Wherever the engine placed the page context, the outline is in the prompt.
     const all = prompt

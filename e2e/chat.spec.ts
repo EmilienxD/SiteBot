@@ -153,12 +153,17 @@ test.describe('client tools', () => {
     await expect(widget.lastAnswer()).toContainText('"filled":true')
   })
 
-  test('navigate loads the page and the conversation carries over', async ({ page, widget }) => {
+  test('an ordinary route link loads the page and retains the conversation', async ({
+    page,
+    widget,
+  }) => {
     await page.goto('/')
     await widget.open()
-    await widget.send('please go to shop')
+    await widget.send('Tell me about the shop')
+    await expect(widget.lastAnswer()).toContainText('Tell me about the shop')
+    await page.getByRole('link', { name: 'Shop', exact: true }).click()
     await page.waitForURL('**/shop')
     await widget.ensureOpen()
-    await expect(widget.log).toContainText('please go to shop')
+    await expect(widget.log).toContainText('Tell me about the shop')
   })
 })

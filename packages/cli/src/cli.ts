@@ -15,7 +15,6 @@ import { shouldColor, Ui } from './terminal.js'
 import type { CommandContext, CommandResult } from './commands/context.js'
 import { runInit, INIT_FLAGS } from './commands/init.js'
 import { runValidate, VALIDATE_FLAGS } from './commands/validate.js'
-import { runIngestCommand, INGEST_FLAGS } from './commands/ingest.js'
 import { runDev, DEV_FLAGS } from './commands/dev.js'
 import { runServe, SERVE_FLAGS } from './commands/serve.js'
 import { runDoctor, DOCTOR_FLAGS } from './commands/doctor.js'
@@ -31,7 +30,6 @@ interface CommandEntry {
 const REGISTRY: Record<string, CommandEntry> = {
   init: { summary: summaryOf('init'), run: runInit, flags: INIT_FLAGS },
   validate: { summary: summaryOf('validate'), run: runValidate, flags: VALIDATE_FLAGS },
-  ingest: { summary: summaryOf('ingest'), run: runIngestCommand, flags: INGEST_FLAGS },
   dev: { summary: summaryOf('dev'), run: runDev, flags: DEV_FLAGS },
   serve: { summary: summaryOf('serve'), run: runServe, flags: SERVE_FLAGS },
   doctor: { summary: summaryOf('doctor'), run: runDoctor, flags: DOCTOR_FLAGS },

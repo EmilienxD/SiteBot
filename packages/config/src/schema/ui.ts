@@ -118,22 +118,15 @@ export const BehaviourSchema = z.strictObject({
     .enum(SESSION_SCOPES)
     .default('tab')
     .describe('tab uses sessionStorage; browser uses localStorage.'),
-  navigateAllowlist: z
-    .array(GlobSchema)
-    .default([])
-    .describe('Extra paths the navigate client tool may target, beyond siteContext.routes.'),
 })
 
 /**
- * Page-context extraction controls — docs/03-protocol.md §10, docs/06 §2.
+ * Page-context extraction controls — docs/03-protocol.md §10.
  * `excludePaths` is the switch for routes the assistant must not see at all.
  */
 export const PageContextSchema = z.strictObject({
   excludePaths: z.array(GlobSchema).default([]),
   redactSelectors: z.array(SelectorSchema).default(['input', '[data-private]', '.pii']),
-  readSelectorDenylist: z
-    .array(SelectorSchema)
-    .default(['input[type=password]', '[data-sensitive]', 'iframe']),
 })
 
 export const UiExtractSchema = z.strictObject({

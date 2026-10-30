@@ -216,6 +216,7 @@ describe('tool-result framing', () => {
       const config = testConfig({
         tools: [
           {
+            outputSchema: {},
             name: 'lookup_data',
             description: 'Look up data from the backend.',
             readOnly: true,
@@ -261,7 +262,13 @@ describe('tool-result framing', () => {
           execute?: (input: unknown, options: { experimental_context: unknown }) => Promise<unknown>
         }
       ).execute
-      const framed = await execute?.({}, { experimental_context: testContext() })
+      const output = await execute?.({}, { experimental_context: testContext() })
+      const convert = tools.lookup_data!.toModelOutput as (args: {
+        output: unknown
+        toolCallId: string
+        input: unknown
+      }) => { type: string; value: unknown }
+      const framed = convert({ output, toolCallId: 'call', input: {} }).value
 
       expect(framed).toContain('<tool_result>')
       expect(framed).toContain('<<<BEGIN UNTRUSTED ')

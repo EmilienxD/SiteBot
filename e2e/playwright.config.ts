@@ -36,13 +36,6 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      cwd: '..',
-      command: 'node e2e/fixtures/knowledge-server.mjs',
-      url: 'http://127.0.0.1:4319/api/chat/health',
-      reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
-    },
-    {
       // From the example dir, so the widget resolves from its node_modules.
       cwd: '../examples/plain-html',
       command: `node ../../packages/cli/dist/cli.js serve --config ../../e2e/chatbot.config.mjs --static public --port ${PORT} --host 127.0.0.1`,

@@ -1,5 +1,6 @@
 import type { UIMessage } from 'ai'
 import type { AuthMode, Mode, PublicConfig, ResolvedConfig } from '@sitebot/config'
+import type { SourceRegistrar } from './sources/types.js'
 
 /**
  * The cross-cutting types of docs/01-architecture.md §5.
@@ -95,6 +96,16 @@ export interface RequestContext {
   logger: Logger
   budget: BudgetTracker
 }
+
+/** Server tool handlers only; the registrar is scoped to one admitted execution. */
+export interface ToolContext extends RequestContext {
+  sources: SourceRegistrar
+}
+
+export type ToolHandler<Input = Record<string, unknown>, Output = unknown> = (
+  input: Input,
+  ctx: ToolContext,
+) => Output | Promise<Output>
 
 export type HealthStatus = 'ok' | 'degraded' | 'error'
 

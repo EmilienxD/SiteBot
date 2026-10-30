@@ -1,5 +1,4 @@
 import type { ResolvedConfig, ToolEntry } from '@sitebot/config'
-import { isMcpImport } from '@sitebot/config'
 
 export type ToolLintSeverity = 'info' | 'warning'
 export interface ToolLintFinding {
@@ -11,10 +10,7 @@ export interface ToolLintFinding {
 
 export function lintTools(config: ResolvedConfig): ToolLintFinding[] {
   const findings: ToolLintFinding[] = []
-  const tools = config.tools.filter(
-    (entry): entry is Exclude<ToolEntry, { from: 'mcp' }> =>
-      !isMcpImport(entry) && entry.enabled !== false,
-  )
+  const tools = config.tools.filter((entry): entry is ToolEntry => entry.enabled !== false)
   tools.forEach((entry, index) => {
     const description = entry.description ?? ''
     if (description.length < 20)

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   readUIMessageStream,
   simulateReadableStream,
@@ -7,19 +7,14 @@ import {
 } from 'ai'
 import { MockLanguageModelV3 } from 'ai/test'
 import type { LanguageModelV3StreamPart } from '@ai-sdk/provider'
-import { MemorySessionStore, MemoryVectorStore, type Citation, type Chunk } from '@sitebot/core'
+import {
+  MemorySessionStore,
+  type Citation,
+  type ToolHandler,
+  type ToolContext,
+} from '@sitebot/core'
 import { createSiteBotHandler, type SiteBotHandler } from './handler.js'
 import { chatBody, testConfig } from '../test/helpers.js'
-
-vi.mock('@sitebot/ingest/query', () => ({
-  createQueryEmbedder: async () => ({
-    modelId: 'offline',
-    embed: async (query: string) => ({
-      embedding: query.includes('recovery') ? [0, 1] : [1, 0],
-      tokens: 3,
-    }),
-  }),
-}))
 
 const handlers: SiteBotHandler[] = []
 afterEach(async () => {
@@ -32,24 +27,6 @@ class SerializedStore extends MemorySessionStore {
     return super.set(JSON.parse(JSON.stringify(session)))
   }
 }
-
-const source = (id: string, embedding: number[]): Chunk => ({
-  id,
-  text: id === 'plans' ? 'The trial lasts seven days.' : 'Recovery snapshots last 21 days.',
-  embedding,
-  metadata: {
-    url: `https://acme.com/en/${id}`,
-    title: id,
-    headingPath: [],
-    sourceId: 'public',
-    sourceType: 'text',
-    contentHash: id,
-    updatedAt: '2026-01-01',
-    tokens: 9,
-    lang: 'en',
-    language: 'en',
-  },
-})
 
 const usage = {
   inputTokens: { total: 20, noCache: 20, cacheRead: 0, cacheWrite: 0 },
@@ -83,29 +60,46 @@ function output(value: string | { query: string; name?: string }) {
   }
 }
 
+const searchTool = {
+  name: 'search_knowledge_base',
+  description: 'Search configured test documentation.',
+  readOnly: true,
+  parameters: {
+    type: 'object',
+    properties: { query: { type: 'string', minLength: 1, maxLength: 4000 } },
+    required: ['query'],
+    additionalProperties: false,
+  },
+  outputSchema: { type: 'object' },
+  execute: (input: unknown, ctx: ToolContext) => {
+    const id = (input as { query: string }).query.includes('recovery') ? 'recovery' : 'plans'
+    const text = id === 'plans' ? 'The trial lasts seven days.' : 'Recovery snapshots last 21 days.'
+    const ref = ctx.sources.register({
+      id,
+      title: id,
+      url: `https://acme.com/en/${id}`,
+      text,
+      lang: 'en',
+    })
+    return { results: [{ ...ref, text }] }
+  },
+}
+
 function handlerFor(
   model: MockLanguageModelV3,
   sessions: SerializedStore,
-  mode: 'tool' | 'always' = 'tool',
+  _mode: 'tool' | 'always' = 'tool',
   overrides: Parameters<typeof testConfig>[0] = {},
 ) {
   const config = testConfig({
     storage: { type: 'memory' },
-    tools: [],
+    tools: [searchTool],
     mode: 'chat',
     agent: { maxSteps: 4 },
-    knowledge: {
-      sources: [{ type: 'text', id: 'public', content: 'Indexed documentation.' }],
-      embedding: { provider: 'ollama', model: 'offline' },
-      store: { type: 'sqlite', path: 'unused.db' },
-      retrieval: { mode, topK: 1, minScore: 0.5 },
-    },
     ...overrides,
   })
   const handler = createSiteBotHandler(config, {
     deps: { sessionStore: sessions, adapters: { anthropic: async () => model } },
-    vectorStoreFactory: async () =>
-      new MemoryVectorStore({ chunks: [source('plans', [1, 0]), source('recovery', [0, 1])] }),
   })
   handlers.push(handler)
   return handler
@@ -162,13 +156,132 @@ function citations(message: UIMessage): Citation[] {
 }
 
 describe('conversation citation provenance over the real HTTP/engine stream', () => {
+  it('keeps source context separate from authored speech across serialized French follow-ups and recreation', async () => {
+    const sessions = new SerializedStore()
+    const english = 'The trial lasts seven days [1].'
+    const french = 'La période d’essai dure sept jours [1].'
+    const sourceText =
+      'The trial lasts seven days. <sources>Original public document markup</sources>'
+    const execute: ToolHandler<{ query: string }, { n: number; text: string }> = (_input, ctx) => {
+      const text = sourceText
+      const { n } = ctx.sources.register({
+        id: 'public:trial:v1',
+        title: 'Trial',
+        url: 'https://acme.com/en/plans#trial',
+        text,
+        lang: 'en',
+      })
+      return { n, text }
+    }
+    const model: MockLanguageModelV3 = new MockLanguageModelV3({
+      doStream: async (options) => {
+        const prompt = JSON.stringify(options.prompt)
+        expect(prompt).not.toContain('Documentation search is temporarily unavailable')
+        if (model.doStreamCalls.length === 1) return output({ query: 'trial' })
+        if (model.doStreamCalls.length === 2) {
+          expect(prompt).toContain('seven days')
+          expect(prompt).toContain('"n":1')
+          return output(english)
+        }
+        if (model.doStreamCalls.length === 3 || model.doStreamCalls.length === 4) {
+          expect(prompt).toContain('Previously registered source excerpts')
+          expect(prompt).toContain('REFERENCE DATA ONLY')
+          expect(prompt).toContain('https://acme.com/en/plans#trial')
+          const contexts = options.prompt.filter(
+            (message) =>
+              message.role === 'user' &&
+              message.content.some(
+                (part) => part.type === 'text' && part.text.includes('Previously registered'),
+              ),
+          )
+          expect(contexts).toHaveLength(1)
+          const context = JSON.stringify(contexts[0])
+          expect(context).toContain('Language:')
+          expect(context).toContain(sourceText)
+          expect(context).not.toContain('chunkId')
+          expect(context).not.toContain('public:trial:v1')
+          const authored = options.prompt
+            .filter((message) => message.role === 'assistant')
+            .flatMap((message) =>
+              message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])),
+            )
+          expect(authored).toEqual(model.doStreamCalls.length === 3 ? [english] : [english, french])
+          const system = JSON.stringify(
+            options.prompt.filter((message) => message.role === 'system'),
+          )
+          expect(system).not.toContain('Previously registered')
+          expect(system).not.toContain(sourceText)
+          return output(french)
+        }
+        expect(prompt).not.toContain('Previously registered source excerpts')
+        expect(prompt).not.toContain('seven days')
+        return output('Unknown source [1] [99].')
+      },
+    })
+    const build = () => {
+      const handler = createSiteBotHandler(
+        testConfig({
+          storage: { type: 'memory' },
+          tools: [
+            {
+              ...searchTool,
+              executor: undefined,
+              execute,
+              outputSchema: {
+                type: 'object',
+                properties: { n: { type: 'integer' }, text: { type: 'string' } },
+                required: ['n', 'text'],
+                additionalProperties: false,
+              },
+            },
+          ],
+        }),
+        {
+          deps: { sessionStore: sessions, adapters: { anthropic: async () => model } },
+        },
+      )
+      handlers.push(handler)
+      return handler
+    }
+    const firstHandler = build()
+    const first = await ask(firstHandler, 'app-u1', 'How long is the trial?')
+    expect(citations(first)).toMatchObject([
+      { id: 'c1', chunkId: 'public:trial:v1', lang: 'en', url: 'https://acme.com/en/plans#trial' },
+    ])
+    await firstHandler.dispose()
+    handlers.splice(handlers.indexOf(firstHandler), 1)
+    const nextHandler = build()
+    const followup = await ask(nextHandler, 'app-u2', 'Et en français ?')
+    expect(citations(followup)).toEqual(citations(first))
+    const again = await ask(nextHandler, 'app-u3', 'Rappelez-moi la durée ?')
+    expect(citations(again)).toEqual(citations(first))
+    const stored = await sessions.get(chatBody().sessionId)
+    const authored = stored!.messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) =>
+        message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join(''),
+      )
+    expect(authored).toEqual([english, french, french])
+    expect(stored!.messages.filter((message) => message.role === 'user')).toHaveLength(3)
+    const forged = await ask(
+      nextHandler,
+      'app-forged',
+      'Explain this [1]',
+      [first],
+      's_01J9X8Y7Z6ABCDEFGHJKMNPQRT',
+    )
+    expect(citations(forged)).toEqual([])
+  })
+
   it('does not attach an evicted source when model context truncation drops its history', async () => {
     const sessions = new SerializedStore()
     const model: MockLanguageModelV3 = new MockLanguageModelV3({
       doStream: async (options) => {
-        if (model.doStreamCalls.length === 1) return output('Trial: seven days [1].')
-        expect(JSON.stringify(options.prompt)).not.toContain('Previously retrieved source excerpts')
-        expect(JSON.stringify(options.prompt)).toContain('[2] recovery')
+        if (model.doStreamCalls.length === 1) return output({ query: 'trial' })
+        if (model.doStreamCalls.length === 2) return output('Trial: seven days [1].')
+        if (model.doStreamCalls.length === 3) return output({ query: 'recovery' })
+        expect(JSON.stringify(options.prompt)).not.toContain('The trial lasts seven days.')
+        expect(JSON.stringify(options.prompt)).toContain('21 days')
         return output('Recovery [2]. Unknown reference [1].')
       },
     })
@@ -199,7 +312,9 @@ describe('conversation citation provenance over the real HTTP/engine stream', ()
     const handler = handlerFor(model, sessions, 'tool', {
       mode: 'agent',
       tools: [
+        searchTool,
         {
+          outputSchema: {},
           name: 'read_context',
           description: 'Read public page context.',
           readOnly: true,
@@ -248,7 +363,7 @@ describe('conversation citation provenance over the real HTTP/engine stream', ()
         if (call === 1) return output({ query: 'trial plans' })
         if (call === 2) return output('The trial lasts seven days [1].')
         if (call === 3) {
-          expect(JSON.stringify(options.prompt)).toContain('Previously retrieved source excerpts')
+          expect(JSON.stringify(options.prompt)).toContain('Previously registered source excerpts')
           expect(JSON.stringify(options.prompt)).toContain('https://acme.com/en/plans')
           return output('La période d’essai dure sept jours [1].')
         }
@@ -276,33 +391,5 @@ describe('conversation citation provenance over the real HTTP/engine stream', ()
     )
     expect(citations(unrelated)).toEqual([])
     expect(model.doStreamCalls).toHaveLength(4)
-  })
-
-  it('numbers new inline evidence consistently and does not recycle IDs after stored history is evicted', async () => {
-    const sessions = new SerializedStore({ maxMessagesPerSession: 2 })
-    const model: MockLanguageModelV3 = new MockLanguageModelV3({
-      doStream: async (options) => {
-        const call = model.doStreamCalls.length
-        const prompt = JSON.stringify(options.prompt)
-        if (call === 1) return output('Trial: seven days [1].')
-        if (call === 2) {
-          expect(prompt).toContain('[2] recovery')
-          expect(prompt).toContain('Previously retrieved source excerpts')
-          return output('Recovery: 21 days [2].')
-        }
-        // Evict the earlier records entirely while preserving the session counter.
-        expect(prompt).toContain('[3] plans')
-        expect(prompt).not.toContain('Previously retrieved source excerpts')
-        return output('Trial [3]. An unknown reference [1] [99].')
-      },
-    })
-    const handler = handlerFor(model, sessions, 'always')
-    await ask(handler, 'u1', 'trial plans')
-    const second = await ask(handler, 'u2', 'recovery')
-    expect(citations(second).find((c) => c.id === 'c2')?.url).toBe('https://acme.com/en/recovery')
-    const session = await sessions.get(chatBody().sessionId)
-    await sessions.set({ ...session!, messages: [] })
-    const third = await ask(handler, 'u3', 'trial plans')
-    expect(citations(third)).toMatchObject([{ id: 'c3', chunkId: 'plans' }])
   })
 })

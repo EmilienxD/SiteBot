@@ -70,29 +70,7 @@ agent:
   onMaxSteps: summarize
   approvalPolicy: always
 
-tools:
-  - name: list_site_sections
-    description: |
-      List the sections and routes available on the Northwind website.
-      Use when the user asks where to find a page or needs navigation help.
-    readOnly: true
-    executor:
-      type: builtin
-      id: list_site_sections
-  - name: get_time
-    description: |
-      Get the current date and time for a requested timezone.
-      Use when the user asks about today's date, a deadline, or support hours.
-    readOnly: true
-    parameters:
-      type: object
-      properties:
-        timezone:
-          type: string
-          description: IANA timezone such as Europe/Paris or America/New_York.
-    executor:
-      type: builtin
-      id: get_time
+tools: []
 
 ui:
   panel:

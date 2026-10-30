@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from '@sitebot/config'
 import type { UIMessage } from 'ai'
-import type { RequestContext } from './types.js'
+import type { RequestContext, ToolContext } from './types.js'
 
 /**
  * Lifecycle hooks — docs/04-providers-and-engine.md §9.
@@ -15,6 +15,7 @@ export interface ToolCallInfo {
 
 export interface StepInfo {
   finishReason: string
+  rawFinishReason?: string | undefined
   text: string
   toolCalls: ToolCallInfo[]
   usage: { inputTokens: number; outputTokens: number }
@@ -33,10 +34,8 @@ export interface SiteBotHooks {
   onRequest?: (request: Request, ctx: RequestContext) => MaybePromise<Response | void>
   /** Rewrite or annotate the incoming user message. */
   onMessage?: (message: UIMessage, ctx: RequestContext) => MaybePromise<UIMessage | void>
-  /** Final say on the composed system prompt. */
-  onPromptComposed?: (prompt: string, ctx: RequestContext) => MaybePromise<string | void>
-  /** Before a server-side tool runs. Return anything but `undefined` to use it as the result. */
-  onToolCall?: (call: ToolCallInfo, ctx: RequestContext) => MaybePromise<unknown>
+  /** Observes an admitted server tool call. Return values are ignored. */
+  onToolCall?: (call: ToolCallInfo, ctx: ToolContext) => MaybePromise<void>
   onStep?: (step: StepInfo, ctx: RequestContext) => MaybePromise<void>
   onFinish?: (result: FinishInfo, ctx: RequestContext) => MaybePromise<void>
   onError?: (error: unknown, ctx: RequestContext) => MaybePromise<void>
@@ -47,12 +46,12 @@ export function hooksOf(config: ResolvedConfig): SiteBotHooks {
   return (config.hooks ?? {}) as SiteBotHooks
 }
 
-type HookName = Exclude<keyof SiteBotHooks, 'onRequest'>
+type HookName = Exclude<keyof SiteBotHooks, 'onRequest' | 'onToolCall'>
 
 /**
  * Run a hook. A throwing hook is logged and ignored: a bug in the developer's
- * analytics must not take the chat down. Only `onRequest` may reject a
- * request, and it is called directly by the server handler, not through here.
+ * analytics must not take the chat down. Execution/prompt hooks are called
+ * directly inside their fail-closed boundaries, never through this helper.
  */
 export async function runHook<K extends HookName>(
   hooks: SiteBotHooks,

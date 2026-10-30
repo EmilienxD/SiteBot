@@ -14,8 +14,7 @@ import { describe, expect, it } from 'vitest'
 const ENTRY = `
   export { validateConfig } from '@sitebot/config'
   export { createFetchHandler } from '@sitebot/server/fetch'
-  export { createUpstashVectorStore, MemorySessionStore } from '@sitebot/core'
-  export { createQueryEmbedder } from '@sitebot/ingest/query'
+  export { MemorySessionStore } from '@sitebot/core'
 `
 
 describe('edge bundle (Workers)', () => {

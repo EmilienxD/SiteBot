@@ -16,7 +16,6 @@ const PACKAGES = {
   config: 'node16',
   core: 'node16',
   server: 'node16',
-  ingest: 'node16',
   react: 'node16',
   cli: 'esm-only',
   widget: 'esm-only',

@@ -2,6 +2,13 @@
 
 How the widget and the server talk. Four endpoints, one streaming format, one JS API.
 
+Regex documentation Q&A uses these same endpoints and AI SDK tool/SSE parts; it introduces no
+browser navigation protocol. `data-citations` retains trusted conversation-level IDs, original URL
+and source language. `score` is optional and absent for regex evidence; it is a vector similarity
+field only. The server-only tools return bounded indexed references and untrusted evidence text.
+Their parameter/result contracts and error codes are specified in the
+[documentation recipe](/recipes/docs-assistant#the-three-interfaces).
+
 ---
 
 ## 1. Endpoints
@@ -104,6 +111,12 @@ Once the stream is open, failures arrive as an `error` stream part instead.
 
 ---
 
+Sources registered explicitly by server application handlers use the same
+`data-citations` part for application-selected evidence. No knowledge configuration
+is required. `chunkId` carries the application's stable source ID. Citation-shaped tool outputs and client-supplied data
+parts never register trusted source mappings. See the
+[handler API](./05-tools.md#application-sources-and-citations).
+
 ## 3. Message model
 
 We use the AI SDK v6 split: **`UIMessage`** on the wire and in the widget, **`ModelMessage`** internally when calling the provider. The widget never sees `ModelMessage`.
@@ -142,12 +155,10 @@ This is where widget-specific behaviour lives. Each is a typed, transient or per
 
 | Part type               | Payload                                                                                          | Widget behaviour                                                         |
 | ----------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `data-citations`        | `{ items: [{ id, chunkId?, title, url, snippet, score, lang? }] }`                                | Renders referenced source chips using the number in `id` (`c27` → `[27]`) |
+| `data-citations`        | `{ items: [{ id, chunkId?, title, url, snippet, score?, lang? }] }`                               | Renders referenced source chips using the number in `id` (`c27` → `[27]`) |
 | `data-approval-request` | `{ approvalId, toolName, toolCallId, title, description, input, risk: 'low'\|'medium'\|'high' }` | Renders a confirm card with Approve / Deny. Stream ends after this part. |
 | `data-client-tool-call` | `{ toolCallId, toolName, input }`                                                                | Widget executes the registered client tool, POSTs the result back        |
 | `data-suggestions`      | `{ items: [{ label, action }] }`                                                                 | Replaces the quick-reply pill row                                        |
-| `data-navigate`         | `{ path, newTab }`                                                                               | Navigates the host page (only to `siteContext.routes` paths)             |
-| `data-handoff`          | `{ target, ticketUrl?, message }`                                                                | Renders a handoff card, optionally opens the vendor widget               |
 | `data-status`           | `{ text }`                                                                                       | Transient status line, e.g. "Searching documentation…"                   |
 | `data-error`            | `{ code, message, retryable }`                                                                   | Inline error bubble with a Retry affordance                              |
 | `data-usage`            | `{ inputTokens, outputTokens, costUsd }`                                                         | Debug overlay only                                                       |
@@ -161,7 +172,7 @@ data: {"type":"start","messageId":"m_9"}
 
 data: {"type":"data-status","transient":true,"data":{"text":"Searching documentation…"}}
 
-data: {"type":"tool-input-start","toolCallId":"tc_1","toolName":"search_knowledge_base"}
+data: {"type":"tool-input-start","toolCallId":"tc_1","toolName":"read_application_data"}
 
 data: {"type":"tool-input-available","toolCallId":"tc_1","input":{"query":"order tracking"}}
 
@@ -279,11 +290,6 @@ Caching: keyed on `key`. When `sessionId` is present the response is `Cache-Cont
   "config": { "valid": true, "mode": "agent", "toolCount": 7 },
   "checks": {
     "provider": { "status": "ok", "latencyMs": 210 },
-    "knowledge": {
-      "status": "ok",
-      "documents": 412,
-      "lastIndexed": "2026-07-30T09:11:00Z",
-    },
     "storage": { "status": "ok" },
     "mcp:acme": { "status": "degraded", "error": "timeout" },
   },
@@ -344,7 +350,6 @@ interface SiteBotApi {
 | `tool`           | `{ name, phase: 'call'\|'result'\|'error', input?, output? }` |
 | `approval`       | `{ approvalId, toolName, decision? }`                         |
 | `citation-click` | `{ url, title }`                                              |
-| `handoff`        | `{ target }`                                                  |
 | `error`          | `{ code, message }`                                           |
 | `feedback`       | `{ messageId, rating }`                                       |
 
@@ -396,8 +401,7 @@ tags return `invalid_request`. Locale never grants permissions.
 Built-in JSON/inline errors may additionally carry a catalog `messageKey` and
 safe interpolation `values` so existing errors can relabel after a locale change.
 `data-status` may include `messageKey`; `data-suggestions` may include `locale`;
-built-in `data-handoff` may include `messageKey`. Citation items retain optional
-`lang` metadata. These are additive fields; source URLs are unchanged.
+Citation items retain optional `lang` metadata. Source URLs are unchanged.
 
 `/config` serves all public locale catalogs/copy with no language negotiation, so
 shared responses are language-independent. Session probes remain private/no-store.

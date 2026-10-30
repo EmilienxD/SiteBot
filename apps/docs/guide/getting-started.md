@@ -22,7 +22,7 @@ site) and asks four things: the provider, the model, your site's URL and the ass
 - **Never overwrites anything.** If a file already exists, it stops and tells you. `--force` overrides
   that.
 
-Every question has a flag (`--provider`, `--model`, `--site-url`, `--name`, `--framework`), and `-y`
+Every question has a flag (`--provider`, `--model`, `--name`, `--framework`), and `-y`
 accepts all the defaults, so it also runs in scripts.
 
 ## 2. Install and add your key
@@ -74,10 +74,6 @@ On a static site with no server of its own, run the chat server beside it with `
 npx sitebot doctor
 ```
 
-`doctor` checks your key, that the provider package is installed, that the model resolves, CORS, storage
-and the knowledge index. Every failure comes with the fix. [Troubleshooting](/guide/troubleshooting)
-lists them all.
-
 Start your dev server and open the site. The launcher sits in the bottom-right corner. Ask it something
 only your site could answer.
 
@@ -85,12 +81,6 @@ only your site could answer.
 
 `siteContext` is a draft. Open `chatbot.config.yaml` and correct it. After that, the most valuable next
 steps are usually:
-
-- **Facts.** Add the handful of things visitors ask about most (`siteContext.facts`).
-- **Knowledge.** Index your pages so answers can cite them: add a `knowledge` block, then run
-  `npx sitebot ingest`. See the [docs assistant recipe](/recipes/docs-assistant).
-- **Tools.** Let it look things up (`http` tools) or act on the page (`client` tools). See the
-  [recipes](/recipes/) for complete examples.
 
 Every key is listed in the [configuration reference](/reference/configuration).
 
@@ -103,3 +93,6 @@ npx sitebot doctor --production
 It audits the settings that matter only in production: explicit origins, auth for tools that touch
 user data, approvals on writable tools, a shared rate-limit store, a privacy footer. Then go through the
 [production checklist](/deploy/checklist).
+
+
+Applications own context loading and every tool implementation. Use complete explicit handlers or transports; an empty registry exposes no tools. See [the tool contract](https://github.com/EmilienxD/SiteBot/blob/main/docs/05-tools.md).

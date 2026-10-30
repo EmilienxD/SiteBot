@@ -62,6 +62,7 @@ describe('resume of an approved client tool', () => {
         mode: 'agent',
         tools: [
           {
+            outputSchema: {},
             name: 'fill_wholesale_form',
             description: 'Fill the wholesale inquiry form on the page.',
             parameters: { type: 'object', properties: {}, additionalProperties: true },
@@ -167,6 +168,7 @@ describe('resume of an approved client tool', () => {
         mode: 'agent',
         tools: [
           {
+            outputSchema: {},
             name: 'fill_wholesale_form',
             description: 'Fill the wholesale inquiry form on the page.',
             parameters: { type: 'object', properties: {}, additionalProperties: true },
@@ -218,6 +220,7 @@ describe('client tool results from the browser (docs/05 §5 rule 5)', () => {
         mode: 'agent',
         tools: [
           {
+            outputSchema: {},
             name: 'fill_wholesale_form',
             description: 'Fill the wholesale inquiry form on the page.',
             parameters: { type: 'object', properties: {}, additionalProperties: true },
@@ -294,6 +297,7 @@ describe('a suspended run the visitor never finishes', () => {
       agent: { maxSteps },
       tools: [
         {
+          outputSchema: {},
           name: 'fill_wholesale_form',
           description: 'Fill the wholesale inquiry form on the page.',
           parameters: { type: 'object', properties: {}, additionalProperties: true },
@@ -492,6 +496,7 @@ describe('maxSteps across client-tool round trips (docs/04 §4)', () => {
         agent: { maxSteps: 3, onMaxSteps, ...agent },
         tools: [
           {
+            outputSchema: {},
             name: 'highlight_section',
             description: 'Highlight a section of the page.',
             parameters: { type: 'object', properties: {}, additionalProperties: true },

@@ -26,12 +26,16 @@ export const connectStdioMcp: StdioMcpConnector = async (server) => {
         inputSchema: tool.inputSchema as never,
       }))
     },
-    async call(name, input) {
-      const result = await client.callTool({
-        name,
-        arguments:
-          typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
-      })
+    async call(name, input, signal) {
+      const result = await client.callTool(
+        {
+          name,
+          arguments:
+            typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
+        },
+        undefined,
+        { signal },
+      )
       const serialized = JSON.stringify(result)
       return serialized.length <= 65_536
         ? result

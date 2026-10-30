@@ -76,15 +76,21 @@ describe('unknown keys are errors with a suggestion (docs/02 §14)', () => {
   it('resolves keys through an array of union members', () => {
     const errors = errorsFor({
       ...minimalConfig(),
-      knowledge: {
-        embedding: { provider: 'openai', model: 'text-embedding-3-small' },
-        sources: [{ type: 'sitemap', url: 'https://acme.com/s.xml', maxPage: 10 }],
-      },
+      tools: [
+        {
+          name: 'lookup',
+          description: 'Read data.',
+          readOnly: true,
+          parameters: { type: 'object' },
+          outputSchema: {},
+          executor: { type: 'http', url: 'https://example.test', maxRedirect: 1 },
+        },
+      ],
     })
     const error = errors.find((e) => e.rule === 'schema/unknown-key')
 
-    expect(error?.path).toBe('knowledge.sources[0].maxPage')
-    expect(error?.suggestion).toBe('maxPages')
+    expect(error?.path).toBe('tools[0].executor.maxRedirect')
+    expect(error?.suggestion).toBe('maxRedirects')
   })
 
   it('names the variant when a key belongs to a different `type`', () => {
@@ -131,6 +137,8 @@ describe('invalid values', () => {
       ...minimalConfig(),
       tools: [
         {
+          parameters: { type: 'object' },
+          outputSchema: {},
           name: 'lookup',
           description: 'Look something up in the catalogue.',
           readOnly: true,
@@ -140,7 +148,7 @@ describe('invalid values', () => {
     })
 
     // The five-way executor union would otherwise produce a wall of
-    // "expected literal mcp / module / builtin / client" noise.
+    // "expected literal mcp / module / client" noise.
     expect(errors).toHaveLength(1)
     expect(errors[0]?.path).toBe('tools[0].executor.url')
   })

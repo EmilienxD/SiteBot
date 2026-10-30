@@ -117,14 +117,85 @@ describe('browser API (docs/03 §9)', () => {
     element.citationClick({
       id: 'c1',
       title: 'Returns',
+      chunkId: 'application:returns:v1',
       url: 'https://acme.test/returns',
       snippet: '',
-      score: 0.9,
     })
     expect(open).toHaveBeenCalledWith('https://acme.test/returns', '_blank', 'noopener,noreferrer')
     expect(heard).toEqual([{ url: 'https://acme.test/returns', title: 'Returns' }])
     open.mockRestore()
   })
+
+  it.each([
+    ['en', 'Source 1: Trial'],
+    ['fr', 'Source 1 : Trial'],
+  ])(
+    'renders grouped stream citations with trusted destinations and accessible %s labels',
+    async (locale, label) => {
+      stubServer(serverConfig())
+      const sources = [
+        {
+          id: 'c1',
+          title: 'Trial',
+          url: 'https://acme.test/en/trial#terms',
+          snippet: 'Seven days.',
+          lang: 'en',
+        },
+        {
+          id: 'c3',
+          title: 'Plans',
+          url: 'https://acme.test/en/plans',
+          snippet: 'Public plans.',
+          lang: 'en',
+        },
+      ]
+      const text =
+        '**Seven days** [ 1,\t3, 1, 99 ] and [3]. ' +
+        '<sources>Visible reference text</sources>\n\n[Read more](https://acme.test/help)'
+      chatResponses.push(
+        sse([
+          { type: 'start', messageId: 'grouped-answer' },
+          { type: 'text-start', id: 't' },
+          { type: 'text-delta', id: 't', delta: text },
+          { type: 'text-end', id: 't' },
+          { type: 'data-citations', id: 'source-citations', data: { items: sources } },
+          { type: 'finish' },
+        ]),
+      )
+      const onEvent = vi.fn()
+      const element = await mount({ locale, onEvent })
+      element.open()
+      await element.load()
+      element.send('Trial?')
+      const root = shadow(element)
+      await vi.waitFor(() => expect(root.querySelectorAll('.citation-chip')).toHaveLength(2))
+      expect([...root.querySelectorAll('.citation-n')].map((node) => node.textContent)).toEqual([
+        '1',
+        '3',
+      ])
+      expect(root.querySelector('.citation-chip')?.getAttribute('aria-label')).toBe(label)
+      expect(root.querySelector('strong')?.textContent).toBe('Seven days')
+      expect(root.textContent).toContain('<sources>Visible reference text</sources>')
+      const link = root.querySelector('a')!
+      expect(link.href).toBe('https://acme.test/help')
+      expect(link.rel).toBe('noopener noreferrer')
+      expect(link.target).toBe('_blank')
+      const open = vi.spyOn(window, 'open').mockReturnValue(null)
+      try {
+        const chips = root.querySelectorAll<HTMLButtonElement>('.citation-chip')
+        chips.forEach((chip) => chip.click())
+        expect(open.mock.calls).toEqual(
+          sources.map((source) => [source.url, '_blank', 'noopener,noreferrer']),
+        )
+        expect(onEvent).toHaveBeenCalledWith({
+          type: 'citation-click',
+          detail: { url: sources[0]!.url, title: 'Trial' },
+        })
+      } finally {
+        open.mockRestore()
+      }
+    },
+  )
 
   it('destroy() removes the element and never throws', async () => {
     stubServer(serverConfig())
@@ -258,6 +329,10 @@ async function iframeScenario(): Promise<void> {
   const target = document.getElementById('pricing')!
   target.scrollIntoView = vi.fn()
   const element = await mount()
+  element.registerTool('highlight', () => {
+    target.scrollIntoView()
+    return { found: true }
+  })
   element.open()
   await element.load()
   const frame = await vi.waitFor(() => {

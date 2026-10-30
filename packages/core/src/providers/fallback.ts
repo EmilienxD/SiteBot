@@ -68,6 +68,11 @@ function messageOf(error: unknown): string {
   return ''
 }
 
+function failureCategory(error: unknown): string {
+  const status = statusOf(error)
+  return `${classifyError(error)}${status === undefined ? '' : ` (HTTP ${status})`}`
+}
+
 export type Classification = 'retryable' | 'fatal'
 
 /**
@@ -196,14 +201,16 @@ export async function runChain<T>(options: RunChainOptions<T>): Promise<ChainRes
       options.onFallback?.({
         from: entryId(entry),
         to: entryId(next),
-        reason: messageOf(lastError) || 'unknown error',
+        reason: failureCategory(lastError),
         attempts: attemptsHere,
       })
     }
   }
 
   throw new EngineError('provider_error', {
-    detail: failures.map((failure) => `${failure.id}: ${messageOf(failure.error)}`).join('; '),
+    detail: failures
+      .map((failure) => `${failure.id}: ${failureCategory(failure.error)}`)
+      .join('; '),
     cause: failures[failures.length - 1]?.error,
   })
 }

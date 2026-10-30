@@ -34,10 +34,6 @@ it, or remove `auth.jwt` if you don't verify visitor identity.
 the one it uses. Run the install command `doctor` prints, e.g. `npm i @ai-sdk/anthropic`. The same
 message appears at runtime as `Provider "…" requires an optional dependency`, and the fix is the same.
 
-Embedding providers and vector stores work the same way: `knowledge.store "upstash" requires the optional
-dependency @upstash/vector`, or `"sqlite" requires … sqlite-vec`. Install the named package, or pick a store
-that needs nothing: `memory` with a `path` saves the index as a JSON file.
-
 ### `provider health`
 
 Skipped with `--offline`. Without it, `doctor` builds the engine and resolves the model exactly as the
@@ -53,9 +49,6 @@ The same checks `GET /api/chat/health` reports:
   URL and that the server is reachable. For `sqlite`, check that the directory is writable.
 - **`health mcp:<id>`** failed: an MCP server didn't answer. For `stdio`, run the `command` yourself to see
   its error. For `http`, check the `url`.
-- **`health knowledge`** degraded: the vector store isn't reachable. Chat keeps working without
-  retrieval. Failed initialization retries on the next chat or health request;
-  retrieval and citations resume when setup succeeds.
 
 ### `health overall`
 
@@ -76,46 +69,6 @@ environment with `${env.NAME}`. Treat a key that has been committed as leaked an
   `https://` origin.
 - **"same-origin only"** is correct when the API route lives in the same app as the pages. A chat server on
   another origin must list the site's origin; see [Separate server](/deploy/sidecar).
-
-### `knowledge`
-
-"no sources configured" is information, not a problem: the assistant still uses `siteContext` and the
-current page.
-
-### `knowledge embedding`
-
-`knowledge.sources` is set but `knowledge.embedding` isn't. Pick an embedding provider and model, e.g.
-`{ provider: openai, model: text-embedding-3-small }`, then run `sitebot ingest`.
-
-### `knowledge exclusions`
-
-A crawl or sitemap source doesn't exclude `/admin`, `/account` or `/internal`. If a signed-in page is ever
-linked from a public one, it ends up in the index. Add `exclude: ['/admin/**', '/account/**']` before
-ingesting.
-
-### `knowledge store`
-
-"no index at …" for a `sqlite` store: nothing has been ingested yet. Run `sitebot ingest`.
-
-### `knowledge extraction`
-
-The online doctor samples up to three sitemap pages or the crawl seed, using the
-same robots rules and extraction settings as ingestion. Skipped with `--offline`.
-If every sampled page is shorter than `knowledge.extract.minChars`, check the
-selector or enable `knowledge.extract.renderJs: true` for a JavaScript site.
-Install the optional renderer with `npm install playwright` and
-`npx playwright install chromium`. Missing browser setup, inaccessible sources,
-and unavailable robots rules report a failure with a suggested fix.
-
-### `knowledge index`
-
-- **"no index has been built"**: run `sitebot ingest`, with `--dry-run` first to see the pages and the
-  estimated cost.
-- **"built with X but knowledge.embedding.model is Y"**: vectors from different models can't be mixed.
-  Rebuild with `sitebot ingest --force`.
-- **"0 documents"**: the sources matched nothing. Check the URLs, globs and `exclude` patterns;
-  `--dry-run` lists what would be fetched.
-- **"built N days ago"** (warning): re-run `sitebot ingest`. Unchanged pages cost no embedding calls.
 
 ### `storage`
 
@@ -151,11 +104,6 @@ Every tool that isn't `readOnly` should need approval (`requiresApproval: true`,
 Give each `http` tool an explicit `allowHosts` list. It bounds where a templated URL can point, on top of
 the private-network block.
 
-### `mcp allow`
-
-Each MCP import should list the tools it takes (`allow: [...]`). Without one, a new tool on the server
-silently becomes available to the model.
-
 ### `budget alerting`
 
 Set `security.budget.maxUsdPerDay` and send `budget_exceeded` events to a webhook, so a runaway day
@@ -179,10 +127,6 @@ come from the proxy and all visitors share one rate-limit bucket.
 ### `secrets`
 
 Literal-looking secrets are in the config, or `.env`/`.env.local` aren't gitignored.
-
-### `ingest freshness`
-
-A reminder: run `sitebot ingest` after each site deploy (in CI) so answers match the live pages.
 
 ### `sensitive routes`
 

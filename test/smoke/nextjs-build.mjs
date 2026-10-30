@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Keyless production build in an isolated copy, with synthetic indexed public
-// evidence present before tracing. No dotenv files or new dependencies.
+// Keyless production build in an isolated copy using explicit application tools.
+// No dotenv files or new dependencies.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -17,7 +17,6 @@ import {
 } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { knowledgeSnapshot } from './nextjs-provider.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const original = join(root, 'examples/nextjs')
@@ -76,8 +75,6 @@ try {
       `import original from '${importPath}'\nexport default { ...original, serverExternalPackages: [...(original.serverExternalPackages ?? []), 'pg'], outputFileTracingRoot: ${JSON.stringify(root)} }\n`,
     )
   }
-  await mkdir(join(app, '.sitebot'))
-  await writeFile(join(app, '.sitebot/index.json'), JSON.stringify(knowledgeSnapshot()))
   const environment = Object.fromEntries(
     Object.entries(process.env).filter(([key]) =>
       ['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'COMSPEC'].includes(key.toUpperCase()),
@@ -95,9 +92,9 @@ try {
   }
   await run(join(original, 'node_modules/next/dist/bin/next'), ['build'])
   await run(join(app, 'scripts/prepare-standalone.mjs'))
-  await run(join(root, 'scripts/check-nextjs-artifact.mjs'), ['--app', app, '--expect-index'], root)
+  await run(join(root, 'scripts/check-nextjs-artifact.mjs'), ['--app', app], root)
   process.stdout.write(
-    'Isolated production build: no provider keys or dotenv files; synthetic snapshot included by tracing.\n',
+    'Isolated production build: no provider keys or dotenv files; explicit application configuration included by tracing.\n',
   )
   const storeEnv =
     process.env.SITEBOT_LIVE_NEXT_STORES === '1'

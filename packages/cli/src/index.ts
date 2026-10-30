@@ -6,7 +6,7 @@
  * the CLI exists.
  */
 
-import { isEnvSourced, isMcpImport, type ResolvedConfig } from '@sitebot/config'
+import { isEnvSourced, type ResolvedConfig } from '@sitebot/config'
 import { validateBudgetPricing } from '@sitebot/core'
 
 export interface CommandSpec {
@@ -45,14 +45,8 @@ export function productionDoctor(
     'Explicit origins are configured and no wildcard-only origin is present.',
   )
 
-  const localTools = config.tools.filter(
-    (tool): tool is Exclude<ResolvedConfig['tools'][number], { from: 'mcp' }> => !isMcpImport(tool),
-  )
   const hasPrivateTool = config.tools.some(
-    (tool) =>
-      tool.scope === 'authenticated' ||
-      !tool.readOnly ||
-      (!isMcpImport(tool) && tool.executor?.type === 'http'),
+    (tool) => tool.scope === 'authenticated' || !tool.readOnly || tool.executor?.type === 'http',
   )
   add(
     'auth',
@@ -63,26 +57,16 @@ export function productionDoctor(
     'approvals',
     config.tools
       .filter((tool) => !tool.readOnly)
-      .every((tool) =>
-        isMcpImport(tool)
-          ? tool.requiresApproval
-          : tool.requiresApproval || config.agent.approvalRequired.includes(tool.name),
-      ),
+      .every((tool) => tool.requiresApproval || config.agent.approvalRequired.includes(tool.name)),
     'Every writable local or MCP tool requires approval.',
   )
   add(
     'http allowHosts',
-    localTools.every(
+    config.tools.every(
       (tool) => tool.executor?.type !== 'http' || (tool.executor.allowHosts?.length ?? 0) > 0,
     ),
     'HTTP tools have explicit host allowlists.',
   )
-  add(
-    'mcp allow',
-    config.tools.filter(isMcpImport).every((tool) => (tool.allow?.length ?? 0) > 0),
-    'MCP imports declare an explicit allowlist.',
-  )
-
   const budgetAlerting =
     config.security.budget.maxUsdPerDay !== undefined &&
     config.telemetry.enabled &&
@@ -129,11 +113,10 @@ export function productionDoctor(
         : '.env and .env.local are not both covered by .gitignore.',
   )
 
-  manual('ingest freshness', 'Confirm sitebot ingest runs in CI after site deployments.')
   add(
     'sensitive routes',
     sensitiveRoutesExcluded(config),
-    'Declared admin, account, and internal routes are excluded from page context and web indexing.',
+    'Declared admin, account, and internal routes are excluded from page context.',
   )
   add(
     'privacy footer',
@@ -203,18 +186,8 @@ function sensitiveRoutesExcluded(config: ResolvedConfig): boolean {
     .filter((path) => /(?:^|\/)(?:admin|account|internal)(?:\/|$)/i.test(path))
   if (sensitive.length === 0) return true
 
-  const webSources = config.knowledge.sources.filter(
-    (
-      source,
-    ): source is Extract<
-      (typeof config.knowledge.sources)[number],
-      { type: 'sitemap' | 'crawl' }
-    > => source.type === 'sitemap' || source.type === 'crawl',
-  )
-  return sensitive.every(
-    (path) =>
-      config.ui.pageContext.excludePaths.some((pattern) => globMatches(path, pattern)) &&
-      webSources.every((source) => source.exclude.some((pattern) => globMatches(path, pattern))),
+  return sensitive.every((path) =>
+    config.ui.pageContext.excludePaths.some((pattern) => globMatches(path, pattern)),
   )
 }
 
@@ -231,7 +204,6 @@ function globMatches(value: string, glob: string): boolean {
 export const COMMANDS: readonly CommandSpec[] = [
   { name: 'init', summary: 'Scaffold config, route handler and script tag, interactively' },
   { name: 'validate', summary: 'Validate the config and print it resolved, with secrets masked' },
-  { name: 'ingest', summary: 'Build or refresh the knowledge index' },
   { name: 'dev', summary: 'Local dev server and playground page, with config hot-reload' },
   { name: 'serve', summary: 'Production sidecar server (topology T2)' },
   { name: 'doctor', summary: 'Diagnose env vars, provider reachability, store health and CORS' },

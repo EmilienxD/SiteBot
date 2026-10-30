@@ -25,6 +25,7 @@ test('navigates to another page and the conversation carries over', async ({ pag
   await page.goto('/')
   await widget.open()
   await widget.send('Take me to the shop page.')
+  await page.getByRole('link', { name: 'Shop', exact: true }).click()
   await page.waitForURL('**/shop')
   await widget.ensureOpen()
   await expect(widget.log.locator('.message.user')).toContainText('Take me to the shop page.')

@@ -44,10 +44,9 @@ export const JsonSchemaObjectSchema = z
  * `chatbot.config.ts`, and excluded from the published JSON Schema because it
  * has no declarative equivalent.
  */
-export const ZodSchemaSchema = z.custom<z.ZodType>(
-  (value) => typeof value === 'object' && value !== null && ('_zod' in value || '_def' in value),
-  { error: 'expected a Zod schema' },
-)
+export const ZodSchemaSchema = z.custom<z.ZodType>((value) => value instanceof z.ZodType, {
+  error: 'expected a Zod schema',
+})
 
 /** Any function, for `defineConfig`-only fields. */
 export const FunctionSchema = z.custom<(...args: never[]) => unknown>(
@@ -55,7 +54,7 @@ export const FunctionSchema = z.custom<(...args: never[]) => unknown>(
   { error: 'expected a function' },
 )
 
-/** A CSS selector list. Not parsed here; the widget and ingest own that. */
+/** A CSS selector list. Not parsed here; the widget owns that. */
 export const SelectorSchema = z.string().min(1)
 
 /** A glob pattern such as `/docs/**`. */

@@ -99,8 +99,7 @@
   },
   "dependencies": {
     "@sitebot/config": "workspace:*",
-    "@sitebot/core": "workspace:*",
-    "@sitebot/ingest": "workspace:*"
+    "@sitebot/core": "workspace:*"
   },
   "peerDependencies": {
     "hono": ">=4"

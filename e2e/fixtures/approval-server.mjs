@@ -29,6 +29,13 @@ const server = createServer(async (request, response) => {
       return
     }
     const page = pages[url.pathname]
+    if (url.pathname === '/application-tools.js') {
+      const script = await readFile(
+        new URL('../../examples/plain-html/public/application-tools.js', import.meta.url),
+      )
+      response.writeHead(200, { 'content-type': 'application/javascript' }).end(script)
+      return
+    }
     if (url.pathname === '/styles.css') {
       const css = await readFile(
         new URL('../../examples/plain-html/public/styles.css', import.meta.url),

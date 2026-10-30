@@ -11,9 +11,9 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck && tsc -p e2e",
-    "test": "vitest run --project=config --project=core --project=server --project=ingest --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
+    "test": "vitest run --project=config --project=core --project=server --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
     "test:security": "vitest run --project=security-*",
-    "test:watch": "vitest --project=config --project=core --project=server --project=ingest --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
+    "test:watch": "vitest --project=config --project=core --project=server --project=cli --project=widget --project=react --project=examples --project=docs --project=boundaries",
     "test:live": "vitest run --project=live",
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "e2e:live": "playwright test -c e2e/live.config.ts",

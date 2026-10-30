@@ -1,8 +1,9 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BackendEntry } from '@sitebot/config'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { moduleUrl, parseModuleSpec } from '../modules.js'
+import * as optionalImports from './optional-import.js'
 import { resolveModel } from './registry.js'
 
 /**
@@ -74,9 +75,19 @@ describe('cloud and local providers', () => {
   ] as const)(
     '%s has an adapter; without its package the error is the install hint',
     async (provider, pkg) => {
-      const error = await resolveModel(entry({ provider })).catch((cause: unknown) => cause)
-      expect(String((error as Error).message)).not.toMatch(/not available yet/)
-      expect(String((error as Error).message)).toContain(`pnpm add ${pkg}`)
+      // Vertex is installed for offline protocol tests. Simulate a missing
+      // optional dependency explicitly, independent of the workspace install.
+      const load = vi
+        .spyOn(optionalImports, 'importProviderPackage')
+        .mockRejectedValueOnce(optionalImports.installHint(provider, pkg))
+      try {
+        const error = await resolveModel(entry({ provider })).catch((cause: unknown) => cause)
+        expect(load).toHaveBeenCalledWith(provider, { baseDir: undefined })
+        expect(String((error as Error).message)).not.toMatch(/not available yet/)
+        expect(String((error as Error).message)).toContain(`pnpm add ${pkg}`)
+      } finally {
+        load.mockRestore()
+      }
     },
   )
 

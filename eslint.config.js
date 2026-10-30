@@ -9,7 +9,7 @@ import globals from 'globals'
  * packages below it:
  *
  *   layer 4  cli, apps
- *   layer 3  server, ingest (node)  |  widget, react (browser)
+ *   layer 3  server (node)  |  widget, react (browser)
  *   layer 2  core
  *   layer 1  config
  */
@@ -20,7 +20,6 @@ const PKG = {
   server: '@sitebot/server',
   widget: '@sitebot/widget',
   react: '@sitebot/react',
-  ingest: '@sitebot/ingest',
   cli: '@sitebot/cli',
 }
 
@@ -138,7 +137,7 @@ export default tseslint.config(
   {
     files: ['packages/core/src/**/*.ts'],
     rules: boundary(
-      [PKG.server, PKG.widget, PKG.react, PKG.ingest, PKG.cli],
+      [PKG.server, PKG.widget, PKG.react, PKG.cli],
       '@sitebot/core may only import @sitebot/config',
     ),
   },
@@ -163,19 +162,12 @@ export default tseslint.config(
   },
 
   // ── layer 3, node ─────────────────────────────────────────────────────────
-  // Rule 3: server and ingest import core and config, and not each other.
+  // Rule 3: server imports core and config.
   {
     files: ['packages/server/src/**/*.ts'],
     rules: boundary(
-      [PKG.widget, PKG.react, PKG.ingest, PKG.cli],
+      [PKG.widget, PKG.react, PKG.cli],
       '@sitebot/server may only import @sitebot/core and @sitebot/config',
-    ),
-  },
-  {
-    files: ['packages/ingest/src/**/*.ts'],
-    rules: boundary(
-      [PKG.widget, PKG.react, PKG.server, PKG.cli],
-      '@sitebot/ingest may only import @sitebot/core and @sitebot/config',
     ),
   },
 
@@ -185,7 +177,7 @@ export default tseslint.config(
     files: ['packages/widget/src/**/*.ts', 'packages/widget/src/**/*.tsx'],
     languageOptions: { globals: { ...globals.browser } },
     rules: boundary(
-      [PKG.core, PKG.server, PKG.ingest, PKG.cli],
+      [PKG.core, PKG.server, PKG.cli],
       '@sitebot/widget is a browser bundle and must not pull in server code',
       [PKG.config],
     ),
@@ -194,7 +186,7 @@ export default tseslint.config(
     files: ['packages/react/src/**/*.ts', 'packages/react/src/**/*.tsx'],
     languageOptions: { globals: { ...globals.browser } },
     rules: boundary(
-      [PKG.core, PKG.server, PKG.ingest, PKG.cli],
+      [PKG.core, PKG.server, PKG.cli],
       '@sitebot/react is a browser bundle and must not pull in server code',
       [PKG.config],
     ),

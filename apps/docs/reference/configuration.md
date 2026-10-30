@@ -81,6 +81,7 @@ docs/02-configuration.md §5.
 | `prompt` | `object` |  | docs/02-configuration.md §5. |
 | `prompt.system` | `string` |  | The system prompt. &#123;&#123;variables}} are substituted; ${env.*} is deliberately NOT (docs/02 §2). _non-empty._ |
 | `prompt.systemFile` | `string` |  | Path to a file holding the system prompt, relative to the config file. Read at load time. _non-empty._ |
+| `prompt.systemTimeoutMs` | `integer` | `3000` | Deadline for server prompt.system resolution; default 3000ms, maximum 10000ms. _≥ 1, ≤ 10000._ |
 | `prompt.includePageContext` | `boolean` | `true` |  |
 | `prompt.includeSiteContext` | `boolean` | `true` |  |
 | `prompt.variables` | `Record<string, string>` | `{}` | Values for &#123;&#123;name}} placeholders in `system`. |
@@ -124,152 +125,6 @@ docs/02-configuration.md §7.
 | `agent.onMaxSteps` | `"summarize" \| "error" \| "silent"` | `"summarize"` | summarize reserves the final permitted call for an answer with tools disabled. |
 | `agent.parallelToolCalls` | `boolean` | `true` |  |
 | `agent.toolChoice` | `"auto" \| "required" \| "none"` | `"auto"` |  |
-
-## `knowledge`
-
-docs/02-configuration.md §9, docs/06-knowledge.md.
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge` | `object` | `{}` | docs/02-configuration.md §9, docs/06-knowledge.md. |
-| `knowledge.sources` | `object[]` | `[]` | Empty means the whole knowledge subsystem stays inert. |
-| `knowledge.extract.selector` | `string` | `"main, article, [role=\"main\"]"` | _non-empty._ |
-| `knowledge.extract.strip` | `string[]` | `["nav","footer","aside",".cookie-banner"]` |  |
-| `knowledge.extract.format` | `"markdown" \| "text"` | `"markdown"` |  |
-| `knowledge.extract.minChars` | `integer` | `200` | Pages shorter than this after extraction are skipped. _≥ 0._ |
-| `knowledge.extract.renderJs` | `boolean` | `false` | Fetch through a headless browser. Slow; for SPA-rendered sites. |
-| `knowledge.chunk.strategy` | `"semantic" \| "heading" \| "fixed"` | `"semantic"` |  |
-| `knowledge.chunk.maxTokens` | `integer` | `512` | _> 0._ |
-| `knowledge.chunk.overlapTokens` | `integer` | `64` | _≥ 0._ |
-| `knowledge.chunk.minTokens` | `integer` | `64` | _≥ 0._ |
-| `knowledge.embedding.provider` <Badge type="warning" text="required" /> | `"openai" \| "google" \| "mistral" \| "cohere" \| "voyage" \| "ollama" \| "openai-compatible"` |  |  |
-| `knowledge.embedding.model` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.embedding.apiKey` | `string` |  |  |
-| `knowledge.embedding.baseUrl` | `string` |  |  |
-| `knowledge.embedding.dimensions` | `integer` |  | _> 0._ |
-| `knowledge.embedding.batchSize` | `integer` | `96` | _> 0._ |
-| `knowledge.embedding.documentPrefix` | `string` |  | Model-specific text prefix for indexed documents. Changing it requires ingest --force. |
-| `knowledge.embedding.queryPrefix` | `string` |  | Model-specific text prefix for retrieval queries. |
-| `knowledge.store` | `object` | `{"type":"memory"}` |  |
-| `knowledge.retrieval.mode` | `"tool" \| "always" \| "hybrid"` |  | Defaults to `always` in chat mode and `tool` in agent mode. |
-| `knowledge.retrieval.topK` | `integer` | `6` | _> 0._ |
-| `knowledge.retrieval.minScore` | `number` | `0.3` | _≥ 0, ≤ 1._ |
-| `knowledge.retrieval.maxContextTokens` | `integer` | `3000` | _> 0._ |
-| `knowledge.retrieval.includeCitations` | `boolean` | `true` |  |
-| `knowledge.retrieval.languagePreference` | `"relevance" \| "locale-first"` | `"relevance"` | Rank all languages by relevance (locale breaks ties), or prefer suitable locale results before falling back. |
-| `knowledge.retrieval.rerank` | `boolean \| object` | `false` | true uses Cohere rerank-v3.5 and COHERE_API_KEY; an object configures Cohere or a local custom cross-encoder. |
-| `knowledge.retrieval.dedupeByUrl` | `boolean` | `true` | At most one chunk per URL, so one long page cannot dominate. |
-| `knowledge.retrieval.expandNeighbours` | `integer` | `0` | Pull N adjacent chunks around each hit from the same document. _≥ 0._ |
-| `knowledge.retrieval.filter` | `Record<string, any>` |  |  |
-
-One of 6 shapes, chosen by `type`.
-
-### `knowledge.sources[]` — `type: sitemap`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"sitemap"` |  |  |
-| `knowledge.sources[].id` | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
-| `knowledge.sources[].url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.sources[].include` | `string[]` | `[]` |  |
-| `knowledge.sources[].exclude` | `string[]` | `[]` |  |
-| `knowledge.sources[].maxPages` | `integer` |  | _> 0._ |
-
-### `knowledge.sources[]` — `type: crawl`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"crawl"` |  |  |
-| `knowledge.sources[].id` | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
-| `knowledge.sources[].url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.sources[].maxDepth` | `integer` | `3` | _≥ 0._ |
-| `knowledge.sources[].maxPages` | `integer` |  | _> 0._ |
-| `knowledge.sources[].respectRobots` | `boolean` | `true` |  |
-| `knowledge.sources[].include` | `string[]` | `[]` |  |
-| `knowledge.sources[].exclude` | `string[]` | `[]` |  |
-
-### `knowledge.sources[]` — `type: files`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"files"` |  |  |
-| `knowledge.sources[].id` | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
-| `knowledge.sources[].glob` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.sources[].baseUrl` | `string` |  | Maps file paths to public URLs so citations link somewhere. |
-
-### `knowledge.sources[]` — `type: openapi`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"openapi"` |  |  |
-| `knowledge.sources[].id` | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
-| `knowledge.sources[].url` | `string` |  | _non-empty._ |
-| `knowledge.sources[].path` | `string` |  | _non-empty._ |
-
-### `knowledge.sources[]` — `type: text`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"text"` |  |  |
-| `knowledge.sources[].id` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  |  |
-| `knowledge.sources[].content` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-
-### `knowledge.sources[]` — `type: json`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.sources[].type` <Badge type="warning" text="required" /> | `"json"` |  |  |
-| `knowledge.sources[].id` | `string` |  | _non-empty._ |
-| `knowledge.sources[].lang` | `string` |  | Source language; overrides detected HTML lang. |
-| `knowledge.sources[].path` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.sources[].jsonPath` | `string` |  | _non-empty._ |
-| `knowledge.sources[].template` <Badge type="warning" text="required" /> | `string` |  | Renders each record into text, e.g. "{name} — {description}". _non-empty._ |
-
-Default: `{"type":"memory"}`
-
-One of 5 shapes, chosen by `type`.
-
-### `knowledge.store` — `type: memory`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.store.type` <Badge type="warning" text="required" /> | `"memory"` |  |  |
-| `knowledge.store.path` | `string` |  | Optional JSON file to persist the in-memory index between runs. |
-
-### `knowledge.store` — `type: sqlite`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.store.type` <Badge type="warning" text="required" /> | `"sqlite"` |  |  |
-| `knowledge.store.path` | `string` | `"./.sitebot/index.db"` | _non-empty._ |
-
-### `knowledge.store` — `type: pgvector`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.store.type` <Badge type="warning" text="required" /> | `"pgvector"` |  |  |
-| `knowledge.store.url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.store.table` | `string` | `"sitebot_chunks"` | _non-empty._ |
-
-### `knowledge.store` — `type: upstash`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.store.type` <Badge type="warning" text="required" /> | `"upstash"` |  |  |
-| `knowledge.store.url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `knowledge.store.token` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-
-### `knowledge.store` — `type: custom`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `knowledge.store.type` <Badge type="warning" text="required" /> | `"custom"` |  |  |
-| `knowledge.store.module` <Badge type="warning" text="required" /> | `string` |  | Path to a module implementing the VectorStore interface. _non-empty._ |
 
 ## `storage`
 
@@ -395,10 +250,8 @@ Fully public — everything here is served by GET /api/chat/config. Never put a 
 | `ui.behaviour.resetOnNavigate` | `boolean` | `false` |  |
 | `ui.behaviour.sound` | `boolean` | `false` |  |
 | `ui.behaviour.sessionScope` | `"tab" \| "browser"` | `"tab"` | tab uses sessionStorage; browser uses localStorage. |
-| `ui.behaviour.navigateAllowlist` | `string[]` | `[]` | Extra paths the navigate client tool may target, beyond siteContext.routes. |
 | `ui.pageContext.excludePaths` | `string[]` | `[]` |  |
 | `ui.pageContext.redactSelectors` | `string[]` | `["input","[data-private]",".pii"]` |  |
-| `ui.pageContext.readSelectorDenylist` | `string[]` | `["input[type=password]","[data-sensitive]","iframe"]` |  |
 | `ui.extract.selector` | `string` | `"main, article, [role=\"main\"]"` | _non-empty._ |
 | `ui.extract.strip` | `string[]` | `[]` |  |
 | `ui.a11y.launcherAriaLabel` | `string` | `"Open chat assistant"` |  |
@@ -497,7 +350,7 @@ docs/02-configuration.md §13.
 | `telemetry.otel.enabled` | `boolean` | `false` |  |
 | `telemetry.otel.serviceName` | `string` | `"sitebot"` | _non-empty._ |
 | `telemetry.events.webhook` | `string` |  | The developer's own endpoint. No webhook, no events. |
-| `telemetry.events.include` | `("message" \| "tool_call" \| "error" \| "finish" \| "approval" \| "feedback" \| "lead" \| "handoff" \| "provider_fallback" \| "budget_exceeded")[]` | `["message","tool_call","error","finish"]` |  |
+| `telemetry.events.include` | `("message" \| "tool_call" \| "error" \| "finish" \| "approval" \| "feedback" \| "provider_fallback" \| "budget_exceeded")[]` | `["message","tool_call","error","finish"]` |  |
 | `telemetry.logLevel` | `"silent" \| "error" \| "warn" \| "info" \| "debug"` | `"info"` |  |
 | `telemetry.redactPromptsInLogs` | `boolean` | `true` |  |
 
@@ -506,58 +359,10 @@ docs/02-configuration.md §13.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `tools` | `object[]` | `[]` |  |
-
-One of 2 shapes.
-
-### `tools[]` — `from: mcp`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `tools[].from` <Badge type="warning" text="required" /> | `"mcp"` |  |  |
-| `tools[].id` <Badge type="warning" text="required" /> | `string` |  | Identifies this server in health checks and telemetry. _non-empty._ |
-| `tools[].server` <Badge type="warning" text="required" /> | `object` |  |  |
-| `tools[].allow` | `string[]` |  | Tool names to import. Strongly recommended in production. |
-| `tools[].deny` | `string[]` | `[]` |  |
-| `tools[].prefix` | `string` | `""` | Prepended to imported tool names to avoid collisions. |
-| `tools[].readOnly` | `boolean` | `false` |  |
-| `tools[].requiresApproval` | `boolean` | `false` |  |
-| `tools[].scope` | `"public" \| "authenticated"` | `"public"` |  |
-| `tools[].timeoutMs` | `integer` | `15000` | _> 0._ |
-| `tools[].enabled` | `boolean \| string` | `true` |  |
-
-One of 2 shapes, chosen by `transport`.
-
-#### `tools[].server` — `transport: http | sse`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `tools[].server.transport` <Badge type="warning" text="required" /> | `"http" \| "sse"` |  |  |
-| `tools[].server.url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `tools[].server.headers` | `Record<string, string>` | `{}` |  |
-
-#### `tools[].server` — `transport: stdio`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `tools[].server.transport` <Badge type="warning" text="required" /> | `"stdio"` |  |  |
-| `tools[].server.command` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
-| `tools[].server.args` | `string[]` | `[]` |  |
-| `tools[].server.env` | `Record<string, string>` | `{}` |  |
-
-### `tools[]` — anything else
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
 | `tools[].name` <Badge type="warning" text="required" /> | `string` |  | Unique tool name the model will call. _matches `^[a-z][a-z0-9_]{0,63}$`._ |
-| `tools[].description` | `string` |  | What the model reads to decide whether to call this. Required except for builtin executors. |
-| `tools[].parameters` | `object` | `{}` | JSON Schema (draft-07 subset) for the tool arguments. |
-| `tools[].parameters.type` | `"object"` | `"object"` |  |
-| `tools[].parameters.properties` | `Record<string, object>` | `{}` |  |
-| `tools[].parameters.required` | `string[]` | `[]` |  |
-| `tools[].outputSchema` | `object` |  | For client tools: the result the page must return. The server checks every result against it before the model sees it — the browser is not trusted to. |
-| `tools[].outputSchema.type` | `"object"` | `"object"` |  |
-| `tools[].outputSchema.properties` | `Record<string, object>` | `{}` |  |
-| `tools[].outputSchema.required` | `string[]` | `[]` |  |
+| `tools[].description` <Badge type="warning" text="required" /> | `string` |  | Application-owned tool description. _non-empty._ |
+| `tools[].parameters` <Badge type="warning" text="required" /> | `Record<string, any>` |  | Complete input JSON Schema; object root required. |
+| `tools[].outputSchema` <Badge type="warning" text="required" /> | `Record<string, any>` |  | Required result JSON Schema, checked for every transport. |
 | `tools[].readOnly` | `boolean` | `false` | Declares no side effects. Must be true in chat mode. |
 | `tools[].scope` | `"public" \| "authenticated"` | `"public"` |  |
 | `tools[].requiresApproval` | `boolean` | `false` |  |
@@ -569,9 +374,9 @@ One of 2 shapes, chosen by `transport`.
 | `tools[].maxCallsPerSession` | `integer` |  | _> 0._ |
 | `tools[].errorMessage` | `string` |  | Shown to the model when the executor fails. |
 
-One of 5 shapes, chosen by `type`.
+One of 4 shapes, chosen by `type`.
 
-#### `tools[].executor` — `type: http`
+### `tools[].executor` — `type: http`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -589,17 +394,17 @@ One of 5 shapes, chosen by `type`.
 | `tools[].executor.allowPrivateNetwork` | `boolean` | `false` |  |
 | `tools[].executor.maxRedirects` | `integer` | `0` | _≥ 0._ |
 
-#### `tools[].executor` — `type: mcp`
+### `tools[].executor` — `type: mcp`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `tools[].executor.type` <Badge type="warning" text="required" /> | `"mcp"` |  |  |
 | `tools[].executor.server` <Badge type="warning" text="required" /> | `object` |  |  |
-| `tools[].executor.tool` <Badge type="warning" text="required" /> | `string` |  | Tool name as the server exposes it. _non-empty._ |
+| `tools[].executor.tool` <Badge type="warning" text="required" /> | `string` |  | Explicit tool name as the server exposes it. _non-empty, matches `^[^*]+$`._ |
 
 One of 2 shapes, chosen by `transport`.
 
-##### `tools[].executor.server` — `transport: http | sse`
+#### `tools[].executor.server` — `transport: http | sse`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -607,7 +412,7 @@ One of 2 shapes, chosen by `transport`.
 | `tools[].executor.server.url` <Badge type="warning" text="required" /> | `string` |  | _non-empty._ |
 | `tools[].executor.server.headers` | `Record<string, string>` | `{}` |  |
 
-##### `tools[].executor.server` — `transport: stdio`
+#### `tools[].executor.server` — `transport: stdio`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -616,7 +421,7 @@ One of 2 shapes, chosen by `transport`.
 | `tools[].executor.server.args` | `string[]` | `[]` |  |
 | `tools[].executor.server.env` | `Record<string, string>` | `{}` |  |
 
-#### `tools[].executor` — `type: module`
+### `tools[].executor` — `type: module`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -624,24 +429,9 @@ One of 2 shapes, chosen by `transport`.
 | `tools[].executor.path` <Badge type="warning" text="required" /> | `string` |  | Module path, resolved relative to the config file. _non-empty._ |
 | `tools[].executor.export` | `string` | `"default"` | _non-empty._ |
 
-#### `tools[].executor` — `type: builtin`
-
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `tools[].executor.type` <Badge type="warning" text="required" /> | `"builtin"` |  |  |
-| `tools[].executor.id` <Badge type="warning" text="required" /> | `"search_knowledge_base" \| "list_site_sections" \| "get_page_context" \| "handoff" \| "navigate" \| "collect_lead" \| "submit_feedback" \| "get_time"` |  |  |
-| `tools[].executor.topK` | `integer` |  | _> 0._ |
-| `tools[].executor.minScore` | `number` |  | _≥ 0, ≤ 1._ |
-| `tools[].executor.filter` | `Record<string, any>` |  |  |
-| `tools[].executor.target.kind` <Badge type="warning" text="required" /> | `"webhook" \| "intercom" \| "crisp" \| "zendesk" \| "email" \| "url"` |  |  |
-| `tools[].executor.target.url` | `string` |  |  |
-| `tools[].executor.target.email` | `string` |  |  |
-| `tools[].executor.target.includeTranscript` | `boolean` | `false` |  |
-| `tools[].executor.message` | `string` |  |  |
-
-#### `tools[].executor` — `type: client`
+### `tools[].executor` — `type: client`
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `tools[].executor.type` <Badge type="warning" text="required" /> | `"client"` |  |  |
-| `tools[].executor.id` <Badge type="warning" text="required" /> | `string` |  | A builtin client tool id, or a name registered via SiteBot.registerTool(). _non-empty._ |
+| `tools[].executor.id` <Badge type="warning" text="required" /> | `string` |  | An application handler id registered via SiteBot.registerTool(). _non-empty._ |

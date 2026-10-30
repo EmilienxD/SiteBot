@@ -71,17 +71,31 @@ describe('tools[] merge by name', () => {
       {
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'quote',
             description: 'from yaml',
             executor: { type: 'http', url: 'https://a.com' },
           },
         ],
       },
-      { tools: [{ name: 'quote', description: 'from ts', execute: 'fn' }] },
+      {
+        tools: [
+          {
+            parameters: { type: 'object' },
+            outputSchema: {},
+            name: 'quote',
+            description: 'from ts',
+            execute: 'fn',
+          },
+        ],
+      },
     ) as { tools: Record<string, unknown>[] }
 
     expect(merged.tools).toHaveLength(1)
     expect(merged.tools[0]).toEqual({
+      parameters: { type: 'object' },
+      outputSchema: {},
       name: 'quote',
       description: 'from ts',
       execute: 'fn',
@@ -101,46 +115,12 @@ describe('tools[] merge by name', () => {
     expect(merged.tools[1]).toEqual({ name: 'b', updated: true })
   })
 
-  it('matches bulk MCP imports on their id', () => {
-    const merged = mergeConfigs(
-      { tools: [{ from: 'mcp', id: 'acme', allow: ['a'] }] },
-      { tools: [{ from: 'mcp', id: 'acme', allow: ['a', 'b'] }] },
-    ) as { tools: Record<string, unknown>[] }
-
-    expect(merged.tools).toHaveLength(1)
-    expect(merged.tools[0]?.['allow']).toEqual(['a', 'b'])
-  })
-
   it('appends entries that have nothing to match on', () => {
     const merged = mergeConfigs(
       { tools: [{ name: 'a' }] },
       { tools: [{ description: 'nameless' }] },
     ) as { tools: unknown[] }
     expect(merged.tools).toHaveLength(2)
-  })
-})
-
-describe('knowledge.sources[] concatenate', () => {
-  it('applies both sides', () => {
-    const merged = mergeConfigs(
-      { knowledge: { sources: [{ type: 'sitemap', url: 'https://a.com' }] } },
-      { knowledge: { sources: [{ type: 'text', id: 'faq', content: 'x' }] } },
-    ) as { knowledge: { sources: unknown[] } }
-
-    expect(merged.knowledge.sources).toHaveLength(2)
-  })
-
-  it('leaves sibling knowledge keys deep-merged', () => {
-    const merged = mergeConfigs(
-      { knowledge: { sources: [{ type: 'text' }], chunk: { maxTokens: 512 } } },
-      { knowledge: { sources: [], chunk: { overlapTokens: 32 } } },
-    )
-    expect(merged).toEqual({
-      knowledge: {
-        sources: [{ type: 'text' }],
-        chunk: { maxTokens: 512, overlapTokens: 32 },
-      },
-    })
   })
 })
 

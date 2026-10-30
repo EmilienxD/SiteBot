@@ -1,6 +1,6 @@
 import { isEnvSourced } from './env.js'
 import { childPath } from './errors.js'
-import { isMcpImport } from './schema/tools.js'
+import { isToolEnabled } from './schema/tools.js'
 import type { AuthMode } from './schema/security.js'
 import type { Mode } from './schema/config.js'
 import type { Ui } from './schema/ui.js'
@@ -45,11 +45,9 @@ export interface PublicCapabilities {
   /**
    * Tool name → the client implementation it runs, when they differ: a tool
    * named `highlight_section` with `executor: { type: client, id: highlight }`
-   * runs the builtin `highlight`. Names absent here run under their own name.
+   * runs an application-registered handler. Names absent here run under their own name.
    */
   clientToolIds?: Record<string, string>
-  /** Server-declared routes that the navigate client tool may target. */
-  routes: string[]
   authMode: AuthMode
 }
 
@@ -78,7 +76,7 @@ export function toPublicConfig(
   const clientTools: string[] = []
   const clientToolIds: Record<string, string> = {}
   for (const entry of config.tools) {
-    if (isMcpImport(entry) || entry.enabled === false) continue
+    if (!isToolEnabled(entry.enabled)) continue
     if (entry.executor?.type === 'client') {
       clientTools.push(entry.name)
       if (entry.executor.id !== entry.name) clientToolIds[entry.name] = entry.executor.id
@@ -93,7 +91,6 @@ export function toPublicConfig(
       fileUpload: config.ui.behaviour.allowFileUpload,
       clientTools,
       ...(Object.keys(clientToolIds).length > 0 ? { clientToolIds } : {}),
-      routes: config.siteContext.routes.map((route) => route.path),
       authMode: config.security.auth.mode,
     },
   }

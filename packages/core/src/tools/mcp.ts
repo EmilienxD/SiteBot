@@ -1,23 +1,15 @@
-import type { McpImport, ToolEntry } from '@sitebot/config'
-import { randomDelimiterId, untrustedBlock } from '../prompt/untrusted.js'
+import type { ToolEntry } from '@sitebot/config'
 import { EngineError } from '../stream/errors.js'
 import type { HealthStatus } from '../types.js'
 import type { JsonSchemaObject } from './schema.js'
 
-export type McpServer = McpImport['server']
+export type McpServer = Extract<NonNullable<ToolEntry['executor']>, { type: 'mcp' }>['server']
 type RemoteServer = Extract<McpServer, { transport: 'http' | 'sse' }>
 export type StdioServer = Extract<McpServer, { transport: 'stdio' }>
 
-export interface McpToolDefinition {
-  name: string
-  description: string
-  parameters: JsonSchemaObject
-  execute(input: unknown): Promise<unknown>
-}
-
 export interface McpConnection {
   list(): Promise<Array<{ name: string; description?: string; inputSchema: JsonSchemaObject }>>
-  call(name: string, input: unknown): Promise<unknown>
+  call(name: string, input: unknown, signal?: AbortSignal): Promise<unknown>
   ping(): Promise<void>
   close(): Promise<void>
 }
@@ -91,7 +83,11 @@ export class McpClientPool {
       this.#run(id, server, operation)
     return {
       list: () => run((connection) => connection.list()),
-      call: (name, input) => run((connection) => connection.call(name, input)),
+      call: (name, input, signal) =>
+        run((connection) => {
+          signal?.throwIfAborted()
+          return connection.call(name, input, signal)
+        }),
       ping: () => run((connection) => connection.ping()),
       close: () => this.#remove(id),
     }
@@ -206,44 +202,14 @@ export class McpClientPool {
   }
 }
 
-export async function expandMcpImport(
-  entry: McpImport,
-  pool: McpClientPool,
-): Promise<McpToolDefinition[]> {
-  return expandFromConnection(entry, pool.connection(entry.id, entry.server))
-}
-
-async function expandFromConnection(
-  entry: McpImport,
-  connection: McpConnection,
-): Promise<McpToolDefinition[]> {
-  const listed = await connection.list()
-  const allow = entry.allow === undefined ? null : new Set(entry.allow)
-  const deny = new Set(entry.deny)
-  return listed
-    .filter(
-      (definition) => (allow === null || allow.has(definition.name)) && !deny.has(definition.name),
-    )
-    .map((definition) => ({
-      name: `${entry.prefix}${definition.name}`,
-      description: frameDescription(
-        capDescription(definition.description ?? `Call MCP tool ${definition.name}.`),
-        entry.id,
-        definition.name,
-      ),
-      parameters: definition.inputSchema,
-      execute: (input) => connection.call(definition.name, input),
-    }))
-}
-
 export async function createMcpExecutor(
-  entry: Exclude<ToolEntry, { from: 'mcp' }>,
+  entry: ToolEntry,
   pool: McpClientPool,
-): Promise<(input: unknown) => Promise<unknown>> {
+): Promise<(input: unknown, ctx: { signal: AbortSignal }) => Promise<unknown>> {
   const executor = entry.executor
   if (executor?.type !== 'mcp') throw new EngineError('not_ready')
   const connection = pool.connection(`tool:${entry.name}`, executor.server)
-  return (input) => connection.call(executor.tool, input)
+  return (input, ctx) => connection.call(executor.tool, input, ctx.signal)
 }
 
 async function connectRemote(
@@ -278,12 +244,16 @@ async function connectRemote(
         inputSchema: tool.inputSchema as JsonSchemaObject,
       }))
     },
-    async call(name, input) {
-      const result = await client.callTool({
-        name,
-        arguments:
-          typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
-      })
+    async call(name, input, signal) {
+      const result = await client.callTool(
+        {
+          name,
+          arguments:
+            typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
+        },
+        undefined,
+        { signal },
+      )
       return capResult(result)
     },
     async ping() {
@@ -293,19 +263,6 @@ async function connectRemote(
       await transport.close()
     },
   }
-}
-
-function capDescription(description: string): string {
-  return description.length <= 1024 ? description : `${description.slice(0, 1021)}...`
-}
-
-function frameDescription(description: string, serverId: string, toolName: string): string {
-  return untrustedBlock({
-    tag: 'mcp_tool_description',
-    source: `The text below is the description of MCP tool "${toolName}" supplied by server "${serverId}".`,
-    content: description,
-    delimiterId: randomDelimiterId(),
-  })
 }
 
 function capResult(result: unknown): unknown {

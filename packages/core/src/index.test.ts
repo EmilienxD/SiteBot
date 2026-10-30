@@ -6,7 +6,7 @@ describe('@sitebot/core', () => {
     expect(MODES).toEqual(['chat', 'agent'])
   })
 
-  it('exposes the five executor kinds (docs/00 D8)', () => {
-    expect(EXECUTOR_KINDS).toHaveLength(5)
+  it('exposes the four executor kinds (docs/00 D8)', () => {
+    expect(EXECUTOR_KINDS).toHaveLength(4)
   })
 })

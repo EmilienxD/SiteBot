@@ -1,19 +1,3 @@
-/**
- * `sitebot init` — the five-minute path from nothing to a working assistant.
- *
- * The acceptance criterion for this command (docs/09 §Phase 9) is that a fresh
- * Next.js app plus one API key yields a site-aware chatbot with no manual file
- * editing. Three decisions follow from that:
- *
- * 1. **Nothing is overwritten.** An existing config or route file stops the
- *    command rather than being merged into. `--force` is the escape hatch.
- * 2. **The homepage is fetched.** A config with a filled-in `siteContext` is
- *    the difference between a bot that knows the site and one that does not,
- *    and it is the step a developer will otherwise skip.
- * 3. **Failure is partial, not total.** A site that will not load costs the
- *    draft, not the scaffold.
- */
-
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { PROVIDERS, type ProviderId } from '@sitebot/config'
@@ -23,7 +7,6 @@ import { type FlagSpecs } from '../args.js'
 import { Prompter } from '../prompt.js'
 import { type Ui } from '../terminal.js'
 import { detectFramework, FRAMEWORK_LABELS, FRAMEWORKS, type Framework } from '../init/detect.js'
-import { draftSiteContext, SiteDraftError, type SiteDraft } from '../init/site-draft.js'
 import {
   CONFIG_FILENAME,
   configFile,
@@ -45,11 +28,6 @@ export const INIT_FLAGS: FlagSpecs = {
   },
   provider: { type: 'string', summary: 'Model provider.', placeholder: '<id>' },
   model: { type: 'string', summary: 'Model ID.', placeholder: '<id>' },
-  'site-url': {
-    type: 'string',
-    summary: 'Site homepage, used to draft siteContext.',
-    placeholder: '<url>',
-  },
   name: {
     type: 'string',
     summary: 'Assistant name, shown as the panel title.',
@@ -69,7 +47,6 @@ export const INIT_FLAGS: FlagSpecs = {
     type: 'boolean',
     summary: 'Serve the widget from your own origin rather than the CDN.',
   },
-  'skip-draft': { type: 'boolean', summary: 'Do not fetch the homepage.' },
   force: { type: 'boolean', summary: 'Overwrite files that already exist.' },
   'dry-run': { type: 'boolean', summary: 'Print what would be written and exit.' },
 }
@@ -191,29 +168,7 @@ async function collect(
   const provider = await resolveProvider(prompter, flags['provider'], ui)
   const model = asString(flags['model']) ?? (await prompter.text('Model', DEFAULT_MODELS[provider]))
 
-  const siteUrl =
-    flags['skip-draft'] === true
-      ? null
-      : (asString(flags['site-url']) ??
-        (await prompter.text('Site URL (used to draft siteContext)', '')))
-
-  let draft: SiteDraft | null = null
-  if (siteUrl !== null && siteUrl !== '') {
-    ui.line()
-    ui.info(`Fetching ${siteUrl} …`)
-    try {
-      draft = await draftSiteContext(siteUrl)
-      ui.success(
-        `Drafted siteContext${draft.routes.length > 0 ? ` with ${draft.routes.length} routes` : ''}`,
-      )
-    } catch (error) {
-      // A draft is a nicety. Losing it must not lose the scaffold.
-      if (error instanceof SiteDraftError) ui.warn(`${error.message} ${error.fix}`)
-      else ui.warn(`Could not draft siteContext: ${describe(error)}`)
-    }
-  }
-
-  const fallbackName = draft?.company ?? (await packageName(cwd)) ?? 'Site Assistant'
+  const fallbackName = (await packageName(cwd)) ?? 'Site Assistant'
   const name = asString(flags['name']) ?? (await prompter.text('Assistant name', fallbackName))
 
   const basePath = normaliseBasePath(asString(flags['base-path']) ?? DEFAULT_BASE_PATH)
@@ -231,8 +186,6 @@ async function collect(
     typescript,
     srcDir,
     basePath,
-    draft,
-    siteUrl: siteUrl === '' ? null : siteUrl,
     selfHostWidget,
   }
 }
@@ -318,7 +271,9 @@ function printNextSteps(
 
   if (written.length > 0) {
     ui.line()
-    ui.info(`Edit ${CONFIG_FILENAME} — the siteContext block is a draft, not an answer.`)
+    ui.info(
+      `Edit ${CONFIG_FILENAME} — fill in trusted siteContext and register your application tools.`,
+    )
   }
 }
 
@@ -356,8 +311,4 @@ function normaliseBasePath(value: string): string {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

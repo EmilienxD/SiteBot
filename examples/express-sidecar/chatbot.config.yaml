@@ -30,7 +30,8 @@ siteContext:
   primaryUrl: ${env.SITE_ORIGIN:-http://localhost:8000}
   facts:
     - Open Monday to Friday 08:00–18:00 and Saturday 09:00–13:00.
-    - Emergency appointments are held back every morning — call 0117 000 0000 from 08:00.
+    - Emergency appointments are held back every morning — call 0117 000 0000
+      from 08:00.
     - A private check-up is £55; a hygienist visit is £70.
     - New patients register online or at reception; bring photo ID.
   routes:

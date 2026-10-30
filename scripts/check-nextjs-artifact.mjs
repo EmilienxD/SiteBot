@@ -66,22 +66,12 @@ for (const trace of traces) {
       path.startsWith('node_modules/') ||
       path.startsWith(`${appPath}/.next/`) ||
       /^packages\/[^/]+\/(dist\/|package\.json$|pricing\.json$)/.test(path) ||
-      [
-        `${appPath}/package.json`,
-        `${appPath}/chatbot.config.yaml`,
-        `${appPath}/.sitebot/index.json`,
-      ].includes(path)
+      [`${appPath}/package.json`, `${appPath}/chatbot.config.yaml`].includes(path)
     assert(permitted, `Unexpected application file in ${relative(build, trace)}: ${path}`)
     all.add(file)
   }
   if (trace === chatTrace) {
     assert(resolved.has(resolve(app, 'chatbot.config.yaml')), 'Chat config missing from trace')
-    if (process.argv.includes('--expect-index')) {
-      assert(
-        resolved.has(resolve(app, '.sitebot/index.json')),
-        'Prebuilt knowledge index missing from trace',
-      )
-    }
     await summarize('Chat route dependencies', resolved)
   }
 }
@@ -101,14 +91,6 @@ assert(
 await stat(sdk)
 const sdkMetadata = JSON.parse(await readFile(sdk, 'utf8'))
 await stat(resolve(dirname(sdk), sdkMetadata.exports['.'].import))
-if (process.argv.includes('--expect-index')) {
-  const snapshotPath = '.sitebot/index.json'
-  assert.equal(
-    await readFile(resolve(deployedApp, snapshotPath), 'utf8'),
-    await readFile(resolve(app, snapshotPath), 'utf8'),
-    'Traced snapshot bytes changed',
-  )
-}
 await summarize('Standalone server (without static assets)', await walk(standalone))
 await summarize('Static assets', await walk(resolve(build, 'static')))
 console.log(

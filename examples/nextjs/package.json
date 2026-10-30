@@ -8,12 +8,12 @@
     "dev": "next dev --port 3000",
     "build": "next build && node scripts/prepare-standalone.mjs",
     "start": "next start --port 3000",
-    "ingest": "sitebot ingest",
     "doctor": "sitebot doctor",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf .next"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.139",
     "@ai-sdk/openai": "^3.0.0",
     "@sitebot/config": "workspace:*",
     "@sitebot/react": "workspace:*",

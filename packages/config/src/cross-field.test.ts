@@ -12,6 +12,8 @@ import { validateConfig } from './index.js'
  */
 
 const CLIENT_TOOL = {
+  parameters: { type: 'object' },
+  outputSchema: {},
   name: 'highlight_section',
   description: 'Scroll to and highlight a section of the page.',
   readOnly: true,
@@ -26,11 +28,15 @@ describe('rule 1 — mode: chat forbids non-readOnly tools', () => {
         mode: 'chat',
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'create_ticket',
             description: 'File a support ticket.',
             executor: { type: 'client', id: 'x' },
           },
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'send_email',
             description: 'Send an email to the user.',
             executor: { type: 'client', id: 'y' },
@@ -55,6 +61,8 @@ describe('rule 1 — mode: chat forbids non-readOnly tools', () => {
         storage: { type: 'memory' },
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'create_ticket',
             description: 'File a support ticket.',
             executor: { type: 'client', id: 'x' },
@@ -136,60 +144,6 @@ describe('rule 4 — provider: custom requires module', () => {
   })
 })
 
-describe('rule 5 — knowledge.sources requires knowledge.embedding', () => {
-  it('fires when sources are configured without an embedder', () => {
-    const error = errorForRule(
-      {
-        ...minimalConfig(),
-        knowledge: {
-          sources: [{ type: 'sitemap', url: 'https://acme.com/sitemap.xml' }],
-        },
-      },
-      'cross-field/5',
-    )
-
-    expect(error.message).toBe(
-      'knowledge.sources is not empty, so knowledge.embedding is required.',
-    )
-    expect(error.path).toBe('knowledge.embedding')
-  })
-
-  it('stays quiet when there are no sources', () => {
-    const result = validateConfig(
-      { ...minimalConfig(), knowledge: { retrieval: { topK: 3 } } },
-      { env: {} },
-    )
-    expect(result.ok).toBe(true)
-  })
-})
-
-describe('rule 6 — sqlite store is rejected on edge', () => {
-  const config = {
-    ...minimalConfig(),
-    knowledge: {
-      sources: [{ type: 'text', id: 'faq', content: 'Returns take 30 days.' }],
-      embedding: { provider: 'openai', model: 'text-embedding-3-small' },
-      store: { type: 'sqlite', path: './.sitebot/index.db' },
-    },
-  }
-
-  it('fires only for the edge target', () => {
-    const result = validateConfig(config, { env: {}, target: 'edge' })
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-
-    const error = result.errors.find((e) => e.rule === 'cross-field/6')
-    expect(error?.message).toBe(
-      'knowledge.store.type "sqlite" is not available on the edge runtime.',
-    )
-    expect(error?.path).toBe('knowledge.store.type')
-  })
-
-  it('is fine on node', () => {
-    expect(validateConfig(config, { env: {}, target: 'node' }).ok).toBe(true)
-  })
-})
-
 describe('rule 7 — auth.mode: required needs a jwt block', () => {
   it('says what verification needs', () => {
     const error = errorForRule(
@@ -212,6 +166,8 @@ describe('rule 8 — scope: authenticated needs auth', () => {
         security: { auth: { mode: 'none' } },
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'check_order_status',
             description: 'Look up an order by ID.',
             readOnly: true,
@@ -236,6 +192,8 @@ describe('rule 8 — scope: authenticated needs auth', () => {
         security: { auth: { mode: 'optional' } },
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'check_order_status',
             description: 'Look up an order by ID.',
             readOnly: true,
@@ -332,6 +290,8 @@ describe('http tool templating (docs/05 §2 rules 2–3)', () => {
     ...minimalConfig(),
     tools: [
       {
+        parameters: { type: 'object' },
+        outputSchema: {},
         name: 'lookup',
         description: 'Look something up. Use when asked.',
         readOnly: true,
@@ -393,10 +353,15 @@ describe('additional normative rules', () => {
       ...minimalConfig(),
       tools: [
         {
-          from: 'mcp',
-          id: 'local',
-          server: { transport: 'stdio', command: 'node', args: ['./mcp.js'] },
-          allow: ['search_docs'],
+          name: 'search_docs',
+          description: 'Search test documents.',
+          parameters: { type: 'object' },
+          outputSchema: {},
+          executor: {
+            type: 'mcp',
+            tool: 'search_docs',
+            server: { transport: 'stdio', command: 'node', args: ['./mcp.js'] },
+          },
           readOnly: true,
         },
       ],
@@ -435,30 +400,7 @@ describe('additional normative rules', () => {
 })
 
 describe('warnings', () => {
-  it('warns when an MCP import has no allow list', () => {
-    const result = validateConfig(
-      {
-        ...minimalConfig(),
-        mode: 'agent',
-        tools: [
-          {
-            from: 'mcp',
-            id: 'acme',
-            server: { transport: 'http', url: 'https://acme.com/mcp' },
-          },
-        ],
-      },
-      { env: {} },
-    )
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.warnings[0]?.rule).toBe('tools/mcp-allow-missing')
-    expect(result.warnings[0]?.message).toBe(
-      'MCP import "acme" has no `allow` list, so every tool the server exposes is imported.',
-    )
-  })
-
-  it('promotes that warning to an error under security.strictTools', () => {
+  it('rejects the removed bulk import shape regardless of strictTools', () => {
     const errors = errorsFor({
       ...minimalConfig(),
       mode: 'agent',
@@ -471,7 +413,7 @@ describe('warnings', () => {
         },
       ],
     })
-    expect(errors.some((e) => e.rule === 'tools/mcp-allow-required')).toBe(true)
+    expect(errors.some((e) => e.path.startsWith('tools[0]'))).toBe(true)
   })
 
   it('warns that an env-sourced name will not reach the browser', () => {
@@ -486,6 +428,8 @@ describe('warnings', () => {
 
   describe('docs/05 §7 rule 5 — writable tools reachable without approval', () => {
     const writable = {
+      parameters: { type: 'object' },
+      outputSchema: {},
       name: 'fill_wholesale_form',
       description: 'Prefill the wholesale form.',
       readOnly: false,

@@ -4,7 +4,7 @@
  * Every template is a pure function of the answers, so the whole scaffold can
  * be asserted in a test without touching a filesystem. Comments in the emitted
  * files are deliberate: the scaffold is the documentation most developers will
- * actually read, and docs/05-tools.md §7 and docs/06-knowledge.md §4 both call
+ * actually read.
  * for `init` to demonstrate the good pattern rather than describe it.
  */
 
@@ -16,7 +16,6 @@ import {
   type ProviderId,
 } from '@sitebot/config'
 import type { Framework } from './detect.js'
-import type { SiteDraft } from './site-draft.js'
 
 export interface ScaffoldAnswers {
   name: string
@@ -26,8 +25,6 @@ export interface ScaffoldAnswers {
   typescript: boolean
   srcDir: boolean
   basePath: string
-  draft: SiteDraft | null
-  siteUrl: string | null
   /** Self-hosted widget rather than the CDN — docs/08-security.md §11. */
   selfHostWidget: boolean
 }
@@ -48,7 +45,6 @@ export const SCHEMA_LINE =
 
 export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
   const envVar = PROVIDER_ENV_VARS[answers.provider]
-  const draft = answers.draft
 
   const lines: string[] = [
     SCHEMA_LINE,
@@ -89,66 +85,25 @@ export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
     '  guardrails:',
     '    refuseOffTopic: true',
     '',
-    '# Layer 1 of the knowledge stack: hand-written facts, always in the prompt,',
-    '# no infrastructure. Drafted from your homepage — check every line.',
+    '# Application-provided facts, always in the prompt,',
+    '# Fill this in from your approved application context — check every line.',
     'siteContext:',
   )
 
-  if (draft?.company !== undefined) lines.push(`  company: ${yamlString(draft.company)}`)
-  if (draft?.description !== undefined) {
-    lines.push(`  description: ${yamlString(draft.description)}`)
-  }
-  if (draft?.primaryUrl !== undefined) lines.push(`  primaryUrl: ${yamlString(draft.primaryUrl)}`)
-
-  if (draft === null || draft.company === undefined) {
-    lines.push('  # company: Acme Inc')
-  }
-  if (draft === null || draft.description === undefined) {
-    lines.push('  # description: What the company does, in one sentence.')
-  }
+  lines.push('  # company: Your company', '  # description: Application-provided public context.')
 
   // An empty-but-present `facts` validates; a key whose only lines are
   // comments parses as null and does not.
   lines.push(
     '  # One fact per line. These go into every prompt, so keep them short and',
-    '  # keep them true — this is the cheapest knowledge you will ever add.',
+    '  # keep them true — these trusted facts guide the assistant.',
     '  # Example: - Support replies within one business day.',
     '  facts: []',
   )
 
-  if (draft !== null && draft.routes.length > 0) {
-    lines.push(
-      '  routes:',
-      '    # Doubles as the allowlist for the `navigate` tool: the assistant cannot',
-      '    # send a visitor anywhere that is not listed here.',
-    )
-    for (const route of draft.routes) {
-      lines.push(`    - path: ${yamlString(route.path)}`)
-      if (route.summary !== undefined) lines.push(`      summary: ${yamlString(route.summary)}`)
-    }
-  } else {
-    // Same null-versus-empty point as `facts` above.
-    lines.push(
-      '  # Doubles as the allowlist for the `navigate` tool:',
-      '  # - path: /pricing',
-      '  #   summary: Plans and per-seat pricing.',
-      '  routes: []',
-    )
-  }
+  lines.push('  routes: []', '', 'tools: []')
 
   lines.push(
-    '',
-    '# Layer 3 — the indexed corpus. Add a source, run `sitebot ingest`, and the',
-    '# assistant can quote your site. Layers 1 and 2 already work without it.',
-    '# knowledge:',
-    '#   sources:',
-    `#     - type: sitemap`,
-    `#       url: ${draft?.primaryUrl ?? 'https://example.com'}/sitemap.xml`,
-    '#   embedding:',
-    '#     provider: openai',
-    '#     model: text-embedding-3-small',
-    '#   store:',
-    '#     type: sqlite',
     '',
     '# Tools let the assistant act. In chat mode every tool must be readOnly.',
     '# The tool description is the highest-leverage thing in this file: it is the',
@@ -166,6 +121,7 @@ export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
     '#       properties:',
     '#         orderNumber: { type: string, description: "e.g. NW-10432" }',
     '#       required: [orderNumber]',
+    '#     outputSchema: { type: object }',
     '#     executor:',
     '#       type: http',
     '#       url: https://api.example.com/orders/{orderNumber}',
@@ -176,7 +132,7 @@ export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
     '  messages:',
     `    greeting: ${yamlString(greeting(answers))}`,
     '    suggestions:',
-    ...suggestions(draft).flatMap((suggestion) => [
+    ...suggestions().flatMap((suggestion) => [
       `      - label: ${yamlString(suggestion.label)}`,
       '        action:',
       '          type: send',
@@ -197,7 +153,7 @@ export function configFile(answers: ScaffoldAnswers): ScaffoldFile {
 }
 
 function systemPrompt(answers: ScaffoldAnswers): string[] {
-  const company = answers.draft?.company ?? answers.name
+  const company = answers.name
   return [
     `You are the assistant for ${company}'s website.`,
     '',
@@ -209,27 +165,12 @@ function systemPrompt(answers: ScaffoldAnswers): string[] {
 }
 
 function greeting(answers: ScaffoldAnswers): string {
-  const company = answers.draft?.company ?? answers.name
+  const company = answers.name
   return `Hi! Ask me anything about ${company}.`
 }
 
-function suggestions(draft: SiteDraft | null): { label: string; text: string }[] {
-  const routes = draft?.routes ?? []
-  const pick = (pattern: RegExp) => routes.find((route) => pattern.test(route.path))
-
-  const chosen: { label: string; text: string }[] = []
-  const pricing = pick(/pricing|plans/i)
-  if (pricing !== undefined) {
-    chosen.push({ label: 'How much does it cost?', text: 'How much does it cost?' })
-  }
-  const docs = pick(/docs|documentation|guide/i)
-  if (docs !== undefined) {
-    chosen.push({ label: 'How do I get started?', text: 'How do I get started?' })
-  }
-  if (chosen.length < 2) {
-    chosen.push({ label: 'What do you do?', text: 'What does this company do?' })
-  }
-  return chosen.slice(0, 3)
+function suggestions(): { label: string; text: string }[] {
+  return [{ label: 'What do you do?', text: 'What does this company do?' }]
 }
 
 // ── route handlers ──────────────────────────────────────────────────────────

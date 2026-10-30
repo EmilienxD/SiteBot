@@ -1,7 +1,7 @@
 {
   "name": "@sitebot/cli",
   "version": "0.0.0",
-  "description": "The sitebot CLI: init, validate, ingest, dev, serve, doctor. Layer 4.",
+  "description": "The sitebot CLI: init, validate, dev, serve, doctor. Layer 4.",
   "homepage": "https://github.com/EmilienxD/SiteBot/tree/main/packages/cli#readme",
   "repository": {
     "type": "git",
@@ -35,7 +35,6 @@
   "dependencies": {
     "@sitebot/config": "workspace:*",
     "@sitebot/core": "workspace:*",
-    "@sitebot/ingest": "workspace:*",
     "@sitebot/server": "workspace:*"
   },
   "devDependencies": {

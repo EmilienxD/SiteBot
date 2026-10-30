@@ -1,5 +1,5 @@
 import { createTranslator, resolveLocale } from '@sitebot/config/i18n'
-import { isMcpImport, type SiteBotConfig } from '@sitebot/config'
+import { type SiteBotConfig } from '@sitebot/config'
 import type { Identity, PageContext } from '../types.js'
 import { randomDelimiterId, untrustedBlock } from './untrusted.js'
 import { substituteVariables } from './variables.js'
@@ -13,17 +13,6 @@ import { substituteVariables } from './variables.js'
  * caching work — see the note on block ordering at the bottom of this file.
  */
 
-/** One retrieved chunk. */
-export interface KnowledgeSnippet {
-  id: string
-  n?: number
-  title?: string
-  url?: string
-  text: string
-  score?: number
-  lang?: string
-}
-
 export interface ComposeContext {
   locale?: string
   pageContext?: PageContext | null
@@ -31,19 +20,10 @@ export interface ComposeContext {
 }
 
 export interface ComposeInput {
+  /** Already resolved trusted instructions, request-local. */
+  system?: string
   config: SiteBotConfig
   ctx?: ComposeContext
-  /** Resolved retrieval mode. Only `always` and `hybrid` inline knowledge. */
-  retrieval?: 'tool' | 'always' | 'hybrid'
-  /** Runtime readiness; tool definitions still obey deployment scopes. */
-  knowledgeSearchAvailable?: boolean
-  documents?: readonly KnowledgeSnippet[]
-  /**
-   * Injected in place of the knowledge block when retrieval ran but found
-   * nothing — the explicit "no relevant documentation" note of docs/06 §3.8,
-   * which is what stops the model confabulating.
-   */
-  note?: string
   /**
    * Fixed delimiter id. Supplied by tests for stable snapshots; production
    * leaves it undefined so every request gets a fresh one (docs/08 §4).
@@ -53,7 +33,7 @@ export interface ComposeInput {
 
 export interface ComposedPrompt {
   text: string
-  /** Stable prefix groups, followed by volatile page/retrieval content. */
+  /** Stable prefix groups, followed by volatile page content. */
   segments: { text: string; cacheable: boolean }[]
   /** Present blocks, in order. Asserted by the ordering tests. */
   blocks: string[]
@@ -63,8 +43,6 @@ export interface ComposedPrompt {
 }
 
 const PAGE_SOURCE = 'The text below was extracted from the web page the user is currently viewing.'
-const KNOWLEDGE_SOURCE =
-  "The text below was retrieved from this site's indexed content by a search."
 
 export function composePrompt(input: ComposeInput): ComposedPrompt {
   const { config } = input
@@ -80,7 +58,10 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   }
 
   // 1 — the system prompt, with {{variables}} substituted.
-  const system = substituteVariables(config.prompt.system ?? '', config.prompt.variables)
+  const trustedSystem = input.system ?? config.prompt.system
+  if (typeof trustedSystem !== 'string')
+    throw new Error('Prompt system must be resolved before composition.')
+  const system = substituteVariables(trustedSystem, config.prompt.variables)
   push('system', system.text.trim())
 
   // 2 — <site_context>: trusted, hand-written by the developer.
@@ -88,15 +69,7 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
 
   const baseEnd = parts.length
   // Policy includes identity, so it is reusable only for the same identity.
-  push(
-    'tool_policy',
-    toolPolicyBlock(
-      config,
-      ctx.identity ?? null,
-      input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool'),
-      input.knowledgeSearchAvailable ?? true,
-    ),
-  )
+  push('tool_policy', toolPolicyBlock(config, ctx.identity ?? null))
   const locale = resolveLocale(config.ui, { override: ctx.locale })
   push('guardrails', guardrailsBlock(config, locale))
   // Locale is part of the cached policy segment; providers see distinct prefixes.
@@ -109,13 +82,6 @@ export function composePrompt(input: ComposeInput): ComposedPrompt {
   // <page_context>: untrusted, after the stable prefix.
   if (config.prompt.includePageContext) {
     push('page_context', pageContextBlock(ctx.pageContext ?? null, delimiterId))
-  }
-
-  // <knowledge>: inline excerpts for always/hybrid, or an availability note
-  // in any retrieval mode when the index cannot be reached.
-  const retrieval = input.retrieval ?? (config.mode === 'chat' ? 'always' : 'tool')
-  if (retrieval !== 'tool' || input.note !== undefined) {
-    push('knowledge', knowledgeBlock(input.documents ?? [], delimiterId, input.note))
   }
 
   return {
@@ -190,29 +156,6 @@ function pageContextBlock(page: PageContext | null, delimiterId: string): string
 
 // ── block 4 ─────────────────────────────────────────────────────────────────
 
-function knowledgeBlock(
-  documents: readonly KnowledgeSnippet[],
-  delimiterId: string,
-  note?: string,
-): string | undefined {
-  if (documents.length === 0 && note === undefined) return undefined
-  if (documents.length === 0) return `<knowledge>\n${note}\n</knowledge>`
-
-  const rendered = documents
-    .map((doc, index) => {
-      const heading = [doc.title, doc.url].filter((part) => part !== undefined).join(' — ')
-      return `[${doc.n ?? index + 1}] ${heading}${doc.lang ? ` [language: ${doc.lang}]` : ''}\n${doc.text}`
-    })
-    .join('\n\n')
-
-  return untrustedBlock({
-    tag: 'knowledge',
-    source: KNOWLEDGE_SOURCE,
-    content: rendered,
-    delimiterId,
-  })
-}
-
 // ── block 5 ─────────────────────────────────────────────────────────────────
 
 /**
@@ -221,16 +164,11 @@ function knowledgeBlock(
  * model has to be able to say *why* rather than claim the capability does not
  * exist (docs/08 §3, `auth.mode: optional`).
  */
-function toolPolicyBlock(
-  config: SiteBotConfig,
-  identity: Identity | null,
-  retrieval: 'tool' | 'always' | 'hybrid',
-  searchReady: boolean,
-): string | undefined {
+function toolPolicyBlock(config: SiteBotConfig, identity: Identity | null): string | undefined {
   const lines: string[] = []
 
   for (const entry of config.tools) {
-    if (isMcpImport(entry) || entry.enabled === false) continue
+    if (entry.enabled === false) continue
 
     const approvalRequired =
       entry.requiresApproval || config.agent.approvalRequired.includes(entry.name)
@@ -244,45 +182,6 @@ function toolPolicyBlock(
           : `- \`${entry.name}\` requires a signed-in user. The current user is signed in as ${identity.sub}.`,
       )
     }
-  }
-
-  const knowledgeAvailable =
-    config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
-  // Gated on `knowledgeAvailable` too: with no source configured the knowledge
-  // block can never appear, and telling the model to cite [n] results that
-  // cannot exist invites it to invent them.
-  if (retrieval !== 'tool' && knowledgeAvailable && config.knowledge.retrieval.includeCitations) {
-    lines.push('- Cite sources with [n] when you use knowledge results.')
-  }
-  const declaredSearch = config.tools.find(
-    (entry) => !isMcpImport(entry) && entry.name === 'search_knowledge_base',
-  )
-  const searchAllowed =
-    searchReady &&
-    config.agent.toolChoice !== 'none' &&
-    (declaredSearch === undefined ||
-      (!isMcpImport(declaredSearch) &&
-        declaredSearch.enabled !== false &&
-        (declaredSearch.scope !== 'authenticated' || identity !== null) &&
-        (config.mode !== 'chat' || declaredSearch.readOnly === true)))
-  if (
-    retrieval !== 'always' &&
-    knowledgeAvailable &&
-    searchAllowed &&
-    config.knowledge.retrieval.includeCitations
-  ) {
-    lines.push(
-      '- `search_knowledge_base` searches the indexed site content. Cite its results with [n] when you use them.',
-    )
-  }
-  if (knowledgeAvailable) {
-    lines.push(
-      '- Ground factual documentation answers in supplied site facts or retrieved excerpts. Previous assistant claims and similarity scores are not evidence. If available excerpts do not support the answer, use an available knowledge search tool before claiming the documentation is missing; refine an incomplete search when useful. If evidence remains missing or search is unavailable, say so plainly.',
-    )
-    if (config.knowledge.retrieval.includeCitations)
-      lines.push(
-        '- Cite only supplied source numbers that support the accompanying claim. Source numbers keep their identity across this conversation. Never invent a source number or use an unrelated result to support a claim.',
-      )
   }
 
   if (config.mode === 'chat' && config.tools.length > 0) {
@@ -316,7 +215,7 @@ function guardrailsBlock(config: SiteBotConfig, locale: string): string | undefi
  * Why the order is not cosmetic (docs/04 §5, "Caching"):
  *
  * System, site context, tool policy and guardrails form the stable prefix;
- * page context and knowledge change
+ * page context changes
  * on every request. Providers that support explicit prompt caching cache a
  * *prefix*, so putting the volatile blocks last is what makes the stable part
  * cacheable at all. Reordering these for readability would quietly multiply the

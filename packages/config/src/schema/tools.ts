@@ -1,57 +1,14 @@
 import { z } from 'zod'
-import {
-  FunctionSchema,
-  JsonSchemaObjectSchema,
-  ToolNameSchema,
-  ZodSchemaSchema,
-} from './primitives.js'
+import { compileToolSchema } from '../tool-schema.js'
+import { FunctionSchema, ToolNameSchema, ZodSchemaSchema } from './primitives.js'
 
-export const EXECUTOR_KINDS = ['http', 'mcp', 'module', 'builtin', 'client'] as const
+export const EXECUTOR_KINDS = ['http', 'mcp', 'module', 'client'] as const
 export const TOOL_SCOPES = ['public', 'authenticated'] as const
 export const APPROVAL_RISKS = ['low', 'medium', 'high'] as const
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as const
 export const MCP_TRANSPORTS = ['http', 'sse', 'stdio'] as const
 
 /** docs/05-tools.md §4. */
-export const BUILTIN_TOOL_IDS = [
-  'search_knowledge_base',
-  'list_site_sections',
-  'get_page_context',
-  'handoff',
-  'navigate',
-  'collect_lead',
-  'submit_feedback',
-  'get_time',
-] as const
-
-/** docs/05-tools.md §5. */
-export const BUILTIN_CLIENT_TOOL_IDS = [
-  'highlight',
-  'navigate',
-  'fill_form',
-  'read_element',
-  'get_page_context',
-  'open_url',
-  'copy_to_clipboard',
-] as const
-
-export const HANDOFF_TARGET_KINDS = [
-  'webhook',
-  'intercom',
-  'crisp',
-  'zendesk',
-  'email',
-  'url',
-] as const
-
-// ── executors ───────────────────────────────────────────────────────────────
-
-/**
- * docs/05-tools.md §2. The security-relevant fields (`allowHosts`,
- * `allowPrivateNetwork`, `maxRedirects`, `maxResponseBytes`) are part of the
- * schema from day one rather than added later, so a config written today keeps
- * working when Phase 5 starts enforcing them.
- */
 export const HttpExecutorSchema = z.strictObject({
   type: z.literal('http'),
   method: z.enum(HTTP_METHODS).default('GET'),
@@ -113,7 +70,11 @@ export const McpServerSchema = z.discriminatedUnion('transport', [
 export const McpExecutorSchema = z.strictObject({
   type: z.literal('mcp'),
   server: McpServerSchema,
-  tool: z.string().min(1).describe('Tool name as the server exposes it.'),
+  tool: z
+    .string()
+    .min(1)
+    .regex(/^[^*]+$/, 'Register one exact MCP tool name; wildcards are not supported.')
+    .describe('Explicit tool name as the server exposes it.'),
 })
 
 export const ModuleExecutorSchema = z.strictObject({
@@ -122,44 +83,18 @@ export const ModuleExecutorSchema = z.strictObject({
   export: z.string().min(1).default('default'),
 })
 
-export const HandoffTargetSchema = z.strictObject({
-  kind: z.enum(HANDOFF_TARGET_KINDS),
-  url: z.string().optional(),
-  email: z.string().optional(),
-  includeTranscript: z.boolean().default(false),
-})
-
-/**
- * `builtin` carries per-id options. They are collected in one object rather
- * than a discriminated union on `id` because most ids take none, and the two
- * that do (`search_knowledge_base`, `handoff`) would otherwise dominate the
- * shape of the schema for very little gain.
- */
-export const BuiltinExecutorSchema = z.strictObject({
-  type: z.literal('builtin'),
-  id: z.enum(BUILTIN_TOOL_IDS),
-  // search_knowledge_base
-  topK: z.number().int().positive().optional(),
-  minScore: z.number().min(0).max(1).optional(),
-  filter: z.record(z.string(), z.unknown()).optional(),
-  // handoff
-  target: HandoffTargetSchema.optional(),
-  message: z.string().optional(),
-})
-
 export const ClientExecutorSchema = z.strictObject({
   type: z.literal('client'),
   id: z
     .string()
     .min(1)
-    .describe('A builtin client tool id, or a name registered via SiteBot.registerTool().'),
+    .describe('An application handler id registered via SiteBot.registerTool().'),
 })
 
 export const ExecutorSchema = z.discriminatedUnion('type', [
   HttpExecutorSchema,
   McpExecutorSchema,
   ModuleExecutorSchema,
-  BuiltinExecutorSchema,
   ClientExecutorSchema,
 ])
 
@@ -167,16 +102,13 @@ export const ExecutorSchema = z.discriminatedUnion('type', [
 
 const ToolShape = {
   name: ToolNameSchema,
-  description: z
-    .string()
-    .optional()
-    .describe(
-      'What the model reads to decide whether to call this. Required except for builtin executors.',
-    ),
-  parameters: JsonSchemaObjectSchema.prefault({}),
-  outputSchema: JsonSchemaObjectSchema.optional().describe(
-    'For client tools: the result the page must return. The server checks every result against it before the model sees it — the browser is not trusted to.',
-  ),
+  description: z.string().trim().min(1).describe('Application-owned tool description.'),
+  parameters: z
+    .record(z.string(), z.unknown())
+    .describe('Complete input JSON Schema; object root required.'),
+  outputSchema: z
+    .record(z.string(), z.unknown())
+    .describe('Required result JSON Schema, checked for every transport.'),
   readOnly: z
     .boolean()
     .default(false)
@@ -198,86 +130,56 @@ const ToolShape = {
   errorMessage: z.string().optional().describe('Shown to the model when the executor fails.'),
 }
 
-export const DeclarativeToolSchema = z.strictObject(ToolShape).check((ctx) => {
-  if (ctx.value.description === undefined && ctx.value.executor.type !== 'builtin') {
-    ctx.issues.push({
-      code: 'custom',
-      input: ctx.value,
-      path: ['description'],
-      message:
-        'A tool description is required — it is what the model reads to decide when to call the tool.',
-    })
+function checkSchemas(
+  ctx: z.core.ParsePayload<{
+    parameters: Record<string, unknown> | z.ZodType
+    outputSchema: Record<string, unknown> | z.ZodType
+  }>,
+) {
+  for (const field of ['parameters', 'outputSchema'] as const) {
+    try {
+      compileToolSchema(ctx.value[field], field === 'parameters')
+    } catch {
+      ctx.issues.push({
+        code: 'custom',
+        input: undefined,
+        path: [field],
+        message: 'Invalid or unsupported tool schema.',
+      })
+    }
   }
-})
+}
 
-/**
- * The `chatbot.config.ts` form: `parameters` may be a Zod schema and `execute`
- * may replace the declarative executor entirely (docs/02 §1).
- */
+/** Environment interpolation yields strings; unresolved conditions grant nothing. */
+export function isToolEnabled(enabled: boolean | string): boolean {
+  return enabled === true || enabled === 'true'
+}
+
+export const DeclarativeToolSchema = z.strictObject(ToolShape).check(checkSchemas)
+
+/** Typed server registrations retain native Zod validation and transforms. */
 export const CodeToolSchema = z
   .strictObject({
     ...ToolShape,
-    parameters: z.union([JsonSchemaObjectSchema, ZodSchemaSchema]).prefault({}),
+    parameters: z.union([ZodSchemaSchema, z.record(z.string(), z.unknown())]),
+    outputSchema: z.union([ZodSchemaSchema, z.record(z.string(), z.unknown())]),
     executor: ExecutorSchema.optional(),
     execute: FunctionSchema.optional(),
   })
   .check((ctx) => {
-    const { executor, execute, description } = ctx.value
-    if (executor === undefined && execute === undefined) {
+    if ((ctx.value.executor === undefined) === (ctx.value.execute === undefined)) {
       ctx.issues.push({
         code: 'custom',
-        input: ctx.value,
+        input: undefined,
         path: ['executor'],
-        message:
-          'A tool needs either an `executor` or, from chatbot.config.ts, an inline `execute` function.',
+        message: 'A tool requires exactly one executor or inline execute handler.',
       })
     }
-    if (description === undefined && executor?.type !== 'builtin') {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        path: ['description'],
-        message:
-          'A tool description is required — it is what the model reads to decide when to call the tool.',
-      })
-    }
+    checkSchemas(ctx)
   })
 
-// ── bulk MCP import ─────────────────────────────────────────────────────────
-
-/**
- * `- from: mcp` imports a whole server's toolset (docs/05-tools.md §3).
- * Omitting `allow` is a warning, not an error, because it is the natural thing
- * to write while exploring — but it means a server update can silently hand the
- * assistant new capabilities, so `security.strictTools` turns it into an error.
- */
-export const McpImportSchema = z.strictObject({
-  from: z.literal('mcp'),
-  id: z.string().min(1).describe('Identifies this server in health checks and telemetry.'),
-  server: McpServerSchema,
-  allow: z
-    .array(z.string().min(1))
-    .optional()
-    .describe('Tool names to import. Strongly recommended in production.'),
-  deny: z.array(z.string().min(1)).default([]),
-  prefix: z.string().default('').describe('Prepended to imported tool names to avoid collisions.'),
-  readOnly: z.boolean().default(false),
-  requiresApproval: z.boolean().default(false),
-  scope: z.enum(TOOL_SCOPES).default('public'),
-  timeoutMs: z.number().int().positive().default(15_000),
-  enabled: z.union([z.boolean(), z.string()]).default(true),
-})
-
-export const DeclarativeToolEntrySchema = z.union([McpImportSchema, DeclarativeToolSchema])
-
-export const ToolEntrySchema = z.union([McpImportSchema, CodeToolSchema])
-
+export const DeclarativeToolEntrySchema = DeclarativeToolSchema
+export const ToolEntrySchema = CodeToolSchema
 export type Executor = z.output<typeof ExecutorSchema>
 export type ToolEntry = z.output<typeof ToolEntrySchema>
 export type Tool = z.output<typeof CodeToolSchema>
-export type McpImport = z.output<typeof McpImportSchema>
-
-/** Narrow a tools[] entry to the single-tool form. */
-export function isMcpImport(entry: ToolEntry): entry is McpImport {
-  return 'from' in entry && entry.from === 'mcp'
-}

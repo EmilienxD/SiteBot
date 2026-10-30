@@ -36,7 +36,6 @@ describe('kitchen-sink config (Phase 1 acceptance)', () => {
         '$meta',
         'agent',
         'backend',
-        'knowledge',
         'mode',
         'name',
         'prompt',
@@ -57,7 +56,6 @@ describe('kitchen-sink config (Phase 1 acceptance)', () => {
     const config = result.value
     expect(config.backend.apiKey).toBe('sk-ant-test')
     expect(config.backend.fallback[1]?.apiKey).toBe('sk-openai-test')
-    expect(config.knowledge.embedding?.apiKey).toBe('sk-openai-test')
     expect(config.security.auth.jwt?.secret).toBe('jwt-test-secret')
     expect(config.telemetry.events.webhook).toBe('https://events.acme.test/hook')
   })
@@ -76,7 +74,6 @@ describe('kitchen-sink config (Phase 1 acceptance)', () => {
       expect.arrayContaining([
         'backend.apiKey',
         'backend.fallback[1].apiKey',
-        'knowledge.embedding.apiKey',
         'security.auth.jwt.secret',
         'tools[0].executor.headers.Authorization',
         'telemetry.events.webhook',
@@ -107,9 +104,6 @@ describe('defaults', () => {
     expect(config.security.rateLimit.perIp).toBe('100/1h')
     expect(config.security.maxRequestBytes).toBe(262_144)
     expect(config.security.redactPii).toBe(false)
-    expect(config.knowledge.store.type).toBe('memory')
-    expect(config.knowledge.retrieval.topK).toBe(6)
-    expect(config.knowledge.retrieval.minScore).toBe(0.3)
     expect(config.ui.zIndex).toBe(2_147_483_000)
     expect(config.ui.position).toBe('bottom-right')
     expect(config.telemetry.logLevel).toBe('info')
@@ -125,13 +119,6 @@ describe('defaults', () => {
     if (!withAgent.ok) return
     expect(withAgent.value.agent.stopWhen.steps).toBe(5)
     expect(withAgent.value.agent.stopWhen.tokens).toBe(20_000)
-  })
-
-  it('follows `mode` for the retrieval default (docs/02 §9)', () => {
-    const chat = validateConfig(minimalConfig(), { env: {} })
-    const agent = validateConfig({ ...minimalConfig(), mode: 'agent' }, { env: {} })
-    expect(chat.ok && chat.value.knowledge.retrieval.mode).toBe('always')
-    expect(agent.ok && agent.value.knowledge.retrieval.mode).toBe('tool')
   })
 
   it('falls back to `name` for the panel title (docs/02 §11)', () => {
@@ -193,6 +180,8 @@ describe('required fields', () => {
         ...minimalConfig(),
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'Check-Order',
             description: 'Look up an order by ID.',
             readOnly: true,

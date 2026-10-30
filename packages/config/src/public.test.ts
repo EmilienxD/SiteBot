@@ -59,22 +59,28 @@ describe('toPublicConfig — the allowlist', () => {
         ui: { behaviour: { streaming: false, allowFileUpload: true } },
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'highlight_section',
             description: 'Highlight part of the page.',
             readOnly: true,
             executor: { type: 'client', id: 'highlight' },
           },
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'get_cart',
             description: 'Read the shopping cart.',
             readOnly: true,
             executor: { type: 'client', id: 'get_cart' },
           },
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'search_docs',
             description: 'Search the docs.',
             readOnly: true,
-            executor: { type: 'builtin', id: 'search_knowledge_base' },
+            executor: { type: 'http', url: 'https://example.test/data' },
           },
         ],
       }),
@@ -89,7 +95,6 @@ describe('toPublicConfig — the allowlist', () => {
       // A tool whose name differs from its client implementation says which
       // one to run; the widget allowlists by name and dispatches by id.
       clientToolIds: { highlight_section: 'highlight' },
-      routes: [],
       authMode: 'required',
     })
   })
@@ -100,6 +105,8 @@ describe('toPublicConfig — the allowlist', () => {
         ...minimalConfig(),
         tools: [
           {
+            parameters: { type: 'object' },
+            outputSchema: {},
             name: 'highlight_section',
             description: 'Highlight part of the page.',
             readOnly: true,

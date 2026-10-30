@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=../../packages/config/schema/chatbot.schema.json
 #
 # One OpenAI key covers both the chat model and the embeddings used for the
-# knowledge index. See README.md.
+# application tools. See README.md.
 
 version: 1
 name: Lumen Bikes
@@ -45,22 +45,6 @@ agent:
   maxSteps: 4
   approvalPolicy: always
 
-# `pnpm ingest` crawls this site's own sitemap (app/sitemap.ts) while `pnpm dev`
-# is running, and answers cite the pages they came from.
-knowledge:
-  sources:
-    - type: sitemap
-      url: ${env.SITE_URL:-http://localhost:3000}/sitemap.xml
-      # Never index signed-in pages, even if a sitemap lists them.
-      exclude: ['/admin/**', '/account/**', '/internal/**']
-  embedding:
-    provider: openai
-    model: text-embedding-3-small
-  # A JSON file: fine for a site this size, and no native dependency.
-  store:
-    type: memory
-    path: ./.sitebot/index.json
-
 tools:
   # A server tool: the engine calls this HTTP endpoint, the browser never
   # does. Here it is a mock route in the same app (app/api/mock/service-slots);
@@ -84,18 +68,26 @@ tools:
       query: { date: '{date}' }
       # The mock lives on localhost; a real API would not need this.
       allowPrivateNetwork: true
-
-  - name: navigate
-    description: |
-      Take the visitor to another page of the site, e.g. /bikes.
-      Use when they ask to go somewhere.
-    readOnly: true
-    parameters:
+    outputSchema:
       type: object
       properties:
-        path: { type: string, description: 'A site path such as /service.' }
-      required: [path]
-    executor: { type: builtin, id: navigate }
+        date:
+          type: string
+        open:
+          type: boolean
+        slots:
+          type: array
+          items:
+            type: string
+        durationMinutes:
+          type: number
+        priceEur:
+          type: number
+      required:
+        - date
+        - open
+        - slots
+      additionalProperties: false
 
 ui:
   theme:

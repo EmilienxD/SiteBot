@@ -140,7 +140,7 @@ function isSecretPath(path: string): boolean {
   if (/(?:^|\.)(apiKey|secret|token|password)$/i.test(path)) return true
   if (/\.headers\.(authorization|x-api-key)$/i.test(path)) return true
   // A store or queue URL usually carries credentials in its userinfo.
-  return /^(storage|security\.rateLimit|knowledge\.store)\.url$/.test(path)
+  return /^(storage|security\.rateLimit)\.url$/.test(path)
 }
 
 // ── contrast ────────────────────────────────────────────────────────────────

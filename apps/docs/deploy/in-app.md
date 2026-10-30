@@ -73,12 +73,11 @@ The config file is read at runtime, so tell Next's file tracer about it:
 // next.config.ts
 const config: NextConfig = {
   serverExternalPackages: ['@ai-sdk/openai'],
-  outputFileTracingIncludes: { '/api/chat/**': ['./chatbot.config.yaml', './.sitebot/index.json'] },
+  outputFileTracingIncludes: { '/api/chat/**': ['./chatbot.config.yaml'] },
 }
 ```
 
-The server-only import and `serverExternalPackages` must name the SDKs actually selected for chat
-and embeddings. They declare dependencies without constructing a model or requiring a build-time key.
+The server-only import and `serverExternalPackages` must name the SDKs actually selected for chat. They declare dependencies without constructing a model or requiring a build-time key.
 For standalone output, use the example's `scripts/prepare-standalone.mjs`: it preserves original
 package names alongside Turbopack's hashed aliases so lazy imports work after relocation. Config
 extensions, prompt files and custom modules also need narrow, explicit tracing includes. See
@@ -93,22 +92,6 @@ loopback origins, and keeps the request's cancellation signal linked to provider
 The route runs on Node because it reads files and can use local SQLite. A persistent single-node
 host can use SQLite on a durable writable volume. For stateless/serverless instances:
 
-- Store conversations and citation state in `storage: redis` or `postgres`. Process memory and local
-  writable SQLite do not provide shared or durable state across instances/restarts.
-- Configure `security.rateLimit.store: redis` and its URL for shared rate and token/USD-budget
-  counters. SQLite conversation persistence alone does not persist these counters. The Next adapter
-  has no socket IP; configure `trustProxy` only for a verified proxy hop count and sanitized forwarded
-  headers. Otherwise per-IP limits cannot identify visitors reliably.
-- For a small public corpus, a prebuilt JSON knowledge snapshot can be traced into the artifact and
-  loaded into each instance's memory. Run ingestion before build and redeploy when it changes; query-only
-  loading/disposal does not rewrite it. This is immutable evidence, not shared mutable state. Use
-  `pgvector` or `upstash` for externally managed knowledge, and package their selected runtime clients.
-- Confirm the host's function duration covers the bounded loop, streaming is unbuffered, disconnects
-  propagate, and session-specific responses are not cached. These require verification on the actual
-  host. Vercel documents a read-only filesystem with temporary scratch space and function duration
-  limits; that scratch space is not durable session storage. See
-  [Vercel runtime documentation](https://vercel.com/docs/functions/runtimes).
-
 The default local standalone gate uses local state; the optional shared-store gate below adds real
 services and concurrent processes. Hosted proxy behavior and cloud runtime packaging still need
 verification on the host. If using edge rather than Node, see [Edge](/deploy/edge).
@@ -119,11 +102,9 @@ All replicas of one site need the same session database and, separately, the sam
 database/namespace. Separate sites and test runs need isolated databases/namespaces. Store URLs,
 credentials, table names and constructor prefixes belong in server-only configuration. The Node
 adapters construct the configured stores; lower-level handlers need explicitly supplied stores.
-For Postgres sessions or pgvector, install the optional `pg` dependency and declare `import 'pg'`
+For Postgres sessions, install the optional `pg` dependency and declare `import 'pg'`
 in the server-only loader and `pg` in `serverExternalPackages`, as with the selected provider SDK.
-The pgvector constructor creates the extension, tables and indexes if missing; the database operator
-must authorize those operations and provide pgvector. Session constructors also create their table
-and index. Reuse connections within an instance and dispose owned handlers during graceful shutdown.
+Session constructors create their table and index; the database operator authorizes those operations. Reuse connections within an instance and dispose owned handlers during graceful shutdown.
 Injected pools/clients remain the caller's responsibility.
 Engine shutdown attempts every resource cleanup even when one fails, and rejects with an
 `AggregateError` containing the failures; graceful-shutdown handlers should report that rejection.
@@ -155,23 +136,12 @@ timeout and retry on a subsequent request after repair. There is no fallback to 
 Configure durability, backups, access control and connection capacity for the actual Redis/Postgres
 services; client-process restart tests do not establish failover or crash durability of those services.
 
-The existing local artifact gate can opt into **empty disposable loopback databases** with
-`SITEBOT_LIVE_NEXT_STORES=1`, `SITEBOT_LIVE_REDIS_URL` and `SITEBOT_LIVE_PG_URL` before running
-`node test/smoke/nextjs-build.mjs`. It refuses a nonempty Redis database or an existing
-`sitebot_sessions` table. It creates synthetic sessions, counters and a uniquely named knowledge
-table, then removes its data. Never point this gate at production or a shared application database.
-It reuses the relocated Next.js harness to check two processes with Redis and Postgres session
-backends, Redis counters, pgvector, bilingual citations, restarts, recovery and concurrent admission.
-Generation and embeddings are deterministic loopback HTTP fixtures. The store-only opt-in suites
-in `packages/core/src/node/stores.live.test.ts` and the synthetic pgvector section of
-`packages/ingest/src/ingest.live.test.ts` cover conformance, TTL, connection recovery, SQL rollback,
-metadata/ranking and ingestion fingerprints without model inference. These checks do not qualify
-semantic relevance or generation quality. Hosted proxy/CDN streaming, function limits, service
-failover and production capacity remain unverified.
-
 `/config` without a session returns a shared, language-independent catalog payload. Session probes
 and mapped JSON errors use `private, no-store`, because their content can vary by session and locale.
 Chat responses also disable storage; SSE additionally uses `no-transform` and disables proxy buffering.
 Verify that the actual hosting/CDN configuration preserves these response headers.
 
 Then go through the [production checklist](/deploy/checklist).
+
+
+Applications own context loading and every tool implementation. Use complete explicit handlers or transports; an empty registry exposes no tools. See [the tool contract](https://github.com/EmilienxD/SiteBot/blob/main/docs/05-tools.md).

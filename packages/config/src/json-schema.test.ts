@@ -33,7 +33,6 @@ describe('emitJsonSchema', () => {
         'agent',
         'backend',
         'extends',
-        'knowledge',
         'mode',
         'name',
         'prompt',

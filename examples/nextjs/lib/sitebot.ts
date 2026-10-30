@@ -2,6 +2,7 @@ import 'server-only'
 // Declare the selected lazy SDK to Next's tracer. Keep this server-side and
 // update it with serverExternalPackages when selecting a different provider.
 import '@ai-sdk/openai'
+import '@ai-sdk/google'
 import { loadConfig } from '@sitebot/config/node'
 import { createRouteHandlers, type NextRouteHandlers } from '@sitebot/server/next'
 

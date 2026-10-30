@@ -15,20 +15,6 @@ function productionConfig(overrides: Record<string, unknown> = {}) {
       },
       prompt: { system: 'You are a safe assistant.' },
       siteContext: { routes: [{ path: '/account/orders' }] },
-      knowledge: {
-        sources: [
-          {
-            type: 'sitemap',
-            url: 'https://acme.example/sitemap.xml',
-            exclude: ['/account/**'],
-          },
-        ],
-        embedding: {
-          provider: 'openai',
-          model: 'text-embedding-3-small',
-          apiKey: '${env.OPENAI_API_KEY}',
-        },
-      },
       storage: { type: 'sqlite', path: './.sitebot/sessions.db' },
       ui: {
         footer: { text: 'We record chats to improve support.' },
@@ -55,6 +41,7 @@ function productionConfig(overrides: Record<string, unknown> = {}) {
           requiresApproval: true,
           scope: 'authenticated',
           parameters: { type: 'object', properties: {} },
+          outputSchema: {},
           executor: {
             type: 'http',
             method: 'POST',
@@ -90,7 +77,6 @@ describe('production doctor', () => {
 
     expect(report.ok).toBe(true)
     expect(report.checks.filter((check) => check.manual).map((check) => check.label)).toEqual([
-      'ingest freshness',
       'widget integrity',
     ])
     expect(report.checks.filter((check) => !check.manual && !check.ok)).toHaveLength(0)

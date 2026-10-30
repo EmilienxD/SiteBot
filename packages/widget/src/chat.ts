@@ -20,7 +20,6 @@ import {
 } from './storage.js'
 import { applyChunk, isTool, readEvents, startMessage, StreamError } from './ui-stream.js'
 import type {
-  HandoffData,
   InlineErrorData,
   PageContext,
   UIMessage,
@@ -71,7 +70,6 @@ export function createController(
   const retryAfter = signal<number | undefined>(undefined)
   const clientToolsRunning = signal(0)
   const statusText = signal<string | undefined>(undefined)
-  const handoff = signal<HandoffData | undefined>(undefined)
   const inlineError = signal<InlineErrorData | undefined>(undefined)
   const usage = signal<UsageData | undefined>(undefined)
   let lastSend: { text: string; hidden?: boolean } | undefined
@@ -83,8 +81,6 @@ export function createController(
   const registeredTools = new Map<string, ClientToolHandler>()
   /** The run the last stream announced — needed to resume a client tool call. */
   let announcedRunId: string | undefined
-  /** A same-tab navigation, held until the run settles (see `settleNavigation`). */
-  let pendingNavigation: string | undefined
 
   const changed = () => {
     // Persisting on every token would serialise the whole history per delta;
@@ -117,20 +113,6 @@ export function createController(
         }
         break
       }
-      case 'data-navigate': {
-        const path = typeof payload.path === 'string' ? payload.path : ''
-        // docs/03 §4: only to server-declared `siteContext.routes`.
-        if (config.capabilities.routes.includes(path)) {
-          if (payload.newTab === true) window.open(path, '_blank', 'noopener,noreferrer')
-          else pendingNavigation = path
-        } else emit('error', { code: 'route_not_allowed', message: t()('navigationBlocked') })
-        break
-      }
-      case 'data-handoff':
-        handoff.value = payload as unknown as HandoffData
-        openVendorHandoff(handoff.value)
-        emit('handoff', { target: payload.target })
-        break
       case 'data-status':
         statusKey =
           typeof payload.messageKey === 'string' && Object.hasOwn(en, payload.messageKey)
@@ -229,7 +211,6 @@ export function createController(
       changed()
       const text = textOf(streaming.message)
       if (text) emit('message', { role: 'assistant', text, messageId: streaming.message.id })
-      settleNavigation()
     } catch (cause) {
       statusText.value = undefined
       if (controller.signal.aborted) {
@@ -258,20 +239,6 @@ export function createController(
     }
   }
 
-  /**
-   * Leave the page only once nothing is left to say: the answer has finished
-   * streaming, no client tool is mid-flight, and no approval is waiting. The
-   * transcript survives the load — server-side, and in the history cache.
-   */
-  function settleNavigation(): void {
-    if (pendingNavigation === undefined || clientToolsRunning.value > 0) return
-    const last = messages.value.at(-1)
-    if (last && hasPendingApproval(last)) return
-    const path = pendingNavigation
-    pendingNavigation = undefined
-    location.assign(path)
-  }
-
   /** Remember the in-flight request so a new send can wait for it to unwind. */
   function track(pending: Promise<void>): Promise<void> {
     const current = pending.finally(() => {
@@ -295,11 +262,7 @@ export function createController(
     try {
       output = await runClientTool(tool, value.input, {
         config,
-        pageContext: async () => pageContext,
         registered: registeredTools,
-        navigate: (path) => {
-          pendingNavigation = path
-        },
       })
       emit('tool', { name: tool, phase: 'result', input: value.input, output })
     } catch (cause) {
@@ -436,9 +399,6 @@ export function createController(
     get statusText() {
       return statusText.value && statusKey ? t()(statusKey) : statusText.value
     },
-    get handoff() {
-      return handoff.value
-    },
     get inlineError() {
       return inlineError.value
     },
@@ -506,7 +466,6 @@ export function createController(
       announcedRunId = undefined
       lastSend = undefined
       statusText.value = undefined
-      handoff.value = undefined
       usage.value = undefined
       clearError()
       removeValue(sessionKey)
@@ -771,22 +730,6 @@ function lastStepSettled(message: UIMessage | undefined): boolean {
   return lastStep(message)
     .filter(isTool)
     .every((part) => part.state !== 'approval-requested' && part.state !== 'input-available')
-}
-
-function openVendorHandoff(data: HandoffData): void {
-  try {
-    const host = window as Window & {
-      Intercom?: (...args: unknown[]) => void
-      $crisp?: { push(value: unknown[]): void }
-      zE?: (...args: unknown[]) => void
-    }
-    const kind = data.target?.kind
-    if (kind === 'intercom' && host.Intercom) host.Intercom('showNewMessage', data.message)
-    else if (kind === 'crisp' && host.$crisp) host.$crisp.push(['do', 'chat:open'])
-    else if (kind === 'zendesk' && host.zE) host.zE('messenger', 'open')
-  } catch {
-    /* best effort */
-  }
 }
 
 function textOf(message: UIMessage): string {

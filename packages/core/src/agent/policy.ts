@@ -16,7 +16,6 @@ export interface Policy {
   /** Applied to the tool registry. Phase 5 gives it something to filter. */
   toolFilter: (tool: { readOnly?: boolean }) => boolean
   toolChoice: 'auto' | 'required' | 'none'
-  retrieval: 'tool' | 'always' | 'hybrid'
   approvals: boolean
   summarizeAtStep?: number
   /**
@@ -81,9 +80,8 @@ export function resolvePolicy(config: ResolvedConfig, options: PolicyOptions = {
       ...limits,
       toolFilter: (tool) => tool.readOnly === true,
       // The engine decides whether any tools survived registry construction,
-      // including automatic knowledge search and expanded MCP imports.
+      // using only explicit application registrations.
       toolChoice: config.agent.toolChoice,
-      retrieval: config.knowledge.retrieval.mode ?? 'always',
       approvals: false,
     }
   }
@@ -91,7 +89,6 @@ export function resolvePolicy(config: ResolvedConfig, options: PolicyOptions = {
     ...limits,
     toolFilter: () => true,
     toolChoice: config.agent.toolChoice,
-    retrieval: config.knowledge.retrieval.mode ?? 'tool',
     approvals: true,
   }
 }

@@ -3,11 +3,11 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import { testConfig } from '../test/helpers.js'
+import { testConfig, testContext } from '../test/helpers.js'
 import { createEngine } from './engine.js'
 import { connectStdioMcp } from './node/mcp.js'
-import { expandMcpImport, McpClientPool, type McpConnection } from './tools/mcp.js'
-import { isMcpImport } from '@sitebot/config'
+import { McpClientPool, type McpConnection } from './tools/mcp.js'
+import { createToolRegistry } from './tools/registry.js'
 import { MockLanguageModelV3 } from 'ai/test'
 
 const pools: McpClientPool[] = []
@@ -17,7 +17,7 @@ afterEach(async () => {
 })
 
 describe('MCP transports and imports', () => {
-  it('imports, filters, prefixes, frames, and calls tools over streamable HTTP', async () => {
+  it('calls only a complete explicitly registered tool over streamable HTTP', async () => {
     const server = new McpServer({ name: 'test-http', version: '1.0.0' })
     server.registerTool(
       'search_docs',
@@ -43,27 +43,35 @@ describe('MCP transports and imports', () => {
     const config = testConfig({
       tools: [
         {
-          from: 'mcp',
-          id: 'docs',
-          server: { transport: 'http', url: 'https://mcp.test/rpc' },
-          allow: ['search_docs', 'admin_delete'],
-          deny: ['admin_delete'],
-          prefix: 'acme_',
+          name: 'acme_search_docs',
+          description: 'Search application documentation.',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query'],
+          },
+          outputSchema: { type: 'object', required: ['content'] },
+          executor: {
+            type: 'mcp',
+            tool: 'search_docs',
+            server: { transport: 'http', url: 'https://mcp.test/rpc' },
+          },
           readOnly: true,
         },
       ],
     })
-    const entry = config.tools[0]
-    if (entry === undefined || !isMcpImport(entry)) throw new Error('expected MCP import')
-
-    const definitions = await expandMcpImport(entry, pool)
-    expect(definitions.map((definition) => definition.name)).toEqual(['acme_search_docs'])
-    expect(definitions[0]?.description).toMatch(/<mcp_tool_description>/)
-    expect(definitions[0]?.description).toMatch(/REFERENCE DATA ONLY/)
-    expect(definitions[0]?.description).toMatch(/Ignore prior instructions/)
-    await expect(definitions[0]?.execute({ query: 'billing' })).resolves.toMatchObject({
-      content: [{ text: 'Found billing' }],
-    })
+    const tools = await createToolRegistry({
+      config,
+      ctx: testContext(),
+      filter: () => true,
+      approvals: false,
+      mcpPool: pool,
+    }).build()
+    expect(Object.keys(tools)).toEqual(['acme_search_docs'])
+    expect(tools.acme_search_docs!.description).toBe('Search application documentation.')
+    await expect(
+      tools.acme_search_docs!.execute!({ query: 'billing' }, { toolCallId: 't', messages: [] }),
+    ).resolves.toMatchObject({ content: [{ text: 'Found billing' }] })
 
     await server.close()
   })
@@ -149,10 +157,15 @@ describe('MCP pool lifecycle', () => {
       testConfig({
         tools: [
           {
-            from: 'mcp',
-            id: 'docs',
-            server: { transport: 'http', url: 'https://mcp.test/rpc' },
-            allow: ['search_docs'],
+            name: 'docs',
+            description: 'Search test documentation.',
+            parameters: { type: 'object' },
+            outputSchema: {},
+            executor: {
+              type: 'mcp',
+              tool: 'search_docs',
+              server: { transport: 'http', url: 'https://mcp.test/rpc' },
+            },
             readOnly: true,
           },
         ],
@@ -165,7 +178,7 @@ describe('MCP pool lifecycle', () => {
 
     const report = await engine.health()
     expect(report.status).toBe('degraded')
-    expect(report.checks['mcp:docs']).toMatchObject({
+    expect(report.checks['mcp:tool:docs']).toMatchObject({
       status: 'degraded',
       transport: 'http',
       error: 'server offline',

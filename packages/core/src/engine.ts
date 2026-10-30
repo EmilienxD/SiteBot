@@ -2,10 +2,8 @@ import { createTranslator, localeTables, resolveLocale } from '@sitebot/config/i
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
-  dynamicTool,
   generateId,
   generateText,
-  jsonSchema,
   streamText,
   type ModelMessage,
   type UIMessage,
@@ -13,6 +11,8 @@ import {
 } from 'ai'
 import {
   ConfigValidationError,
+  compileToolSchema,
+  isToolEnabled,
   toPublicConfig,
   type ProviderId,
   type ResolvedConfig,
@@ -32,14 +32,14 @@ import {
 } from './agent/checkpoint.js'
 import { MemoryRateLimitStore, type RateLimitStore } from './guards/rate-limit.js'
 import { lastUserMessage, mergeHistory, settleDanglingToolCalls } from './session/history.js'
-import { retrieve } from './knowledge/retrieve.js'
-import { KnowledgeEvidence, searchKnowledge } from './knowledge/search.js'
-import type { KnowledgeDeps, Citation } from './knowledge/types.js'
-import { composePrompt, type ComposedPrompt, type KnowledgeSnippet } from './prompt/compose.js'
+import { SourceEvidence } from './sources/evidence.js'
+import { appendCitations } from './sources/stream.js'
+import { composePrompt, type ComposedPrompt } from './prompt/compose.js'
 import { cachedSystem } from './prompt/cache.js'
 import type { ProviderFactory } from './providers/adapters.js'
 import { runChain } from './providers/fallback.js'
 import { resolveChain, resolveModel } from './providers/registry.js'
+import { withModelTimeout } from './providers/timeout.js'
 import { createSessionStore } from './session/factory.js'
 import type { SessionStore } from './session/store.js'
 import { contextBudget, estimateTokens, truncateHistory } from './session/truncate.js'
@@ -48,12 +48,15 @@ import { usageCost, validateBudgetPricing, type PricingTable } from './guards/bu
 import { errorResponse, mapError } from './stream/errors.js'
 import { EngineError } from './stream/errors.js'
 import { awaitFirstOutput } from './stream/start.js'
+import { ensureTerminalOutcome, type LoopStopReason } from './stream/terminal.js'
 import { createEventDispatcher, noopDispatcher, type EventDispatcher } from './telemetry/events.js'
 import { createLogger } from './telemetry/logger.js'
 import { hooksOf, reportError, runHook } from './hooks.js'
-import { validateJsonSchema, type JsonSchemaObject } from './tools/schema.js'
+import { withDeadline, checkDeadline } from './deadline.js'
+import { resolveSystem } from './prompt/resolve.js'
+import { snapshotToolValue } from './tools/schema.js'
 import { noopTracer, withSpan, type Tracer } from './telemetry/span.js'
-import { createToolRegistry, WIDGET_EFFECT, type WidgetEffect } from './tools/registry.js'
+import { createToolRegistry } from './tools/registry.js'
 import type { HostResolver } from './tools/http.js'
 import { McpClientPool, type StdioMcpConnector } from './tools/mcp.js'
 import type {
@@ -69,9 +72,7 @@ import type {
 /**
  * The engine — docs/01-architecture.md §2, docs/04-providers-and-engine.md §4.
  *
- * Phase 2 scope: chat mode, no tools, no knowledge. The seams for both are cut
- * (`policy.toolFilter`, `composePrompt`'s `documents`), so Phases 5 and 6 add
- * capability without reshaping this file.
+ * Application tools, instructions and providers are explicitly configured.
  *
  * Everything external is injectable. That is not test-scaffolding for its own
  * sake — it is what lets `@sitebot/core` claim to be edge-compatible while
@@ -93,12 +94,6 @@ export interface EngineDeps {
   resolveHost?: HostResolver
   connectStdioMcp?: StdioMcpConnector
   mcpPool?: McpClientPool
-  /**
-   * Phase 6: the reachable knowledge index plus the query embedder. Absent
-   * (or failed at boot) → `/health` reports the knowledge check as degraded
-   * and no knowledge tool is registered, but chat keeps working.
-   */
-  knowledge?: KnowledgeDeps
 }
 
 /** How long a `/health` provider check is reused — docs/03-protocol.md §8. */
@@ -129,6 +124,11 @@ export function createEngine(
   const now = deps.now ?? (() => Date.now())
 
   const sessionStore = deps.sessionStore ?? createSessionStore(config.storage)
+  if (
+    config.tools.some((entry) => entry.maxCallsPerSession !== undefined) &&
+    sessionStore.claimToolCall === undefined
+  )
+    throw new EngineError('not_ready')
   const rateLimitStore = deps.rateLimitStore ?? new MemoryRateLimitStore({ now })
   const dispatcher =
     deps.dispatcher ??
@@ -156,17 +156,6 @@ export function createEngine(
       ?.NODE_ENV === 'production'
   const errorOptions = { debug, production }
 
-  const knowledgeConfigured =
-    config.knowledge.sources.length > 0 && config.knowledge.embedding !== undefined
-  // `knowledgeDeps` reads live at request time: the server assembles the store
-  // asynchronously (a cold host must not fail to boot on an unreachable
-  // index), so the deps object it built the engine with is filled in behind
-  // this closure. When knowledge is not configured at all the subsystem is
-  // inert regardless.
-  const knowledgeDeps: KnowledgeDeps | undefined = knowledgeConfigured
-    ? (deps.knowledge ?? {})
-    : deps.knowledge
-
   let providerCheck: ProviderCheck | undefined
 
   // ── history ───────────────────────────────────────────────────────────────
@@ -188,11 +177,11 @@ export function createEngine(
     messages: ModelMessage[],
     originalMessages: UIMessage[],
     system: string,
+    evidence: SourceEvidence,
     ctx: RequestContext,
     session: Awaited<ReturnType<SessionStore['get']>>,
     resumeRunId?: string,
     activeChain = chain,
-    knowledge?: { enabled: boolean; evidence: KnowledgeEvidence },
     composed?: ComposedPrompt,
     progress: { stepsTaken?: number; tokensUsed?: number; activeMs?: number } = {},
   ): Promise<{ stream: ReadableStream<UIMessageChunk>; modelId: string }> {
@@ -200,15 +189,47 @@ export function createEngine(
     const policy = resolvePolicy(config, { ...progress, now })
     const runId = resumeRunId ?? `r_${generateId()}`
     const clientTools = new Set(
-      config.tools.flatMap((entry) =>
-        !('from' in entry) && entry.executor?.type === 'client' ? [entry.name] : [],
-      ),
+      config.tools.flatMap((entry) => (entry.executor?.type === 'client' ? [entry.name] : [])),
     )
+    let stepToolsEnabled = policy.toolChoice !== 'none'
+    const consumedApprovals = new Set<string>()
+    let attemptTools = new AbortController()
+    let attemptToolSignal = ctx.signal
+    const toolContext: RequestContext = {
+      ...ctx,
+      get signal() {
+        return attemptToolSignal
+      },
+    }
     const tools = await createToolRegistry({
       config,
-      ctx,
+      ctx: toolContext,
       filter: policy.toolFilter,
+      canExecute: () => stepToolsEnabled,
       approvals: policy.approvals,
+      ...(sessionStore.claimToolCall === undefined
+        ? {}
+        : {
+            claimToolCall: (name: string, limit: number) =>
+              sessionStore.claimToolCall!(ctx.sessionId, name, limit),
+          }),
+      isCallApproved: (name, input, callId) => {
+        if (callId === undefined || consumedApprovals.has(callId)) return false
+        const pending = session?.state?.pendingRun as PendingRun | undefined
+        const approved =
+          pending?.responseMessage.parts.some((part) => {
+            const candidate = part as MutableToolPart
+            return (
+              candidate.type === `tool-${name}` &&
+              candidate.toolCallId === callId &&
+              candidate.state === 'approval-responded' &&
+              candidate.approval?.approved === true &&
+              JSON.stringify(candidate.input) === JSON.stringify(input)
+            )
+          }) ?? false
+        if (approved) consumedApprovals.add(callId)
+        return approved
+      },
       isApprovalGranted: async (toolName, input) =>
         config.agent.approvalPolicy === 'once-per-session'
           ? hasApprovalGrant(session, toolName, input)
@@ -217,60 +238,19 @@ export function createEngine(
       baseDir: config.$meta.baseDir,
       ...(deps.resolveHost === undefined ? {} : { resolveHost: deps.resolveHost }),
       mcpPool,
-      ...(knowledgeDeps === undefined ? {} : { knowledge: knowledgeDeps }),
-      ...(knowledge === undefined ? {} : { knowledgeEvidence: knowledge.evidence }),
-      onEvent: async (event, data) => {
-        dispatcher.emit(event, data, { requestId: ctx.requestId, sessionId: ctx.sessionId })
-        if (event === 'feedback') await runHook(hooks, 'onFeedback', ctx, data, ctx)
-      },
-      onToolCall: (call, callCtx) => runHook(hooks, 'onToolCall', callCtx, call, callCtx),
-      transcript: originalMessages,
+      sourceEvidence: evidence,
+      onToolCall: async (call, callCtx) => hooks.onToolCall?.(call, callCtx),
     }).build()
     let finalUsage: { inputTokens: number; outputTokens: number; costUsd: number } | undefined
     let totalTokens = 0
     let completedSteps = 0
-
-    // `search_knowledge_base` — the engine-owned side of retrieval mode `tool`
-    // and `hybrid`. Keep explicitly configured handlers (including disabled or
-    // scoped declarations) under the registry's existing policy.
-    if (
-      knowledge?.enabled &&
-      policy.retrieval !== 'always' &&
-      !config.tools.some((entry) => !('from' in entry) && entry.name === 'search_knowledge_base')
-    ) {
-      tools['search_knowledge_base'] = dynamicTool({
-        description:
-          "Search the site's knowledge base for pages relevant to a question. Returns numbered results with [n], title, url and text.",
-        inputSchema: jsonSchema({
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              minLength: 1,
-              maxLength: 4000,
-              description: 'What to search for.',
-            },
-          },
-          required: ['query'],
-        } as never),
-        execute: async (input: unknown) => {
-          const override = await runHook(
-            hooks,
-            'onToolCall',
-            ctx,
-            { name: 'search_knowledge_base', input },
-            ctx,
-          )
-          return override !== undefined
-            ? override
-            : searchKnowledge(input, config, knowledgeDeps, ctx, knowledge.evidence)
-        },
-      } as unknown as Parameters<typeof dynamicTool>[0]) as unknown as (typeof tools)[string]
-    }
+    let stepTokens = 0
+    let loopStop: LoopStopReason | undefined
 
     // Do not rely on a provider honoring `tool_choice: none` to suppress
     // execution. In particular, some compatible local endpoints ignore it.
-    const callableTools = policy.toolChoice === 'none' ? {} : tools
+    const callableTools =
+      policy.toolChoice === 'none' ? (Object.create(null) as typeof tools) : tools
     const result = await runChain({
       entries: activeChain,
       onFallback: (event) => {
@@ -286,6 +266,10 @@ export function createEngine(
         )
       },
       attempt: async (entry) => {
+        if (ctx.signal.aborted) throw new DOMException('Request cancelled.', 'AbortError')
+        attemptTools = new AbortController()
+        attemptToolSignal = AbortSignal.any([ctx.signal, attemptTools.signal])
+        const toolsForAttempt = attemptTools
         const resolved = await resolveModel(entry, {
           ...(deps.adapters === undefined ? {} : { adapters: deps.adapters }),
           baseDir: config.$meta.baseDir,
@@ -298,21 +282,40 @@ export function createEngine(
         // only a request that fails outright reaches `onError` (from the
         // catch in handleChat). After it, the error is the visitor's.
         let outputCommitted = false
+        let terminalFailure = false
 
         const streamed = streamText({
-          model: resolved.model,
+          model: withModelTimeout(resolved.model, entry.timeoutMs, () =>
+            toolsForAttempt.abort(new Error('Provider deadline exceeded.')),
+          ),
           system: cachedSystem(entry.provider, system, composed),
           messages,
           tools: callableTools,
           toolChoice: Object.keys(callableTools).length > 0 ? policy.toolChoice : 'none',
-          stopWhen: policy.stopWhen,
+          stopWhen: async (state) => {
+            // A timed-out provider can still have emitted a tool call. Its
+            // aborted tool result must not start a fresh model step.
+            if (toolsForAttempt.signal.aborted) return true
+            const stops = await Promise.all(policy.stopWhen.map((condition) => condition(state)))
+            // Preserve the exact OR policy and record which hard boundary ended the loop.
+            loopStop = stops[1] ? 'tokens' : stops[2] ? 'time' : stops[0] ? 'steps' : undefined
+            return stops.some(Boolean)
+          },
           ...(policy.summarizeAtStep === undefined
             ? {}
             : {
-                prepareStep: ({ stepNumber }: { stepNumber: number }) =>
-                  stepNumber >= policy.summarizeAtStep!
+                prepareStep: ({ stepNumber }: { stepNumber: number }) => {
+                  stepToolsEnabled = stepNumber < policy.summarizeAtStep!
+                  return !stepToolsEnabled
                     ? {
-                        activeTools: [],
+                        // Google/Vertex omit native functionCallingConfig.NONE
+                        // when declarations are empty. Retain only this request's
+                        // eligible application schemas; toolChoice and the
+                        // independent canExecute guard still prohibit calls.
+                        activeTools:
+                          entry.provider === 'google' || entry.provider === 'vertex'
+                            ? Object.keys(callableTools)
+                            : [],
                         toolChoice: 'none' as const,
                         system: (() => {
                           const cached = cachedSystem(entry.provider, system, composed)
@@ -323,7 +326,8 @@ export function createEngine(
                             : [...cached, { role: 'system' as const, content: instruction }]
                         })(),
                       }
-                    : undefined,
+                    : undefined
+                },
               }),
           ...(entry.temperature === undefined ? {} : { temperature: entry.temperature }),
           ...(entry.topP === undefined ? {} : { topP: entry.topP }),
@@ -346,12 +350,16 @@ export function createEngine(
           },
           onStepFinish: (step) => {
             completedSteps += 1
+            stepTokens +=
+              step.usage.totalTokens ??
+              (step.usage.inputTokens ?? 0) + (step.usage.outputTokens ?? 0)
             void runHook(
               hooks,
               'onStep',
               ctx,
               {
                 finishReason: step.finishReason,
+                rawFinishReason: step.rawFinishReason,
                 text: step.text,
                 toolCalls: step.toolCalls.map((call) => ({
                   name: call.toolName,
@@ -413,8 +421,12 @@ export function createEngine(
           originalMessages,
           sendReasoning: config.ui.behaviour.showReasoning,
           onError: (error) =>
-            mapError(error, { ...errorOptions, locale: ctx.locale, localization: config.ui })
-              .message,
+            mapError(
+              error instanceof Error && error.name === 'TimeoutError'
+                ? new EngineError('provider_error')
+                : error,
+              { ...errorOptions, locale: ctx.locale, localization: config.ui },
+            ).message,
         }) as ReadableStream<UIMessageChunk>
 
         const committed = await awaitFirstOutput(uiStream, { rawError: () => rawError })
@@ -423,21 +435,46 @@ export function createEngine(
           runId,
           clientTools,
           config,
+          authorizeClient: (name, input) => {
+            if (!stepToolsEnabled) throw new CheckpointError('Tool is no longer authorized.', 403)
+            return authorizeTool(name, input, ctx, false, true)
+          },
           locale: ctx.locale,
           debug,
-          status: knowledge?.enabled
-            ? createTranslator(config.ui, ctx.locale)('searching')
-            : undefined,
           usage: () => finalUsage,
         })
 
-        const withCitations =
-          knowledge === undefined
-            ? annotated
-            : appendCitations(annotated, {
-                items: () => knowledge.evidence.citations,
-                include: config.knowledge.retrieval.includeCitations,
+        const terminal = ensureTerminalOutcome(annotated, {
+          signal: ctx.signal,
+          stopReason: () => loopStop,
+          onMaxSteps: config.agent.onMaxSteps,
+          errors: { ...errorOptions, locale: ctx.locale, localization: config.ui },
+          priorAnswerCharacters: answerCharacters(originalMessages.at(-1)),
+          onComplete: (outcome) => {
+            terminalFailure = outcome.failed
+            if (terminalFailure) toolsForAttempt.abort(new Error('Model turn ended.'))
+            if (terminalFailure)
+              ctx.logger.error('model loop failed', {
+                ...outcome,
+                requestId: ctx.requestId,
+                stopReason: loopStop ?? 'provider',
+                steps: (progress.stepsTaken ?? 0) + completedSteps,
               })
+            ctx.logger.debug('model loop finalized', {
+              ...outcome,
+              requestId: ctx.requestId,
+              stopReason: loopStop ?? 'provider',
+              steps: (progress.stepsTaken ?? 0) + completedSteps,
+              stepsThisRequest: completedSteps,
+              totalTokens: (progress.tokensUsed ?? 0) + stepTokens,
+              activeMs: (progress.activeMs ?? 0) + Math.max(0, now() - startedAt),
+            })
+          },
+        })
+        const withCitations = appendCitations(terminal, {
+          items: () => evidence.citations,
+          include: true,
+        })
 
         const assembled = createUIMessageStream<UIMessage>({
           originalMessages,
@@ -447,6 +484,8 @@ export function createEngine(
               .message,
           onFinish: async ({ responseMessage }) => {
             if (responseMessage.id === '' && responseMessage.parts.length === 0) return
+            if (terminalFailure)
+              responseMessage = settleDanglingToolCalls([responseMessage]).messages[0]!
             const current =
               (await sessionStore.get(ctx.sessionId)) ??
               ({
@@ -465,11 +504,11 @@ export function createEngine(
                   typeof current.state?.['nextCitationNumber'] === 'number'
                     ? current.state['nextCitationNumber']
                     : 1,
-                  knowledge?.evidence.nextNumber ?? 1,
+                  evidence.nextNumber,
                 ),
               },
             }
-            const pending = pendingRun(responseMessage, runId, now())
+            const pending = terminalFailure ? null : pendingRun(responseMessage, runId, now())
             if (pending === null) {
               if (resumeRunId !== undefined) await clearPendingRun(sessionStore, next, resumeRunId)
               else await sessionStore.set(next)
@@ -503,9 +542,9 @@ export function createEngine(
           span.setAttribute('sitebot.mode', config.mode)
           span.setAttribute('sitebot.session_id', ctx.sessionId)
 
-          const policy = resolvePolicy(config)
+          const resolvedSystem = await resolveSystem(config, ctx)
 
-          // `onMessage` rewrites the visitor's message before retrieval and
+          // `onMessage` rewrites the visitor's message before composition and
           // history see it (docs/04 §9).
           if (hooks.onMessage !== undefined && request.trigger !== 'resume') {
             const index = request.messages.findLastIndex((message) => message.role === 'user')
@@ -516,81 +555,24 @@ export function createEngine(
             }
           }
 
-          // ── knowledge retrieval (docs/06 §3.8) ─────────────────────────
-          // Modes: `always`/`hybrid` embed the latest user message and inject
-          // hits into the system prompt; `tool`/`hybrid` register
-          // `search_knowledge_base`. Degraded knowledge never fails the chat:
-          // the tool is absent and the prompt explains the missing evidence.
+          // Restore generic provenance only from trusted server history.
           const sourceSession =
             config.storage.type === 'none' ? null : await sessionStore.get(request.sessionId)
-          const knowledgeRequest = {
-            enabled: false,
-            evidence: new KnowledgeEvidence(
-              sourceSession?.messages,
-              sourceSession?.state?.['nextCitationNumber'],
-            ),
-          }
-          let documents: KnowledgeSnippet[] = []
-          let knowledgeNote: string | undefined
-          if (
-            knowledgeConfigured &&
-            knowledgeDeps?.store !== undefined &&
-            knowledgeDeps.embedder !== undefined
-          ) {
-            knowledgeRequest.enabled = true
-            if (policy.retrieval !== 'tool' && request.trigger !== 'resume') {
-              const latest = lastUserMessage(request.messages)
-              const query = latest?.parts
-                .filter((part) => part.type === 'text')
-                .map((part) => part.text)
-                .join('\n')
-              if (query !== undefined && query.trim() !== '') {
-                try {
-                  const result = await retrieve(
-                    {
-                      ...knowledgeDeps,
-                      store: knowledgeDeps.store,
-                      embedder: knowledgeDeps.embedder,
-                    },
-                    query,
-                    config,
-                    ctx.locale,
-                  )
-                  const numbers = knowledgeRequest.evidence.add(result.hits)
-                  documents = result.hits.map((hit, index) => ({ ...hit, n: numbers[index]! }))
-                  if (result.hits.length === 0) {
-                    knowledgeNote =
-                      'No relevant documentation was found for this question. Say so rather than guessing.'
-                  }
-                } catch (error) {
-                  ctx.logger.warn('knowledge retrieval failed', { error })
-                  knowledgeNote =
-                    'Search is temporarily unavailable. Answer from the page context or say you do not know.'
-                }
-              }
-            }
-          }
-
-          if (knowledgeConfigured && !knowledgeRequest.enabled) {
-            knowledgeNote =
-              'Documentation search is temporarily unavailable. If the available site context does not cover the question, say you do not know. Never invent facts or citations.'
-          }
-
+          const evidence = new SourceEvidence(
+            sourceSession?.messages,
+            sourceSession?.state?.['nextCitationNumber'],
+          )
           const composed = composePrompt({
             config,
+            system: resolvedSystem,
             ctx: { pageContext: ctx.pageContext, identity: ctx.identity, locale: ctx.locale },
-            retrieval: policy.retrieval,
-            knowledgeSearchAvailable: knowledgeRequest.enabled,
-            documents,
-            note: knowledgeNote,
           })
           if (composed.missingVariables.length > 0) {
             ctx.logger.warn('prompt has unresolved {{variables}}', {
               variables: composed.missingVariables,
             })
           }
-          const rewrittenSystem = await runHook(hooks, 'onPromptComposed', ctx, composed.text, ctx)
-          const system = typeof rewrittenSystem === 'string' ? rewrittenSystem : composed.text
+          const system = composed.text
 
           let history: UIMessage[]
           let session = await sessionStore.get(request.sessionId)
@@ -609,7 +591,18 @@ export function createEngine(
               request.resume.runId,
               now(),
             )
-            const resumed = await applyResume(loaded.session, loaded.pending, request.resume)
+            // docs/04 §4: `maxSteps` bounds the run, not the request. Each
+            // client-tool round trip is a new request, and without this every
+            // one of them started a fresh step budget.
+            stepsTaken = loaded.pending.stepsTaken ?? stepCount(loaded.pending.responseMessage)
+            tokensUsed = loaded.pending.tokensUsed ?? 0
+            activeMs = loaded.pending.activeMs ?? 0
+            const resumedPolicy = resolvePolicy(config, { stepsTaken, tokensUsed, activeMs, now })
+            if (resumedPolicy.stepsExhausted || resumedPolicy.budgetExhausted) {
+              await clearPendingRun(sessionStore, loaded.session, request.resume.runId)
+              return limitResponse(ctx, loaded.pending, resumedPolicy.budgetExhausted)
+            }
+            const resumed = await applyResume(loaded.session, loaded.pending, request.resume, ctx)
             session = resumed.session
             await sessionStore.set(session)
             if (resumed.handoffs.length > 0) {
@@ -622,22 +615,6 @@ export function createEngine(
             }
             history = session.messages
             resumeRunId = request.resume.runId
-            // docs/04 §4: `maxSteps` bounds the run, not the request. Each
-            // client-tool round trip is a new request, and without this every
-            // one of them started a fresh step budget.
-            stepsTaken = loaded.pending.stepsTaken ?? stepCount(loaded.pending.responseMessage)
-            tokensUsed = loaded.pending.tokensUsed ?? 0
-            activeMs = loaded.pending.activeMs ?? 0
-            const resumedPolicy = resolvePolicy(config, { stepsTaken, tokensUsed, activeMs, now })
-            if (resumedPolicy.stepsExhausted || resumedPolicy.budgetExhausted) {
-              await clearPendingRun(sessionStore, session, resumeRunId)
-              return limitResponse(
-                ctx.requestId,
-                loaded.pending.responseMessage.id,
-                resumedPolicy.budgetExhausted,
-                ctx.locale,
-              )
-            }
           } else {
             const settled = settleDanglingToolCalls(await buildHistory(request))
             history = settled.messages
@@ -693,16 +670,16 @@ export function createEngine(
             { requestId: ctx.requestId, sessionId: ctx.sessionId },
           )
 
-          knowledgeRequest.evidence.retain(truncated.messages)
+          evidence.retain(truncated.messages)
           const { stream, modelId } = await startStream(
-            await knowledgeRequest.evidence.modelMessages(truncated.messages),
+            await evidence.modelMessages(truncated.messages),
             truncated.messages,
             system,
+            evidence,
             ctx,
             session,
             resumeRunId,
             selectedChain,
-            knowledgeRequest,
             composed,
             { stepsTaken, tokensUsed, activeMs },
           )
@@ -836,9 +813,7 @@ export function createEngine(
       if (part === undefined || part.toolCallId === undefined || part.approval?.id === undefined)
         return publicConfig
       const name = toolName(part)
-      const entry = config.tools.find(
-        (candidate) => !('from' in candidate) && candidate.name === name,
-      )
+      const entry = config.tools.find((candidate) => candidate.name === name)
       return {
         ...publicConfig,
         pending: {
@@ -848,10 +823,8 @@ export function createEngine(
             toolName: name,
             toolCallId: part.toolCallId,
             input: part.input,
-            risk: entry && !('from' in entry) ? entry.approvalRisk : 'medium',
-            ...(entry && !('from' in entry) && entry.approvalSummary
-              ? { description: entry.approvalSummary }
-              : {}),
+            risk: entry ? entry.approvalRisk : 'medium',
+            ...(entry && entry.approvalSummary ? { description: entry.approvalSummary } : {}),
           },
         },
       }
@@ -916,7 +889,6 @@ export function createEngine(
 
       const mcpEntries = config.tools.flatMap((entry) => {
         if (entry.enabled === false) return []
-        if ('from' in entry) return [{ id: entry.id, server: entry.server }]
         return entry.executor?.type === 'mcp'
           ? [{ id: `tool:${entry.name}`, server: entry.executor.server }]
           : []
@@ -928,38 +900,8 @@ export function createEngine(
         }),
       )
 
-      // Knowledge: unreachable store → `degraded`, never `error` — chat keeps
-      // working without retrieval (docs/06 §3.7).
-      if (knowledgeConfigured) {
-        const started = now()
-        try {
-          if (knowledgeDeps?.store === undefined) {
-            throw new EngineError('not_ready', {
-              detail: 'knowledge sources are configured but no store is reachable',
-            })
-          }
-          const stats = await knowledgeDeps.store.stats()
-          checks.knowledge = {
-            status: 'ok',
-            latencyMs: now() - started,
-            type: config.knowledge.store.type,
-            chunks: stats.chunks,
-            documents: stats.documents,
-            lastIndexed: stats.lastIndexed,
-            model: stats.model,
-          }
-        } catch (error) {
-          checks.knowledge = {
-            status: 'degraded',
-            latencyMs: now() - started,
-            error: mapError(error, errorOptions).message,
-            type: config.knowledge.store.type,
-          }
-        }
-      }
-
       // `error` when the provider or storage is unusable, `degraded` when
-      // something non-essential is (knowledge and MCP, from Phases 6 and 7).
+      // a non-essential MCP service is unavailable.
       const statuses = Object.values(checks).map((check) => check.status)
       const status: HealthStatus = statuses.includes('error')
         ? 'error'
@@ -983,7 +925,6 @@ export function createEngine(
         () => dispatcher.drain(),
         () => sessionStore.dispose?.(),
         () => rateLimitStore.dispose?.(),
-        () => knowledgeDeps?.store?.close(),
         () => mcpPool.dispose(),
       ]) {
         try {
@@ -1028,6 +969,7 @@ export function createEngine(
     session: NonNullable<Awaited<ReturnType<SessionStore['get']>>>,
     pending: PendingRun,
     resume: NonNullable<ChatRequest['resume']>,
+    ctx: RequestContext,
   ): Promise<{ session: typeof session; handoffs: ClientToolHandoff[] }> {
     let responseMessage = structuredClone(pending.responseMessage)
     let nextSession = session
@@ -1042,6 +984,7 @@ export function createEngine(
       )
       if (part === undefined) throw new CheckpointError('Approval replay was rejected.', 403)
       const approved = approval.decision === 'approve'
+      await authorizeTool(toolName(part), part.input, ctx, true, false)
       // docs/03 §5 rule 3: a deny reaches the model as a tool result
       // (`execution-denied`) that says the visitor declined, so it can answer
       // gracefully instead of retrying or failing.
@@ -1052,8 +995,9 @@ export function createEngine(
       // An approved client tool has no server executor for the model run to
       // call: it goes back to the page, which answers with `clientToolResults`.
       if (approved && isClientTool(toolName(part)) && part.toolCallId !== undefined) {
+        const input = await authorizeTool(toolName(part), part.input, ctx, true, true)
         part.state = 'input-available'
-        handoffs.push({ toolCallId: part.toolCallId, toolName: toolName(part), input: part.input })
+        handoffs.push({ toolCallId: part.toolCallId, toolName: toolName(part), input })
       } else part.state = 'approval-responded'
       if (approval.decision === 'approve' && config.agent.approvalPolicy === 'once-per-session') {
         nextSession = await grantApproval(nextSession, toolName(part), part.input)
@@ -1069,8 +1013,9 @@ export function createEngine(
           isClientTool(toolName(candidate)),
       )
       if (part === undefined) throw new CheckpointError('Client tool replay was rejected.', 403)
+      await authorizeTool(toolName(part), part.input, ctx, true, false)
       part.state = 'output-available'
-      part.output = checkClientToolResult(toolName(part), result.output)
+      part.output = await checkClientToolResult(toolName(part), result.output, ctx)
     }
 
     if ((resume.approvals?.length ?? 0) + (resume.clientToolResults?.length ?? 0) === 0) {
@@ -1121,33 +1066,46 @@ export function createEngine(
   /**
    * Ends a resumed run whose step, token, or active-time budget is spent,
    * without calling the model. The final summary belongs inside the ceiling.
-   * The client tool's result is already in the stored transcript.
+   * Persist the same explicit outcome the client sees, settling unfinished calls.
    */
   function limitResponse(
-    requestId: string,
-    messageId: string,
+    ctx: RequestContext,
+    pending: PendingRun,
     budgetExhausted = false,
-    locale = 'en',
   ): Response {
+    const previous = settleDanglingToolCalls([pending.responseMessage]).messages[0]!
     const stream = createUIMessageStream({
+      originalMessages: [previous],
       execute: ({ writer }) => {
-        writer.write({ type: 'start', messageId })
-        if (budgetExhausted || config.agent.onMaxSteps !== 'silent') {
+        writer.write({ type: 'start', messageId: previous.id })
+        const failed =
+          budgetExhausted ||
+          config.agent.onMaxSteps !== 'silent' ||
+          answerCharacters(previous) === 0
+        if (failed) {
           const mapped = mapError(
             new EngineError(budgetExhausted ? 'budget_exceeded' : 'max_steps_exceeded'),
-            { ...errorOptions, locale, localization: config.ui },
+            { ...errorOptions, locale: ctx.locale, localization: config.ui },
           )
           writer.write({
             type: 'data-error',
             data: { ...mapped, retryable: false },
           } as UIMessageChunk)
         }
-        writer.write({ type: 'finish', finishReason: 'stop' } as UIMessageChunk)
+        writer.write({ type: 'finish', finishReason: failed ? 'error' : 'stop' } as UIMessageChunk)
+      },
+      onFinish: async ({ responseMessage }) => {
+        const current = await sessionStore.get(ctx.sessionId)
+        if (current)
+          await sessionStore.set({
+            ...current,
+            messages: replaceOrAppend(current.messages, responseMessage),
+          })
       },
     })
     return createUIMessageStreamResponse({
       stream,
-      headers: { 'x-sitebot-request-id': requestId },
+      headers: { 'x-sitebot-request-id': ctx.requestId },
     })
   }
 
@@ -1184,12 +1142,12 @@ export function createEngine(
         .filter(Boolean)
         .join('\n')
       const result = await generateText({
-        model: resolved.model,
+        model: withModelTimeout(resolved.model, entry.timeoutMs),
         system:
           'Summarise this earlier part of a website chat in at most five short sentences: what the visitor wanted, what they were told, and anything still open. Plain text, no preamble.',
         prompt: transcript,
         maxOutputTokens: 300,
-        maxRetries: 1,
+        maxRetries: entry.maxRetries,
         abortSignal: ctx.signal,
       })
       await ctx.budget.record(
@@ -1215,9 +1173,7 @@ export function createEngine(
   }
 
   function isClientTool(name: string): boolean {
-    return config.tools.some(
-      (entry) => !('from' in entry) && entry.name === name && entry.executor?.type === 'client',
-    )
+    return config.tools.some((entry) => entry.name === name && entry.executor?.type === 'client')
   }
 
   /**
@@ -1227,14 +1183,67 @@ export function createEngine(
    * `outputSchema`, so a tampered page can neither flood the context nor hand
    * the model a result shaped unlike anything the tool returns.
    */
-  function checkClientToolResult(name: string, output: unknown): unknown {
-    if ((JSON.stringify(output) ?? '').length > CLIENT_RESULT_MAX_CHARS)
-      return { error: 'result_too_large' }
-    const entry = config.tools.find((tool) => !('from' in tool) && tool.name === name)
-    const schema = entry && !('from' in entry) ? entry.outputSchema : undefined
-    if (schema === undefined) return output
-    const checked = validateJsonSchema(schema as JsonSchemaObject, output)
-    return checked.ok ? output : { error: 'invalid_output', issues: checked.issues }
+  async function authorizeTool(
+    name: string,
+    input: unknown,
+    ctx: RequestContext,
+    approved: boolean,
+    count: boolean,
+  ): Promise<unknown> {
+    const entry = config.tools.find((tool) => tool.name === name)
+    const policy = resolvePolicy(config)
+    if (
+      !entry ||
+      !isToolEnabled(entry.enabled) ||
+      !policy.toolFilter(entry) ||
+      policy.toolChoice === 'none' ||
+      (entry.scope === 'authenticated' && !ctx.identity)
+    )
+      throw new CheckpointError('Tool is no longer authorized.', 403)
+    return withDeadline(entry.timeoutMs, ctx.signal, async (signal) => {
+      const parsed = await compileToolSchema(entry.parameters, true).parse(input)
+      checkDeadline(signal)
+      if (!parsed.ok) throw new CheckpointError('Invalid tool input.', 403)
+      if (
+        !approved &&
+        config.agent.approvalPolicy !== 'never' &&
+        (entry.requiresApproval || config.agent.approvalRequired.includes(name))
+      ) {
+        const session = await sessionStore.get(ctx.sessionId)
+        if (!(
+          config.agent.approvalPolicy === 'once-per-session' &&
+          (await hasApprovalGrant(session, name, input))
+        ))
+          throw new CheckpointError('Tool approval is required.', 403)
+      }
+      if (
+        count &&
+        entry.maxCallsPerSession !== undefined &&
+        !(await sessionStore.claimToolCall?.(ctx.sessionId, name, entry.maxCallsPerSession))
+      )
+        throw new CheckpointError('Tool call limit reached.', 403)
+      checkDeadline(signal)
+      return parsed.value
+    })
+  }
+
+  async function checkClientToolResult(
+    name: string,
+    output: unknown,
+    ctx: RequestContext,
+  ): Promise<unknown> {
+    try {
+      if ((JSON.stringify(output) ?? '').length > CLIENT_RESULT_MAX_CHARS)
+        return { error: 'result_too_large' }
+      const entry = config.tools.find((tool) => tool.name === name)
+      if (!entry) return { error: 'invalid_output' }
+      const checked = await withDeadline(entry.timeoutMs, ctx.signal, async () =>
+        compileToolSchema(entry.outputSchema).parse(output),
+      )
+      return checked.ok ? snapshotToolValue(checked.value) : { error: 'invalid_output' }
+    } catch {
+      return { error: 'invalid_output' }
+    }
   }
 }
 
@@ -1250,44 +1259,17 @@ const CLIENT_RESULT_MAX_CHARS = 16_384
 
 // ── citations ───────────────────────────────────────────────────────────────
 
-/**
- * Attaches the `data-citations` message part once the assistant text finishes
- * (docs/06 §3.9). The part carries every retrieved chunk; the widget filters
- * to the `[n]` markers actually used in the text, so the UI stays honest.
- */
-function appendCitations(
-  stream: ReadableStream<UIMessageChunk>,
-  options: { items: () => Citation[]; include: boolean },
-): ReadableStream<UIMessageChunk> {
-  if (!options.include) return stream
-  let emitted = false
-  const emit = (controller: TransformStreamDefaultController<UIMessageChunk>) => {
-    const items = options.items()
-    if (items.length > 0)
-      controller.enqueue({
-        type: 'data-citations',
-        id: 'knowledge-citations',
-        data: { items },
-      } as UIMessageChunk)
-    emitted = true
-  }
-  return stream.pipeThrough(
-    new TransformStream<UIMessageChunk, UIMessageChunk>({
-      transform(chunk, controller) {
-        // Tool retrieval can run after an introductory text-end. Read the
-        // current list only when the entire assistant run is finishing.
-        if (chunk.type === 'finish' && !emitted) emit(controller)
-        controller.enqueue(chunk)
-      },
-      flush(controller) {
-        // A response with no text part (tool-only) still cites what the tool found.
-        if (!emitted) emit(controller)
-      },
-    }),
-  )
-}
-
 type ClientToolHandoff = { toolCallId: string; toolName: string; input: unknown }
+
+/** Only a continued assistant message contributes prior visitor-facing text. */
+function answerCharacters(message: UIMessage | undefined): number {
+  return message?.role === 'assistant'
+    ? message.parts.reduce(
+        (count, part) => count + (part.type === 'text' ? part.text.trim().length : 0),
+        0,
+      )
+    : 0
+}
 
 type MutableToolPart = {
   type: string
@@ -1341,10 +1323,10 @@ function annotateAgentStream(
   options: {
     runId: string
     clientTools: Set<string>
+    authorizeClient: (name: string, input: unknown) => Promise<unknown>
     config: ResolvedConfig
     debug: boolean
     locale: string
-    status?: string
     usage: () => { inputTokens: number; outputTokens: number; costUsd: number } | undefined
   },
 ): ReadableStream<UIMessageChunk> {
@@ -1352,7 +1334,7 @@ function annotateAgentStream(
   const approvals = new Set<string>()
   return stream.pipeThrough(
     new TransformStream<UIMessageChunk, UIMessageChunk>({
-      transform(chunk, controller) {
+      async transform(chunk, controller) {
         if (chunk.type === 'start') {
           controller.enqueue(chunk)
           const ui = options.config.ui
@@ -1366,28 +1348,18 @@ function annotateAgentStream(
               data: { items: suggestions, locale: options.locale },
             } as UIMessageChunk)
           }
-          if (options.status) {
-            controller.enqueue({
-              type: 'data-status',
-              transient: true,
-              data: { text: options.status, messageKey: 'searching' },
-            } as UIMessageChunk)
-          }
           return
         }
         if (chunk.type === 'error') {
+          const mapped = mapError(new EngineError('provider_error'), {
+            locale: options.locale,
+            localization: options.config.ui,
+          })
           controller.enqueue({
             type: 'data-error',
-            data: { code: 'provider_error', message: chunk.errorText, retryable: true },
+            data: { ...mapped, message: chunk.errorText, retryable: true },
           } as UIMessageChunk)
           return
-        }
-        if (chunk.type === 'tool-output-available' && isWidgetEffectOutput(chunk.output)) {
-          controller.enqueue({
-            type: chunk.output[WIDGET_EFFECT].type,
-            data: chunk.output[WIDGET_EFFECT].data,
-          } as UIMessageChunk)
-          chunk = { ...chunk, output: withoutWidgetEffect(chunk.output) }
         }
         if (chunk.type === 'tool-input-available') {
           calls.set(chunk.toolCallId, { toolName: chunk.toolName, input: chunk.input })
@@ -1395,9 +1367,7 @@ function annotateAgentStream(
         if (chunk.type === 'tool-approval-request') {
           approvals.add(chunk.toolCallId)
           const call = calls.get(chunk.toolCallId)
-          const entry = options.config.tools.find(
-            (candidate) => !('from' in candidate) && candidate.name === call?.toolName,
-          )
+          const entry = options.config.tools.find((candidate) => candidate.name === call?.toolName)
           controller.enqueue({
             type: 'data-approval-request',
             data: {
@@ -1406,19 +1376,28 @@ function annotateAgentStream(
               toolCallId: chunk.toolCallId,
               toolName: call?.toolName,
               input: call?.input,
-              risk: entry && !('from' in entry) ? entry.approvalRisk : 'medium',
-              description: entry && !('from' in entry) ? entry.approvalSummary : undefined,
+              risk: entry ? entry.approvalRisk : 'medium',
+              description: entry ? entry.approvalSummary : undefined,
             },
           } as UIMessageChunk)
         }
         if (chunk.type === 'finish') {
           for (const [toolCallId, call] of calls) {
             if (!options.clientTools.has(call.toolName) || approvals.has(toolCallId)) continue
-            controller.enqueue({
-              type: 'data-client-tool-call',
-              transient: true,
-              data: { runId: options.runId, toolCallId, ...call },
-            } as UIMessageChunk)
+            try {
+              const input = await options.authorizeClient(call.toolName, call.input)
+              controller.enqueue({
+                type: 'data-client-tool-call',
+                transient: true,
+                data: { runId: options.runId, toolCallId, ...call, input },
+              } as UIMessageChunk)
+            } catch {
+              controller.enqueue({
+                type: 'tool-output-error',
+                toolCallId,
+                errorText: 'Tool unavailable.',
+              } as UIMessageChunk)
+            }
           }
         }
         controller.enqueue(chunk)
@@ -1438,20 +1417,4 @@ function annotateAgentStream(
       },
     }),
   )
-}
-
-function isWidgetEffectOutput(
-  output: unknown,
-): output is Record<string, unknown> & { [WIDGET_EFFECT]: WidgetEffect } {
-  return (
-    typeof output === 'object' &&
-    output !== null &&
-    WIDGET_EFFECT in output &&
-    typeof (output as Record<string, unknown>)[WIDGET_EFFECT] === 'object'
-  )
-}
-
-function withoutWidgetEffect(output: Record<string, unknown>): Record<string, unknown> {
-  const { [WIDGET_EFFECT]: _effect, ...result } = output
-  return result
 }

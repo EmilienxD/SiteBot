@@ -58,7 +58,7 @@ function context(
 
 describe('init → validate, fresh Next.js app', () => {
   it('produces a config that validates with only the API key set', async () => {
-    const init = context({ flags: { yes: true, 'skip-draft': true } })
+    const init = context({ flags: { yes: true } })
     expect((await runInit(init)).exitCode).toBe(0)
 
     // No hand edits — read the file the scaffold wrote, verbatim.

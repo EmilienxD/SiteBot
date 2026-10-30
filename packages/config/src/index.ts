@@ -12,6 +12,8 @@
 export * from './schema/index.js'
 
 export { defineConfig } from './define.js'
+export { compileToolSchema } from './tool-schema.js'
+export type { ToolSchema, CompiledToolSchema } from './tool-schema.js'
 export { validateConfig } from './validate.js'
 export type { ResolvedConfig, ValidateOptions } from './validate.js'
 export { toPublicConfig } from './public.js'

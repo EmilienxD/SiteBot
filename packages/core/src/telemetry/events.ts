@@ -16,8 +16,6 @@ export type EventName =
   | 'finish'
   | 'approval'
   | 'feedback'
-  | 'lead'
-  | 'handoff'
   | 'provider_fallback'
   | 'budget_exceeded'
 

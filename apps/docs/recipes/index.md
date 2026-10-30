@@ -4,9 +4,4 @@ Complete configs for four common assistants. Each is a whole `chatbot.config.yam
 the example company's details, and run `npx sitebot doctor`. A test in the repo validates every config on
 these pages against the schema, so they don't drift from what the loader accepts.
 
-| Recipe                                   | Mode  | Shows                                                         |
-| ---------------------------------------- | ----- | ------------------------------------------------------------- |
-| [Ecommerce assistant](./ecommerce)       | agent | Client tools on your own cart code, stock lookup, product knowledge |
-| [Docs assistant](./docs-assistant)       | chat  | Targeted read-only search, refinement, English/French, citations |
-| [Lead-capture bot](./lead-capture)       | agent | `fill_form` with approval, lead events to your webhook        |
-| [Support triage](./support-triage)       | agent | Signed-in order lookup, ticket creation, handoff to a human   |
+Applications own context loading and every tool implementation. Use complete explicit handlers or transports; an empty registry exposes no tools. See [the tool contract](https://github.com/EmilienxD/SiteBot/blob/main/docs/05-tools.md).

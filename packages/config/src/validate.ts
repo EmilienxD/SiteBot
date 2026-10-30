@@ -86,17 +86,6 @@ export function validateConfig(
 function applyDerivedDefaults(config: SiteBotConfig, envPaths: string[]): SiteBotConfig {
   const next: SiteBotConfig = { ...config }
 
-  // docs/02 §9: retrieval mode follows `mode` unless set explicitly.
-  if (next.knowledge.retrieval.mode === undefined) {
-    next.knowledge = {
-      ...next.knowledge,
-      retrieval: {
-        ...next.knowledge.retrieval,
-        mode: next.mode === 'chat' ? 'always' : 'tool',
-      },
-    }
-  }
-
   // docs/02 §11: the panel title falls back to the top-level name. If the name
   // came from the environment the derived title did too, so it has to inherit
   // the marking — otherwise a secret would launder itself into the public
@@ -142,9 +131,28 @@ function fromIssue(issue: z.core.$ZodIssue, input: unknown, prefix: PropertyKey[
   const formatted = formatPath(path)
   const value = valueAt(input, path)
 
+  if (issue.code === 'custom' && issue.message === 'Invalid or unsupported tool schema.')
+    return [{ path: formatted, message: issue.message, rule: 'schema/custom' }]
+
   switch (issue.code) {
     case 'unrecognized_keys':
       return issue.keys.map((key) => {
+        if (formatted === '' && key === 'knowledge')
+          return {
+            path: key,
+            message:
+              'knowledge has been removed. Applications own context loading and every tool implementation.',
+            fix: 'Remove knowledge and register complete application tools with explicit handlers or transports.',
+            rule: 'schema/removed-option',
+          }
+        if (formatted === 'hooks' && key === 'onPromptComposed')
+          return {
+            path: 'hooks.onPromptComposed',
+            message:
+              'onPromptComposed has been removed. Use prompt.system as a string or async server resolver.',
+            fix: 'Move trusted instruction loading into prompt.system.',
+            rule: 'schema/removed-option',
+          }
         const candidates = keysAtPath(RuntimeConfigSchema, path)
         // Candidates span every variant of a union, so a key can be both
         // "unknown" here and valid for a sibling `type` — say that instead of

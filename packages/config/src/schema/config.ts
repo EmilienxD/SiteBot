@@ -1,9 +1,8 @@
 import { z } from 'zod'
 import { AgentSchema, MODES } from './agent.js'
 import { BackendSchema } from './backend.js'
-import { KnowledgeSchema } from './knowledge.js'
 import { CONFIG_SCHEMA_VERSION, FunctionSchema } from './primitives.js'
-import { PromptSchema } from './prompt.js'
+import { PromptSchema, CodePromptSchema } from './prompt.js'
 import { SecuritySchema } from './security.js'
 import { SiteContextSchema } from './site-context.js'
 import { StorageSchema } from './storage.js'
@@ -15,7 +14,6 @@ import { UiSchema } from './ui.js'
 export const HooksSchema = z.strictObject({
   onRequest: FunctionSchema.optional(),
   onMessage: FunctionSchema.optional(),
-  onPromptComposed: FunctionSchema.optional(),
   onToolCall: FunctionSchema.optional(),
   onStep: FunctionSchema.optional(),
   onFinish: FunctionSchema.optional(),
@@ -49,7 +47,6 @@ const CommonShape = {
   prompt: PromptSchema,
   siteContext: SiteContextSchema.prefault({}),
   agent: AgentSchema.prefault({}),
-  knowledge: KnowledgeSchema.prefault({}),
   storage: StorageSchema.prefault({ type: 'memory' }),
   ui: UiSchema.prefault({}),
   security: SecuritySchema.prefault({}),
@@ -75,6 +72,7 @@ export const ConfigSchema = z
  */
 export const RuntimeConfigSchema = z.strictObject({
   ...CommonShape,
+  prompt: CodePromptSchema,
   tools: z.array(ToolEntrySchema).default([]),
   hooks: HooksSchema.optional(),
 })

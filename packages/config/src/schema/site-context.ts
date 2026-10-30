@@ -10,12 +10,7 @@ export const GlossaryEntrySchema = z.strictObject({
   definition: z.string().min(1),
 })
 
-/**
- * Layer 1 of the knowledge stack (docs/06-knowledge.md §1): hand-written facts,
- * always in the prompt, no infrastructure. `routes` doubles as the allowlist
- * for the builtin `navigate` client tool — the model cannot send the user
- * anywhere that is not declared here.
- */
+/** Trusted application-provided site facts and route descriptions; no action allowlist. */
 export const SiteContextSchema = z
   .strictObject({
     company: z.string().optional(),

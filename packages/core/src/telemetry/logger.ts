@@ -104,11 +104,35 @@ export function redact(
   if (value instanceof Error) {
     // The cause chain is where the operator's answer is: a tool's "could not
     // complete" wraps "fetch failed", which wraps ECONNREFUSED.
-    const { code, detail } = value as { code?: unknown; detail?: unknown }
+    const { code, detail, statusCode, status, isRetryable, finishReason, toolChoice } =
+      value as Error & {
+        code?: unknown
+        detail?: unknown
+        statusCode?: unknown
+        status?: unknown
+        isRetryable?: unknown
+        finishReason?: unknown
+        toolChoice?: { type?: unknown }
+      }
+    const providerError = value.name.startsWith('AI_')
+    const choice = toolChoice?.type
     return {
       name: value.name,
-      message: redactString(value.message),
+      message:
+        providerError && options.redactPrompts !== false ? REDACTED : redactString(value.message),
       ...(typeof code === 'string' ? { code } : {}),
+      ...(typeof statusCode === 'number' ? { statusCode } : {}),
+      ...(typeof status === 'number' ? { status } : {}),
+      ...(typeof isRetryable === 'boolean' ? { isRetryable } : {}),
+      ...(typeof finishReason === 'string' &&
+      ['stop', 'length', 'content-filter', 'tool-calls', 'error', 'other', 'unknown'].includes(
+        finishReason,
+      )
+        ? { finishReason }
+        : {}),
+      ...(choice === 'none' || choice === 'auto' || choice === 'required' || choice === 'tool'
+        ? { toolChoice: { type: choice } }
+        : {}),
       // Withheld from clients in production; logs are the operator's copy.
       ...(typeof detail === 'string' ? { detail: redactString(detail) } : {}),
       ...(value.cause === undefined ? {} : { cause: redact(value.cause, options, seen) }),

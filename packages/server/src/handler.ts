@@ -1,13 +1,11 @@
 import { createTranslator } from '@sitebot/config/i18n'
-import type { Knowledge, ResolvedConfig } from '@sitebot/config'
+import type { ResolvedConfig } from '@sitebot/config'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import {
   checkContentLength,
   checkPublicKey,
   createBudgetTracker,
   createEngine,
-  createVectorStore,
-  isEdgeVectorStore,
   createEventDispatcher,
   createJwtVerifier,
   createLogger,
@@ -24,11 +22,9 @@ import {
   type EngineDeps,
   type EventDispatcher,
   type Logger,
-  type KnowledgeDeps,
   type RateLimitStore,
   type RequestContext,
   type TokenVerifier,
-  type VectorStore,
 } from '@sitebot/core'
 import { corsHeaders, preflightResponse, withHeaders } from './http/cors.js'
 import {
@@ -84,16 +80,6 @@ export interface SiteBotHandlerOptions {
   /** JWT verification. Phase 8 ships the implementation. */
   verifier?: TokenVerifier
   logger?: Logger
-  /**
-   * Builds a `knowledge.store` that needs a Node runtime (sqlite, pgvector, a
-   * persisted memory file, custom). The Node adapters supply it through
-   * `withNodeRuntime`; this file never imports `@sitebot/core/node`, so a
-   * Workers bundle of the fetch adapter contains no `node:*` module.
-   */
-  vectorStoreFactory?: (
-    store: Knowledge['store'],
-    options: { model: string; baseDir: string | null },
-  ) => Promise<VectorStore>
 }
 
 /**
@@ -158,81 +144,17 @@ export function createSiteBotHandler(
       ? createEventDispatcher({ telemetry: config.telemetry, logger })
       : noopDispatcher
 
-  // Supply one knowledge object before creating the engine, then fill its
-  // fields after initialization. The engine captures it for retrieval, health,
-  // and disposal. Injected engines/dependencies keep their initialization path.
-  const managedKnowledge: KnowledgeDeps | undefined =
-    options.engine === undefined &&
-    options.deps?.knowledge === undefined &&
-    config.knowledge.sources.length > 0 &&
-    config.knowledge.embedding !== undefined
-      ? {}
-      : undefined
   const engineDeps: EngineDeps = {
     logger,
     rateLimitStore,
     dispatcher,
     ...options.deps,
-    ...(managedKnowledge === undefined ? {} : { knowledge: managedKnowledge }),
   }
   const engine =
     options.engine ??
     createEngine(config, engineDeps, {
       ...(options.version === undefined ? {} : { version: options.version }),
     })
-
-  // Phase 6: build the knowledge store when sources are configured (the
-  // engine, not the CLI, owns query-time retrieval). Boot is lazy — the
-  // promise resolves on the first request, so a cold start pays nothing when
-  // knowledge is not configured at all. A store that fails to open degrades
-  // knowledge; chat keeps working, per docs/06 §3.7.
-  let knowledgeReady: Promise<void> | undefined
-  let disposed = false
-  function ensureKnowledge(): Promise<void> {
-    if (managedKnowledge === undefined || disposed) return Promise.resolve()
-    // Share one attempt across chat and health requests. The rejection handler
-    // runs after assignment, even if initialization fails synchronously.
-    knowledgeReady ??= initializeKnowledge().catch((error: unknown) => {
-      knowledgeReady = undefined
-      logger.warn('knowledge store unreachable; chat continues without RAG', { error })
-    })
-    return knowledgeReady
-  }
-
-  async function initializeKnowledge(): Promise<void> {
-    let store: VectorStore | undefined
-    try {
-      const embedding = config.knowledge.embedding!
-      // `memory` and `upstash` need only `fetch`, so a Workers host (docs/00
-      // T3) builds them here without ever importing the Node entry.
-      const storeConfig = config.knowledge.store
-      const model = embedding.model
-      if (isEdgeVectorStore(storeConfig)) store = await createVectorStore(storeConfig, { model })
-      else if (options.vectorStoreFactory !== undefined)
-        store = await options.vectorStoreFactory(storeConfig, {
-          model,
-          baseDir: config.$meta.baseDir ?? null,
-        })
-      else
-        throw new EngineError('not_ready', {
-          message: `knowledge.store "${storeConfig.type}" needs a Node runtime.`,
-          detail:
-            'use a Node adapter (next, express, fastify, node); on the edge use upstash, or memory without a path',
-        })
-      const { createQueryEmbedder } = await import('@sitebot/ingest/query')
-      const embedder = await createQueryEmbedder(embedding)
-      Object.assign(managedKnowledge!, { store, embedder })
-    } catch (error) {
-      // Until both dependencies are ready this attempt owns the store. Once
-      // attached, the engine owns it and closes it during disposal.
-      try {
-        await store?.close()
-      } catch (closeError) {
-        logger.warn('failed to close uninitialized knowledge store', { error: closeError })
-      }
-      throw error
-    }
-  }
 
   const debug = config.telemetry.logLevel === 'debug'
   const production =
@@ -249,10 +171,6 @@ export function createSiteBotHandler(
     locale: { value: string },
   ): Promise<Response> {
     const { security } = config
-
-    // Knowledge is boot-lazy; the first chat request awaits it so retrieval
-    // is present from the first answer, not the second.
-    await ensureKnowledge()
 
     // Cheap first: the declared size, before a byte of the body is read.
     checkContentLength(request.headers.get('content-length'), security.maxRequestBytes)
@@ -450,7 +368,6 @@ export function createSiteBotHandler(
    * instance out of rotation.
    */
   async function handleHealth(cors: Record<string, string>): Promise<Response> {
-    await ensureKnowledge()
     const report = await engine.health()
     return Response.json(report, {
       status: report.status === 'error' ? 503 : 200,
@@ -568,10 +485,8 @@ export function createSiteBotHandler(
   let disposal: Promise<void> | undefined
   handler.dispose = () => {
     disposal ??= (async () => {
-      disposed = true
       // An in-flight attempt must hand its store to the engine (or close it)
       // before the engine is disposed; otherwise a late success leaks it.
-      await knowledgeReady
       await engine.dispose()
       await dispatcher.drain()
     })()

@@ -29,9 +29,11 @@ const stops = async (
 ): Promise<boolean> => Boolean(await condition({ steps }))
 
 const readOnlyTool = (name: string) => ({
+  description: 'Test application tool.',
+  outputSchema: {},
   name,
   parameters: { type: 'object' as const, properties: {} },
-  executor: { type: 'builtin' as const, id: 'submit_feedback' as const },
+  execute: () => ({ iso: 'registered-handler' }),
   readOnly: true,
 })
 
@@ -58,14 +60,6 @@ describe('resolvePolicy — chat mode (docs/04 §4)', () => {
     expect(toolFilter({})).toBe(false)
   })
 
-  it('allows automatic knowledge tools even without enabled action tools', () => {
-    expect(resolvePolicy(testConfig()).toolChoice).toBe('auto')
-    expect(
-      resolvePolicy(testConfig({ tools: [{ ...readOnlyTool('lookup'), enabled: false }] }))
-        .toolChoice,
-    ).toBe('auto')
-  })
-
   it('sets toolChoice to auto once a tool is enabled', () => {
     expect(resolvePolicy(testConfig({ tools: [readOnlyTool('lookup')] })).toolChoice).toBe('auto')
   })
@@ -79,27 +73,26 @@ describe('resolvePolicy — chat mode (docs/04 §4)', () => {
     expect(resolvePolicy(testConfig({ agent: { toolChoice: 'none' } })).toolChoice).toBe('none')
   })
 
-  it('allows the engine to select expanded read-only MCP tools', () => {
+  it('allows explicitly registered read-only MCP tools', () => {
     const policy = resolvePolicy(
       testConfig({
         tools: [
           {
-            from: 'mcp',
-            id: 'acme',
-            server: { transport: 'http', url: 'https://mcp.acme.test' },
+            name: 'lookup',
+            description: 'Look up test data.',
+            parameters: { type: 'object' },
+            outputSchema: {},
+            executor: {
+              type: 'mcp',
+              tool: 'lookup',
+              server: { transport: 'http', url: 'https://mcp.acme.test' },
+            },
             readOnly: true,
           },
         ],
       }),
     )
     expect(policy.toolChoice).toBe('auto')
-  })
-
-  it('defaults retrieval to always, and honours an explicit mode', () => {
-    expect(resolvePolicy(testConfig()).retrieval).toBe('always')
-    expect(
-      resolvePolicy(testConfig({ knowledge: { retrieval: { mode: 'tool' } } })).retrieval,
-    ).toBe('tool')
   })
 })
 
@@ -121,14 +114,6 @@ describe('resolvePolicy — agent mode (docs/04 §4)', () => {
   it('takes toolChoice from agent config', () => {
     expect(resolvePolicy(agentConfig({ toolChoice: 'required' })).toolChoice).toBe('required')
     expect(resolvePolicy(agentConfig({ toolChoice: 'none' })).toolChoice).toBe('none')
-  })
-
-  it('defaults retrieval to tool, and honours an explicit mode', () => {
-    expect(resolvePolicy(agentConfig()).retrieval).toBe('tool')
-    expect(
-      resolvePolicy(testConfig({ mode: 'agent', knowledge: { retrieval: { mode: 'hybrid' } } }))
-        .retrieval,
-    ).toBe('hybrid')
   })
 
   it('stops at the configured step count', async () => {
@@ -336,9 +321,11 @@ describe('summarizeAtStep consumption in the engine', () => {
       siteContext: { routes: [{ path: '/pricing' }] },
       tools: [
         {
+          description: 'Test application tool.',
+          outputSchema: {},
           name: 'navigate',
           parameters: { type: 'object', properties: {}, additionalProperties: true },
-          executor: { type: 'builtin', id: 'navigate' },
+          execute: () => ({ iso: 'registered-handler' }),
         },
       ],
     })

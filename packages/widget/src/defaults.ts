@@ -7,7 +7,6 @@ export const defaultConfig: PublicConfig = {
     streaming: true,
     fileUpload: false,
     clientTools: [],
-    routes: [],
     authMode: 'none',
   },
   ui: {
@@ -47,12 +46,10 @@ export const defaultConfig: PublicConfig = {
       resetOnNavigate: false,
       sound: false,
       sessionScope: 'tab',
-      navigateAllowlist: [],
     },
     pageContext: {
       excludePaths: [],
       redactSelectors: ['input', '[data-private]', '.pii'],
-      readSelectorDenylist: ['input[type=password]', '[data-sensitive]', 'iframe'],
     },
     extract: { selector: 'main, article, [role="main"]', strip: [] },
     a11y: { launcherAriaLabel: 'Open chat assistant', panelAriaLabel: 'Chat assistant' },

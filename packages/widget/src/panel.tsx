@@ -297,7 +297,6 @@ export function Panel({ controller, close, offline, framed }: PanelProps) {
             )}
           </div>
         )}
-        {controller.handoff && <HandoffCard data={controller.handoff} t={t} />}
         {controller.usage && (
           <details class="usage">
             <summary>{t('usage')}</summary>
@@ -595,36 +594,25 @@ function ErrorBubble({ controller, t }: { controller: WidgetController; t: Trans
   )
 }
 
-function HandoffCard({
-  data,
-  t,
-}: {
-  data: NonNullable<WidgetController['handoff']>
-  t: Translate
-}) {
-  const target = String(data.target?.kind ?? t('support'))
-  return (
-    <div class="card handoff-card" role="status">
-      <strong>{t('handoff', { target })}</strong>
-      <p>{data.messageKey ? t(data.messageKey) : data.message}</p>
-      {data.ticketUrl && (
-        <a href={data.ticketUrl} target="_blank" rel="noopener noreferrer">
-          {t('openHandoff')}
-        </a>
-      )}
-    </div>
-  )
-}
-
 /**
  * Numbered source chips under an assistant bubble — docs/06 §3.9 rule 5.
- * The `data-citations` part carries every retrieval hit; the widget shows only
- * those the model actually cited (`[n]` in the text), which is what keeps the
+ * The `data-citations` part carries registered sources; the widget shows only
+ * those the model actually cited (`[n]` or `[n, m]` in the text), which keeps the
  * UI honest when retrieval surfaced context the model did not use.
  */
 export function citationList(message: UIMessage, text: string): Citation[] {
+  if (message.role !== 'assistant') return []
   const used = new Set<string>()
-  for (const match of text.matchAll(/\[([1-9]\d*)\]/g)) used.add(`c${match[1]}`)
+  for (const match of text.matchAll(/\[([^\]]*)\]/g)) {
+    const references = match[1]!
+    // Validate the whole group: never salvage IDs from malformed/nested markers.
+    if (!/^\s*[1-9]\d*(?:\s*,\s*[1-9]\d*)*\s*$/.test(references)) continue
+    if (text[match.index + match[0].length] === ']') continue
+    for (const reference of references.split(',')) {
+      const n = reference.trim()
+      if (Number.isSafeInteger(Number(n))) used.add(`c${n}`)
+    }
+  }
   const sources = new Map<string, Citation>()
   for (const part of message.parts as unknown[]) {
     if (!isCitationsPart(part)) continue

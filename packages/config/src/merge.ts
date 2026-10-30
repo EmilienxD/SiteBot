@@ -6,20 +6,16 @@
  * | Scalars, objects      | Deep merge; the overriding file wins.               |
  * | Arrays of primitives  | Replaced wholesale.                                 |
  * | `tools[]`             | Merged by `name`; same name replaces, new appends.  |
- * | `knowledge.sources[]` | Concatenated — both apply.                          |
  * | `hooks`               | Code only, so it can only ever come from the top.   |
  * | Object whose `type` changes | Replaced wholesale — it is a different variant. |
  *
- * Arrays that are neither `tools` nor `knowledge.sources` are replaced rather
- * than concatenated. Concatenating `backend.fallback` or `ui.messages.suggestions`
+ * Other arrays are replaced rather than concatenated. Concatenating `backend.fallback` or `ui.messages.suggestions`
  * would make it impossible for a TS config to *shorten* a list it inherited,
  * and silently-growing lists are much harder to debug than an explicit rewrite.
  */
 
 /** Arrays merged by identity rather than replaced. */
 const MERGE_BY_KEY = new Set(['tools'])
-/** Arrays where both sides apply. */
-const CONCATENATE = new Set(['knowledge.sources'])
 
 export function mergeConfigs(base: unknown, override: unknown): unknown {
   return merge(base, override, '')
@@ -35,7 +31,6 @@ function merge(base: unknown, override: unknown, path: string): unknown {
   if (base === undefined) return override
 
   if (Array.isArray(base) && Array.isArray(override)) {
-    if (CONCATENATE.has(path)) return [...base, ...override]
     if (MERGE_BY_KEY.has(path)) return mergeByKey(base, override)
     return override
   }
@@ -55,15 +50,11 @@ function merge(base: unknown, override: unknown, path: string): unknown {
 }
 
 /**
- * Identity for a `tools[]` entry: its `name`, or `mcp:<id>` for the bulk import
- * form. Entries without either are always appended — there is nothing to match
+ * Identity for a `tools[]` entry: its `name`. Entries without a name are always appended — there is nothing to match
  * them on, and dropping one silently would be worse than a duplicate.
  */
 function entryKey(entry: unknown): string | null {
   if (!isPlainObject(entry)) return null
-  if (entry['from'] === 'mcp') {
-    return typeof entry['id'] === 'string' ? `mcp:${entry['id']}` : null
-  }
   return typeof entry['name'] === 'string' ? entry['name'] : null
 }
 

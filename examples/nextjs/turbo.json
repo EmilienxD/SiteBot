@@ -10,7 +10,10 @@
         "scripts/**",
         "package.json",
         "chatbot.config.yaml",
+        "chatbot.regex.yaml",
+        "public-docs/**",
         ".sitebot/index.json",
+        ".sitebot/text.json",
         "next.config.ts",
         "tsconfig.json"
       ],

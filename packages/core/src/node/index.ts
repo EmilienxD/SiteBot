@@ -10,7 +10,7 @@ import { createSqliteSessionStore } from './sqlite-store.js'
  * @sitebot/core/node — the Node-only surface.
  *
  * Anything that imports `node:*` belongs here: the stdio MCP transport, the
- * sqlite session store, filesystem-backed knowledge stores. The root entry
+ * sqlite session store, persistent session stores. The root entry
  * stays edge-compatible because none of this is reachable from it.
  *
  * Implemented across Phases 2, 5, 6 and 8.
@@ -32,13 +32,6 @@ export type { SafeFetch } from './safe-fetch.js'
 export { connectStdioMcp } from './mcp.js'
 export { createRedisRateLimitStore, RedisRateLimitStore } from './redis-rate-limit.js'
 export type { RedisRateLimitStoreOptions } from './redis-rate-limit.js'
-export { createNodeVectorStore } from './vector-store.js'
-export { createSqliteVectorStore } from './vector-sqlite.js'
-export type { SqliteVectorStoreOptions } from './vector-sqlite.js'
-export { createPgVectorStore } from './vector-pgvector.js'
-export type { PgVectorStoreOptions } from './vector-pgvector.js'
-export { createUpstashVectorStore } from '../knowledge/upstash-store.js'
-export type { UpstashVectorStoreOptions } from '../knowledge/upstash-store.js'
 
 /**
  * Build the session store for a config, including the backends the edge-safe

@@ -186,11 +186,15 @@ storage:
 tools:
   - name: quote
     description: Quote from the YAML file.
+    parameters: { type: object }
+    outputSchema: {}
     executor:
       type: http
       url: https://api.acme.com/quote
   - name: lookup
     description: Look something up.
+    parameters: { type: object }
+    outputSchema: {}
     readOnly: true
     executor:
       type: client
@@ -200,8 +204,8 @@ tools:
         extends: './chatbot.config.yaml',
         name: 'Overridden',
         tools: [
-          { name: 'quote', description: 'Quote from the TS file.', executor: { type: 'client', id: 'quote' } },
-          { name: 'extra', description: 'A brand new tool.', executor: { type: 'client', id: 'extra' } },
+          { name: 'quote', parameters: { type: 'object' }, outputSchema: {}, description: 'Quote from the TS file.', executor: { type: 'client', id: 'quote' } },
+          { name: 'extra', parameters: { type: 'object' }, outputSchema: {}, description: 'A brand new tool.', executor: { type: 'client', id: 'extra' } },
         ],
       }`,
     })
@@ -212,7 +216,7 @@ tools:
     expect(config.mode).toBe('agent')
     expect(config.$meta.extendsChain).toEqual([join(dir, 'chatbot.config.yaml')])
 
-    const names = config.tools.map((tool) => ('name' in tool ? tool.name : `mcp:${tool.id}`))
+    const names = config.tools.map((tool) => tool.name)
     expect(names).toEqual(['quote', 'lookup', 'extra'])
 
     const quote = config.tools[0]
@@ -232,28 +236,6 @@ tools:
     expect(config.name).toBe('Branded')
     expect(config.ui.theme.primary).toBe('#ff0000')
     expect(config.$meta.extendsChain).toEqual([join(dir, 'base.yaml'), join(dir, 'brand.yaml')])
-  })
-
-  it('concatenates knowledge sources across the chain', async () => {
-    const dir = project({
-      'base.yaml': `${MINIMAL_YAML}
-knowledge:
-  embedding:
-    provider: openai
-    model: text-embedding-3-small
-  sources:
-    - type: text
-      id: from_base
-      content: base content
-`,
-      'chatbot.config.mjs': `export default {
-        extends: './base.yaml',
-        knowledge: { sources: [{ type: 'text', id: 'from_ts', content: 'ts content' }] },
-      }`,
-    })
-
-    const config = await loadConfig(undefined, { cwd: dir, env: {} })
-    expect(config.knowledge.sources.map((source) => source.id)).toEqual(['from_base', 'from_ts'])
   })
 
   it('refuses a circular chain', async () => {
@@ -367,7 +349,7 @@ security:
 })
 
 describe('warnings', () => {
-  it('surfaces them without failing the load', async () => {
+  it('rejects bulk MCP discovery at load time', async () => {
     const dir = project({
       'chatbot.config.yaml': `${MINIMAL_YAML}
 mode: agent
@@ -380,11 +362,8 @@ tools:
 `,
     })
 
-    const { config, warnings } = await loadConfigWithWarnings(undefined, {
-      cwd: dir,
-      env: {},
-    })
-    expect(config.mode).toBe('agent')
-    expect(warnings.map((warning) => warning.rule)).toContain('tools/mcp-allow-missing')
+    await expect(loadConfigWithWarnings(undefined, { cwd: dir, env: {} })).rejects.toThrow(
+      /problems in the configuration/,
+    )
   })
 })

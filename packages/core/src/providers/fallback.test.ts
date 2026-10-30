@@ -1,7 +1,47 @@
 import { describe, expect, it } from 'vitest'
 import { validateConfig } from '@sitebot/config'
-import { backoffDelay, classifyError } from './fallback.js'
+import { backoffDelay, classifyError, runChain } from './fallback.js'
 import { resolveChain } from './registry.js'
+import { testConfig } from '../../test/helpers.js'
+import { redact } from '../telemetry/logger.js'
+import { APICallError } from '@ai-sdk/provider'
+
+it('keeps provider response text out of fallback events and failure details', async () => {
+  const failure = new APICallError({
+    message: 'PRIVATE_PROVIDER_BODY',
+    url: 'https://example.test/private',
+    requestBodyValues: { prompt: 'PRIVATE_PROMPT' },
+    statusCode: 400,
+  })
+  const events: unknown[] = []
+  const entries = resolveChain(
+    testConfig({
+      backend: {
+        provider: 'vertex',
+        model: 'offline',
+        maxRetries: 0,
+        fallback: [{ provider: 'vertex', model: 'fallback', maxRetries: 0 }],
+      },
+    }).backend,
+  )
+  let caught: unknown
+  try {
+    await runChain({
+      entries,
+      attempt: async () => {
+        throw failure
+      },
+      onFallback: (event) => {
+        events.push(event)
+      },
+    })
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toMatchObject({ code: 'provider_error', cause: failure })
+  expect(JSON.stringify(redact(caught))).toContain('HTTP 400')
+  expect(JSON.stringify([redact(caught), events])).not.toMatch(/PRIVATE_/)
+})
 
 /** docs/04 §3 rules 1–3. */
 describe('classifyError', () => {

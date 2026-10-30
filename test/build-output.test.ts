@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
  */
 
 const ROOT = join(import.meta.dirname, '..')
-const NODE_PACKAGES = ['config', 'core', 'server', 'ingest', 'cli']
+const NODE_PACKAGES = ['config', 'core', 'server', 'cli']
 const PREFIX_ONLY = ['sqlite', 'test', 'sea', 'test/reporters']
 
 describe('Node packages keep the node: protocol', () => {

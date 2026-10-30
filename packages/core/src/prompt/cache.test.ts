@@ -11,7 +11,6 @@ const compose = (extract: string) =>
   composePrompt({
     config,
     ctx: { pageContext: { extract } },
-    documents: [{ id: 'd', text: extract }],
   })
 
 describe('explicit provider cache boundaries', () => {

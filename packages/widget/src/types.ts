@@ -36,18 +36,13 @@ export interface SiteBotOptions {
 /** One item of a `data-citations` message part — docs/03-protocol.md §4. */
 export interface Citation {
   id: string
+  /** Application source identity (also used by legacy indexed chunks). */
+  chunkId?: string
   title: string
   url: string
   snippet: string
-  score: number
+  score?: number
   lang?: string
-}
-
-export interface HandoffData {
-  target: Record<string, unknown>
-  ticketUrl?: string
-  message: string
-  messageKey?: MessageKey
 }
 
 export interface InlineErrorData {
@@ -92,7 +87,6 @@ export interface SiteBotEvent {
     | 'message'
     | 'tool'
     | 'approval'
-    | 'handoff'
     | 'feedback'
     | 'error'
     | 'reset'
@@ -129,7 +123,6 @@ export interface WidgetController {
   readonly retryAfter?: number
   readonly composerDisabled: boolean
   readonly statusText?: string
-  readonly handoff?: HandoffData
   readonly inlineError?: InlineErrorData
   readonly usage?: UsageData
   open(): void

@@ -108,9 +108,12 @@ tools:
       errorMap:
         '404': No order with that ID exists.
         '403': That order belongs to a different account.
+    outputSchema: {}
 
   - name: create_ticket
-    description: File a support ticket on the user's behalf. Use when the user asks for human help with a concrete problem.
+    description:
+      File a support ticket on the user's behalf. Use when the user asks
+      for human help with a concrete problem.
     requiresApproval: true
     approvalRisk: high
     approvalSummary: 'Create a ticket titled {subject}'
@@ -118,7 +121,7 @@ tools:
       type: object
       properties:
         subject: { type: string, description: One-line summary }
-        priority: { type: string, description: low, normal or high }
+        priority: { type: string, description: 'low, normal or high' }
       required: [subject]
     executor:
       type: http
@@ -129,23 +132,32 @@ tools:
         requester: '{{identity.email}}'
         source: website_assistant
       maxRedirects: 0
+    outputSchema: {}
 
-  - from: mcp
-    id: acme_docs
-    server:
-      transport: http
-      url: https://acme.com/mcp
-      # Quoted because a bare ${env.X} ends in `}`, which would close a YAML
-      # flow mapping. Worth knowing before writing it the short way.
-      headers:
-        Authorization: Bearer ${env.MCP_TOKEN}
-    allow: [search_docs, list_plans]
-    prefix: docs_
+  - name: docs_search_docs
+    description: Search the application documentation.
+    parameters:
+      {
+        type: object,
+        properties: { query: { type: string } },
+        required: [query],
+      }
+    outputSchema: { type: object }
     readOnly: true
     timeoutMs: 15000
+    executor:
+      type: mcp
+      tool: search_docs
+      server:
+        transport: http
+        url: https://acme.com/mcp
+        headers:
+          Authorization: Bearer ${env.MCP_TOKEN}
 
   - name: calculate_quote
-    description: Compute a shipping quote for a route and weight. Use for pricing questions with concrete inputs.
+    description:
+      Compute a shipping quote for a route and weight. Use for pricing
+      questions with concrete inputs.
     readOnly: true
     parameters:
       type: object
@@ -158,20 +170,11 @@ tools:
       type: module
       path: ./tools/quote.ts
       export: calculateQuote
-
-  - name: handoff_to_human
-    description: Connect the user to a human from the sales or support team.
-    executor:
-      type: builtin
-      id: handoff
-      target:
-        kind: webhook
-        url: ${env.SLACK_WEBHOOK}
-        includeTranscript: true
-      message: A human will reply here shortly.
+    outputSchema: {}
 
   - name: highlight_section
-    description: Scroll to and highlight a section of the current page. Use when pointing the user at something on screen.
+    description: Scroll to and highlight a section of the current page. Use when
+      pointing the user at something on screen.
     readOnly: true
     parameters:
       type: object
@@ -179,57 +182,7 @@ tools:
         selector: { type: string, description: CSS selector }
       required: [selector]
     executor: { type: client, id: highlight }
-
-knowledge:
-  sources:
-    - type: sitemap
-      url: https://acme.com/sitemap.xml
-      include: ['/docs/**', '/blog/**']
-      exclude: ['/docs/internal/**']
-      maxPages: 500
-    - type: crawl
-      url: https://acme.com
-      maxDepth: 3
-      respectRobots: true
-    - type: files
-      glob: ./content/**/*.{md,mdx}
-      baseUrl: https://acme.com/guides
-    - type: openapi
-      path: ./openapi.yaml
-    - type: text
-      id: policies
-      content: |
-        Returns accepted within 30 days of delivery, in original packaging.
-    - type: json
-      path: ./data/products.json
-      jsonPath: $.products[*]
-      template: '{name} — {description}'
-  extract:
-    selector: main, article
-    strip: [nav, footer, aside, .cookie-banner]
-    format: markdown
-    minChars: 200
-  chunk:
-    strategy: semantic
-    maxTokens: 512
-    overlapTokens: 64
-  embedding:
-    provider: openai
-    model: text-embedding-3-small
-    apiKey: ${env.OPENAI_API_KEY}
-    batchSize: 96
-  store:
-    type: sqlite
-    path: ./.sitebot/index.db
-  retrieval:
-    mode: tool
-    topK: 6
-    minScore: 0.35
-    maxContextTokens: 3000
-    includeCitations: true
-    rerank: false
-    dedupeByUrl: true
-    expandNeighbours: 1
+    outputSchema: {}
 
 storage:
   type: sqlite
@@ -277,7 +230,7 @@ ui:
       - label: 'Start the Application 🚀'
         action: { type: navigate, path: /apply }
       - label: 'Chat with Sales now 💬'
-        action: { type: tool, tool: handoff_to_human }
+        action: { type: tool, tool: create_ticket }
       - label: Read the docs
         action: { type: link, url: https://acme.com/docs }
     suggestionsPersist: false

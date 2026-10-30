@@ -37,9 +37,11 @@ siteContext:
   tone: Warm, brief and practical.
   facts:
     - Every bag is 340 g and ships within 48 hours of roasting.
-    - Free US shipping on orders over $45; otherwise a flat $6. No international shipping yet.
+    - Free US shipping on orders over $45; otherwise a flat $6. No international
+      shipping yet.
     - Subscriptions take 10% off and can be paused or cancelled any time.
-    - The café at 214 Commercial Street opens Mon–Fri 7:00–16:00, weekends 8:00–15:00.
+    - The café at 214 Commercial Street opens Mon–Fri 7:00–16:00, weekends
+      8:00–15:00.
   routes:
     - path: /shop
       summary: The four coffees, prices and bag sizes.
@@ -60,25 +62,6 @@ agent:
   approvalPolicy: always
 
 tools:
-  - name: list_site_sections
-    description: |
-      List the pages of the Harbor & Pine site and what each covers.
-      Use when the visitor asks where to find something.
-    readOnly: true
-    executor: { type: builtin, id: list_site_sections }
-
-  - name: navigate
-    description: |
-      Take the visitor to another page of the site, e.g. /shop or /brewing.
-      Use when they ask to go somewhere — not to answer a question.
-    readOnly: true
-    parameters:
-      type: object
-      properties:
-        path: { type: string, description: 'A site path such as /shop.' }
-      required: [path]
-    executor: { type: builtin, id: navigate }
-
   - name: highlight_section
     description: |
       Scroll the visitor's current page to an element and outline it.
@@ -90,7 +73,15 @@ tools:
       properties:
         selector: { type: string, description: 'CSS selector, e.g. #espresso' }
       required: [selector]
-    executor: { type: client, id: highlight }
+    executor: { type: client, id: highlight_section }
+    outputSchema:
+      type: object
+      properties:
+        found:
+          type: boolean
+      required:
+        - found
+      additionalProperties: false
 
   - name: fill_wholesale_form
     description: |
@@ -108,9 +99,24 @@ tools:
         selector: { type: string, description: 'Always "#wholesale-form".' }
         fields:
           type: object
-          description: 'Field values keyed by input name: business, email, volume (one of 5-20, 20-50, 50+ — i.e. 5–20 kg, 20–50 kg, over 50 kg; if the amount fits none, ask), message.'
+          description:
+            'Field values keyed by input name: business, email, volume (one of
+            5-20, 20-50, 50+ — i.e. 5–20 kg, 20–50 kg, over 50 kg; if the amount
+            fits none, ask), message.'
       required: [selector, fields]
-    executor: { type: client, id: fill_form }
+    executor: { type: client, id: fill_wholesale_form }
+    outputSchema:
+      type: object
+      properties:
+        filled:
+          type: boolean
+        rejected:
+          type: array
+          items:
+            type: object
+      required:
+        - filled
+      additionalProperties: false
 
 ui:
   panel:

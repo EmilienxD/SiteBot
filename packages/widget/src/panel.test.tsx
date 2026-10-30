@@ -51,16 +51,16 @@ describe('Panel fidelity', () => {
   it('keeps sparse source numbers and click provenance after wire assembly and history persistence', () => {
     const source = {
       id: 'c27',
+      chunkId: 'application:trial:v1',
       title: 'Trial',
       url: 'https://example.com/en/trial',
       lang: 'en',
       snippet: 'Seven days.',
-      score: 0.9,
     }
     const streamed = startMessage(undefined, 'followup')
     for (const chunk of [
       { type: 'text-delta', id: 't', delta: 'Sept jours [27].' },
-      { type: 'data-citations', id: 'knowledge-citations', data: { items: [source] } },
+      { type: 'data-citations', id: 'source-citations', data: { items: [source] } },
     ])
       applyChunk(streamed, chunk)
     const value = controller(JSON.parse(JSON.stringify([streamed.message])))
@@ -129,19 +129,12 @@ describe('Panel fidelity', () => {
     expect(value.send).toHaveBeenCalledWith(expect.stringContaining('lookup'), { hidden: true })
   })
 
-  it('renders handoff, status, inline error and debug usage data', () => {
+  it('renders status, inline error and debug usage data', () => {
     const value = controller([])
     Object.defineProperties(value, {
       // The status line is transient: it shows only while a response runs.
       state: { value: 'streaming' },
       statusText: { value: 'Searching documentation…' },
-      handoff: {
-        value: {
-          target: { kind: 'zendesk' },
-          ticketUrl: 'https://support.test/ticket/1',
-          message: 'A person will reply.',
-        },
-      },
       inlineError: {
         value: { code: 'provider_error', message: 'Please retry.', retryable: true },
       },
@@ -150,7 +143,6 @@ describe('Panel fidelity', () => {
     const root = document.createElement('div')
     render(<Panel controller={value} close={() => {}} />, root)
     expect(root.querySelector('.status')?.textContent).toContain('Searching documentation')
-    expect(root.querySelector('.handoff-card')?.textContent).toContain('zendesk')
     // docs/07 §10: the server's error text is never shown, only the fixed copy.
     expect(root.querySelector('.inline-error')?.textContent).toContain('having trouble')
     expect(root.querySelector('.inline-error')?.textContent).not.toContain('Please retry')
